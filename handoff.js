@@ -21,8 +21,16 @@ export const DEFAULT_TRIGGER_TOKENS = 300000
 export const DEFAULT_REMIND_EVERY = 2
 /** How long a "next session inherits this agent" intent stays valid. */
 export const DEFAULT_NEXT_TTL_MS = 30 * 60 * 1000
+/**
+ * The first message the automatic switch sends into the fresh conversation.
+ * The context was just reset, so it points the model at the durable record it
+ * already has instead of asking the user to explain the situation again.
+ */
+export const DEFAULT_STARTUP_PROMPT =
+  '这是交接后的新会话（上下文已重置）。先读你最近的日志和交棒检查点（agent_journal），再搜共享知识库里的相关经验，确认上次的进度后继续完成工作；结束前更新记忆和日志。'
 const MIN_TOKENS = 20000
 const MAX_TOKENS = 2000000
+const MAX_STARTUP_PROMPT_CHARS = 2000
 
 function readJson(file, fallback) {
   try {
@@ -43,6 +51,10 @@ function clampTokens(value, fallback) {
   const number = Number(value)
   if (!Number.isFinite(number)) return fallback
   return Math.min(Math.max(Math.round(number), MIN_TOKENS), MAX_TOKENS)
+}
+
+function clampStartupPrompt(value) {
+  return String(value ?? '').slice(0, MAX_STARTUP_PROMPT_CHARS)
 }
 
 function shortSession(sessionId) {
@@ -66,6 +78,8 @@ export function createHandoff(options = {}) {
       remindEverySteps: Math.min(Math.max(Math.round(Number(raw.remindEverySteps) || DEFAULT_REMIND_EVERY), 1), 20),
       exportDir: typeof raw.exportDir === 'string' ? raw.exportDir.trim() : '',
       autoSwitch: raw.autoSwitch === true,
+      startupPrompt:
+        typeof raw.startupPrompt === 'string' ? clampStartupPrompt(raw.startupPrompt) : DEFAULT_STARTUP_PROMPT,
     }
   }
 
@@ -79,6 +93,7 @@ export function createHandoff(options = {}) {
     }
     if (typeof patch.exportDir === 'string') next.exportDir = patch.exportDir.trim()
     if (typeof patch.autoSwitch === 'boolean') next.autoSwitch = patch.autoSwitch
+    if (typeof patch.startupPrompt === 'string') next.startupPrompt = clampStartupPrompt(patch.startupPrompt).trim()
     writeAtomic(files.config, `${JSON.stringify(next, null, 2)}\n`)
     return next
   }

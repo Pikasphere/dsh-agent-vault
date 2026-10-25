@@ -699,6 +699,35 @@ function writeCheckpoint(ctx, store, journals, handoff, input) {
   }
 }
 
+/**
+ * Send the startup instruction into a fresh session. Admission is durable: the
+ * Agent inbox owns the message even before the browser finishes opening the
+ * conversation. The request id is stable per session, and the Host dedupes by
+ * it, so the deferred retry cannot post the message twice.
+ */
+async function sendStartupPrompt(ctx, store, sessionId, text) {
+  const controller = ctx.get('sessionController')
+  if (controller === undefined || typeof controller.prompt !== 'function') return
+  const admit = () =>
+    controller.prompt(
+      {
+        requestId: `handoff-start-${sessionId}`,
+        sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text }],
+      },
+      new AbortController().signal,
+    )
+  try {
+    await admit()
+  } catch (error) {
+    // Creation can still be settling; one deferred retry usually lands.
+    setTimeout(() => {
+      admit().catch(retryError => recordError(store, 'handoff/startup-prompt', retryError))
+    }, 500)
+  }
+}
+
 function handoffStatus(ctx, store, handoff) {
   const config = handoff.config()
   const agents = ctx.get('agents')
@@ -731,7 +760,7 @@ function handoffStatus(ctx, store, handoff) {
       armedAt: state?.next?.at,
     }
   })
-  return { config, capabilities: { arm: true }, sessions }
+  return { config, capabilities: { arm: true, startPrompt: true }, sessions }
 }
 
 function registerHandoff(ctx, store, journals, handoff, archives, hints) {
@@ -806,6 +835,7 @@ function registerHandoff(ctx, store, journals, handoff, archives, hints) {
           const taken = handoff.takeNext({ cwd: sessionCwd(ctx, sessionId), excludeSessionId: sessionId })
           if (taken === null) return
           store.setBinding({ sessionId, agentId: taken.agentId })
+          let modelPending = false
           if (taken.approval !== undefined) {
             const approval = ctx.get('approval')
             if (approval !== undefined && typeof approval.setPolicy === 'function') approval.setPolicy(agent, taken.approval)
@@ -817,6 +847,7 @@ function registerHandoff(ctx, store, journals, handoff, archives, hints) {
               try {
                 await applyModel()
               } catch (error) {
+                modelPending = true
                 // Creation can still be settling; one deferred retry usually lands.
                 setTimeout(() => {
                   applyModel().catch(retryError => recordError(store, 'handoff/select-model', retryError))
@@ -836,6 +867,19 @@ function registerHandoff(ctx, store, journals, handoff, archives, hints) {
               })
             } catch (error) {
               recordError(store, 'handoff/archive', error)
+            }
+          }
+          // Auto-switch only: the client attaches the startup instruction to
+          // the intent right before it opens the conversation. Send it after
+          // the inheritance above so the first turn uses the inherited model.
+          const startupPrompt = typeof taken.startupPrompt === 'string' ? taken.startupPrompt.trim() : ''
+          if (startupPrompt !== '') {
+            if (modelPending) {
+              setTimeout(() => {
+                void sendStartupPrompt(ctx, store, sessionId, startupPrompt)
+              }, 500)
+            } else {
+              await sendStartupPrompt(ctx, store, sessionId, startupPrompt)
             }
           }
         } catch (error) {
@@ -997,6 +1041,7 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
         remindEverySteps: args.remindEverySteps,
         exportDir: args.exportDir,
         autoSwitch: args.autoSwitch,
+        startupPrompt: args.startupPrompt,
       })
     case 'handoff.reset':
       handoff.clearState(args.sessionId)
@@ -1006,17 +1051,24 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
       const agentId = store.bindingOf(sessionId)
       if (agentId === '') throw new MemoryError('no-agent', 'bind an agent to this session first')
       const cwd = sessionCwd(ctx, sessionId)
+      const config = handoff.config()
+      // Only the automatic switch asks for the startup instruction; a manual
+      // "continue" or an ordinary new session must not start talking on its own.
+      const startupPrompt =
+        args.autoStart === true && config.startupPrompt.trim() !== '' ? config.startupPrompt.trim() : ''
       const next = handoff.armNext(sessionId, {
         agentId,
         cwd,
         approval: approvalOf(ctx, sessionId),
         model: modelOf(ctx, sessionId),
+        ...(startupPrompt === '' ? {} : { startupPrompt }),
       })
       return {
         sessionId,
         agentId,
         workspaceId: workspaceIdOf(ctx, cwd),
         agentPreset: agentPresetOf(ctx, sessionId),
+        startupPrompt,
         next,
       }
     }

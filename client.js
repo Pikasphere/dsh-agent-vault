@@ -126,6 +126,9 @@ window.__ModuleLoader__.load({
         handoffNoSessions: '当前没有活动会话。',
         autoSwitch: '检查点后自动开启新对话',
         autoSwitchHint: '当前会话写下检查点、且这个回合结束后，自动新建一个对话并切过去（继承绑定、工作区、审批策略与模型），旧会话转为归档。需要面板保持打开或页面在运行。',
+        autoStartPrompt: '启动指令',
+        autoStartPromptPlaceholder: '新对话打开后自动发送的第一条消息…',
+        autoStartPromptHint: '自动切换创建新对话后，把这段文字作为第一条消息发出去；留空则只打开对话、不发消息。手动「续会话」不会发送。',
         'stage.off': '已关闭',
         'stage.watching': '观察中',
         'stage.due': '已到阈值',
@@ -273,6 +276,9 @@ window.__ModuleLoader__.load({
         handoffNoSessions: 'No live sessions right now.',
         autoSwitch: 'Start a new conversation after a checkpoint',
         autoSwitchHint: 'Once the current session has a checkpoint and its turn is over, a fresh conversation opens automatically in the same workspace with the inherited agent, approval policy and model; the old one is archived.',
+        autoStartPrompt: 'Startup instruction',
+        autoStartPromptPlaceholder: 'First message sent into the new conversation…',
+        autoStartPromptHint: 'After the automatic switch creates the new conversation, this text is sent as its first message. Leave it empty to open the conversation without sending anything. Manual "Continue in new session" never sends it.',
         'stage.off': 'off',
         'stage.watching': 'watching',
         'stage.due': 'at threshold',
@@ -351,6 +357,7 @@ window.__ModuleLoader__.load({
 .am-note{margin:0;font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary)}
 .am-note-dim{margin:0;font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .am-textarea{width:100%;box-sizing:border-box;min-height:210px;resize:vertical;padding:12px 14px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 60%,transparent);color:inherit;font:inherit;line-height:1.7;outline:none}
+.am-textarea-sm{min-height:78px}
 .am-textarea:focus,.am-input:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,var(--dsw-alias-border-l1))}
 .am-textarea.is-over{border-color:color-mix(in srgb,var(--dsw-alias-state-warning-primary,var(--dsw-alias-state-business-primary)) 60%,var(--dsw-alias-border-l1))}
 .am-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -542,7 +549,12 @@ window.__ModuleLoader__.load({
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
       const [handoffInfo, setHandoffInfo] = useState(null)
-      const [handoffDraft, setHandoffDraft] = useState({ triggerTokens: 300000, remindEverySteps: 2, exportDir: '' })
+      const [handoffDraft, setHandoffDraft] = useState({
+        triggerTokens: 300000,
+        remindEverySteps: 2,
+        exportDir: '',
+        startupPrompt: '',
+      })
       const [handoffVersion, setHandoffVersion] = useState(0)
       const [sessionsInfo, setSessionsInfo] = useState({ sessions: [], workspaces: [] })
       const [sessionsWorkspace, setSessionsWorkspace] = useState('')
@@ -721,6 +733,7 @@ window.__ModuleLoader__.load({
                 triggerTokens: value.config.triggerTokens,
                 remindEverySteps: value.config.remindEverySteps,
                 exportDir: value.config.exportDir,
+                startupPrompt: value.config.startupPrompt ?? '',
               })
             }
           })
@@ -1379,6 +1392,21 @@ window.__ModuleLoader__.load({
               disabled: busy !== '',
               onChange: checked => void saveHandoff({ autoSwitch: checked }),
             }),
+            handoffInfo?.capabilities?.startPrompt === true
+              ? h(
+                  'div',
+                  { className: 'am-split' },
+                  h(Field, { label: t('autoStartPrompt') }, h('textarea', {
+                    className: 'am-textarea am-textarea-sm',
+                    rows: 3,
+                    value: handoffDraft.startupPrompt,
+                    placeholder: t('autoStartPromptPlaceholder'),
+                    disabled: busy !== '',
+                    onChange: event => setHandoffDraft({ ...handoffDraft, startupPrompt: event.target.value }),
+                  })),
+                  h('p', { className: 'am-note-dim' }, t('autoStartPromptHint')),
+                )
+              : null,
             h(Field, { label: t('handoffThreshold') }, h('input', {
               className: 'am-input',
               type: 'number',
@@ -1415,6 +1443,7 @@ window.__ModuleLoader__.load({
                     triggerTokens: handoffDraft.triggerTokens,
                     remindEverySteps: handoffDraft.remindEverySteps,
                     exportDir: handoffDraft.exportDir,
+                    startupPrompt: handoffDraft.startupPrompt,
                   }),
                 },
                 t('handoffSave'),
@@ -2282,15 +2311,32 @@ window.__ModuleLoader__.load({
                   const ui = ctx.get('uiWorkspace')
                   if (ui !== undefined && typeof ui.startSession === 'function') {
                     autoSwitched.add(selectedId)
-                    try {
-                      // Keep the conversation's mode: a fresh Session starts on
-                      // the default preset unless we pass the source one along.
-                      ui.startSession(
-                        row.workspaceId || undefined,
-                        row.agentPreset ? { agentPreset: row.agentPreset } : undefined,
-                      )
-                    } catch {
-                      autoSwitched.delete(selectedId)
+                    const open = () => {
+                      if (stopped) return
+                      try {
+                        // Keep the conversation's mode: a fresh Session starts on
+                        // the default preset unless we pass the source one along.
+                        ui.startSession(
+                          row.workspaceId || undefined,
+                          row.agentPreset ? { agentPreset: row.agentPreset } : undefined,
+                        )
+                      } catch {
+                        autoSwitched.delete(selectedId)
+                      }
+                    }
+                    if (status?.capabilities?.startPrompt === true) {
+                      // Attach the startup instruction to the handoff intent
+                      // first: the Host sends it after the new session inherits
+                      // the binding, approval policy and model. A failed arm
+                      // still opens the conversation, just without a message.
+                      void request('/op', {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ op: 'handoff.arm', args: { sessionId: selectedId, autoStart: true } }),
+                      })
+                        .then(open, open)
+                    } else {
+                      open()
                     }
                   }
                 }

@@ -32,12 +32,14 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 | 知识库自主查 | `agent_knowledge_search` / `read` / `write` 由模型自行决定调用 |
 | 讨论室 | 可建多个房间；用户指定哪些智能体加入，成员可中途加入或退出；每条发言标注是哪个智能体说的 |
 | 私有日志 | 每个智能体一份详细的日记式记录，**只有它自己能读写**，按需检索，不自动注入 |
-| 接力（检查点） | 上下文到阈值时提醒模型先写记忆和日志，两件都完成后自动把检查点写进该智能体的日志；可选额外导出 markdown；settle 后新会话自动继承绑定、审批策略与模型，面板「续会话」一键续到新会话；可开启「检查点后自动开启新对话」 |
+| 接力（检查点） | 上下文到阈值时提醒模型先写记忆和日志，两件都完成后自动把检查点写进该智能体的日志；可选额外导出 markdown；settle 后新会话自动继承绑定、审批策略与模型，面板「续会话」一键续到新会话；可开启「检查点后自动开启新对话」，并在新对话里自动发送一条「启动指令」 |
 | 自动归档 | 续会话/新会话接管后，旧会话自动转为**归档**（只读、可查看、不能继续）；面板「对话」页签可取消归档、转**强归档**（侧栏隐藏、面板灰色）或转回归档 |
 
 ## 安装
 
 DSH 插件以 profile 包的形式安装。任选一种：
+
+> **npm 版本注意**：已发布的 1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），安装后 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。请使用 1.3.1；在 1.3.1 发布前，用源码目录安装（`dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault`）或 `link:` 安装。
 
 ### 方式一：从目录安装
 
@@ -48,7 +50,7 @@ dsh plugin --profile <你的 profile> add dsh-agent-vault
 也可以直接从目录装：
 
 ```bash
-dsh plugin --profile <你的 profile> add /path/to/dsh-agent-memory
+dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 ```
 
 ### 方式二：手工加到 patch 层
@@ -150,17 +152,19 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-memory
   "enabled": true,
   "triggerTokens": 300000,
   "remindEverySteps": 2,
-  "exportDir": ""
+  "exportDir": "",
+  "autoSwitch": false,
+  "startupPrompt": "这是交接后的新会话（上下文已重置）。先读你最近的日志和交棒检查点（agent_journal），再搜共享知识库里的相关经验，确认上次的进度后继续完成工作；结束前更新记忆和日志。"
 }
 ```
 
-`remindEverySteps` 控制提醒频率：超阈值后**每隔这么多步**才重复一次（默认 2）。第一次触发总会提醒，之后按这个间隔降噪；记忆和日志一落盘就彻底停止。`exportDir` 留空时就只写日志；填了会额外落一份 markdown（`checkpoint-<会话短 id>-<时间>.md`），方便用编辑器看或给别的工具读。
+`remindEverySteps` 控制提醒频率：超阈值后**每隔这么多步**才重复一次（默认 2）。第一次触发总会提醒，之后按这个间隔降噪；记忆和日志一落盘就彻底停止。`exportDir` 留空时就只写日志；填了会额外落一份 markdown（`checkpoint-<会话短 id>-<时间>.md`），方便用编辑器看或给别的工具读。`startupPrompt` 是自动切换后发给新会话的第一条消息，留空则只打开对话、不发消息（上限 2000 字）。
 
 ### 重置
 
 「接力」页签的会话列表里，处于等待沉淀或已生成检查点的会话那一行会有「重置」。它只清掉该会话的阶段记录，让它重新从 `watching` 开始；已经写进日志的检查点**不会删除**。适合手动压缩过上下文、或者想在同一会话里再走一轮的时候。
 
-检查点落盘后会记一个 30 分钟内有效的「下一会话」意图：在这个目录里新建的会话会自动绑定同一智能体，并继承审批策略、模型与 Agent preset（`resume`、子智能体和已绑定的会话不会误消费）。面板的「续会话」按钮把意图刷新 + 新建会话合成一步，并让新会话落在源会话所在的工作区、沿用源会话的模式。开启「检查点后自动开启新对话」后，客户端在回合结束、会话空闲时自动完成这套切换，旧会话自动归档；API 事实与实现细节见 [docs/handoff-v2.md](docs/handoff-v2.md)。
+检查点落盘后会记一个 30 分钟内有效的「下一会话」意图：在这个目录里新建的会话会自动绑定同一智能体，并继承审批策略、模型与 Agent preset（`resume`、子智能体和已绑定的会话不会误消费）。面板的「续会话」按钮把意图刷新 + 新建会话合成一步，并让新会话落在源会话所在的工作区、沿用源会话的模式。开启「检查点后自动开启新对话」后，客户端在回合结束、会话空闲时自动完成这套切换，旧会话自动归档；切换前会把「启动指令」写进交棒意图，新会话继承完成后由主机自动发送，作为它的第一条消息（手动「续会话」不发送）。API 事实与实现细节见 [docs/handoff-v2.md](docs/handoff-v2.md)。
 
 ## 面板
 
@@ -196,17 +200,19 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-memory
 - `rooms.js` — 讨论室存储
 - `journal.js` — 私有日志存储
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
+- `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
 测试（无需安装依赖）：
 
 ```bash
+node test-package.mjs    # 打包保护：import 链上的文件必须都在 package.json files 里
 node test-store.mjs      # 记忆与知识库文件层
 node test-host.mjs       # 用 mock ctx 跑注册、工具与 HTTP 分发
 node test-migrate.mjs    # 旧「按智能体分目录」布局合并到共享库
 node test-binding.mjs    # 对话绑定与解析优先级
 node test-rooms.mjs      # 讨论室：成员、中途加入、发言顺序
 node test-journal.mjs    # 私有日志与跨智能体隔离
-node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本与导出
+node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本、启动指令与导出
 ```
 
 ## 许可

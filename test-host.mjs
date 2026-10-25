@@ -248,6 +248,11 @@ ctx.get = name => {
         modelCalls.push(request)
         return Promise.resolve({ selected: { provider: request.provider, model: request.model } })
       },
+      prompt: (request, signal) => {
+        promptCalls.push(request)
+        promptSignals.push(signal)
+        return Promise.resolve({ accepted: true })
+      },
       list: () =>
         Promise.resolve({
           items: [
@@ -281,6 +286,8 @@ ctx.get = name => {
 }
 const approvalCalls = []
 const modelCalls = []
+const promptCalls = []
+const promptSignals = []
 const createCalls = []
 const archiveCalls = []
 const unarchiveCalls = []
@@ -300,8 +307,16 @@ assert.ok(status.payload.value.sessions[0].requestedAt)
 assert.equal(status.payload.value.sessions[0].checkpoint, undefined)
 const autoSaved = await call('POST', '/op', { op: 'handoff.save', args: { autoSwitch: true } })
 assert.equal(autoSaved.payload.value.autoSwitch, true)
+const promptSaved = await call('POST', '/op', {
+  op: 'handoff.save',
+  args: { startupPrompt: '继续上次的界面工作。' },
+})
+assert.equal(promptSaved.payload.value.startupPrompt, '继续上次的界面工作。')
+assert.equal(promptSaved.payload.value.autoSwitch, true)
 const autoStatus = await call('POST', '/op', { op: 'handoff.status', args: {} })
 assert.equal(autoStatus.payload.value.config.autoSwitch, true)
+assert.equal(autoStatus.payload.value.config.startupPrompt, '继续上次的界面工作。')
+assert.equal(autoStatus.payload.value.capabilities.startPrompt, true)
 await call('POST', '/op', { op: 'handoff.save', args: { autoSwitch: false } })
 const reset = await call('POST', '/op', { op: 'handoff.reset', args: { sessionId: 'session-test-1234' } })
 assert.equal(reset.status, 200)
@@ -313,11 +328,13 @@ console.log('handoff status/reset ok')
 // ── the next fresh session inherits agent + approval policy ────────────────
 const nextSession = registered.handlers.find(item => item.event === 'agent/created').handler
 const bindings = async () => (await call('POST', '/op', { op: 'binding.list', args: {} })).payload.value
-const armed = await call('POST', '/op', { op: 'handoff.arm', args: { sessionId: 'session-test-1234' } })
+const armed = await call('POST', '/op', { op: 'handoff.arm', args: { sessionId: 'session-test-1234', autoStart: true } })
 assert.equal(armed.status, 200)
 assert.equal(armed.payload.value.next.agentId, id)
 assert.equal(armed.payload.value.next.cwd, 'E:\\work')
 assert.equal(armed.payload.value.next.approval, 'never')
+assert.equal(armed.payload.value.next.startupPrompt, '继续上次的界面工作。')
+assert.equal(armed.payload.value.startupPrompt, '继续上次的界面工作。')
 assert.equal(armed.payload.value.agentPreset, 'cordis')
 assert.deepEqual(armed.payload.value.next.model, { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' })
 
@@ -326,13 +343,16 @@ await nextSession({ agent: { id: 'session-next-1' }, source: 'resume' })
 assert.equal((await bindings()).some(item => item.sessionId === 'session-next-1'), false)
 assert.ok((await call('POST', '/op', { op: 'handoff.status', args: {} })).payload.value.sessions[0].armed)
 assert.equal(modelCalls.length, 0)
+assert.equal(promptCalls.length, 0)
 
 // subagents never capture it
 await nextSession({ agent: { id: 'session-sub-1' }, source: 'startup' })
 assert.equal((await bindings()).some(item => item.sessionId === 'session-sub-1'), false)
 assert.equal(modelCalls.length, 0)
+assert.equal(promptCalls.length, 0)
 
-// a real fresh session consumes it once, binding the same agent and policy
+// a real fresh session consumes it once, binding the same agent and policy,
+// and receives the startup instruction as its first message
 await nextSession({ agent: { id: 'session-next-2' }, source: 'startup' })
 const bound = (await bindings()).find(item => item.sessionId === 'session-next-2')
 assert.equal(bound?.agentId, id)
@@ -340,6 +360,15 @@ assert.deepEqual(approvalCalls, [['session-next-2', 'never']])
 assert.deepEqual(modelCalls, [
   { sessionId: 'session-next-2', provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' },
 ])
+assert.deepEqual(promptCalls, [
+  {
+    requestId: 'handoff-start-session-next-2',
+    sessionId: 'session-next-2',
+    mode: 'queue',
+    content: [{ type: 'text', text: '继续上次的界面工作。' }],
+  },
+])
+assert.ok(promptSignals[0] !== undefined)
 assert.equal((await call('POST', '/op', { op: 'handoff.status', args: {} })).payload.value.sessions[0].armed, false)
 
 // the next session after that does not inherit anything
@@ -347,6 +376,7 @@ await nextSession({ agent: { id: 'session-next-3' }, source: 'startup' })
 assert.equal((await bindings()).some(item => item.sessionId === 'session-next-3'), false)
 assert.deepEqual(approvalCalls, [['session-next-2', 'never']])
 assert.equal(modelCalls.length, 1)
+assert.equal(promptCalls.length, 1)
 console.log('handoff next-session inheritance ok')
 
 // ── weak auto-archive + manual level changes ────────────────────────────────
@@ -410,6 +440,10 @@ assert.ok(demoGroup.sessions.some(item => item.sessionId === 'session-created'))
 
 const armedAgain = await call('POST', '/op', { op: 'handoff.arm', args: { sessionId: 'session-test-1234' } })
 assert.equal(armedAgain.payload.value.workspaceId, 'w-work')
+// a manual continue refreshes the intent but does not attach a message
+assert.equal(armedAgain.payload.value.next.startupPrompt, undefined)
+assert.equal(armedAgain.payload.value.startupPrompt, '')
+assert.equal(promptCalls.length, 1)
 
 assert.equal((await call('GET', '/state')).payload.state.hideBoundSessions, true)
 const hidden = await call('POST', '/op', { op: 'settings.save', args: { hideBoundSessions: false } })

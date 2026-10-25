@@ -6,7 +6,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const { createHandoff, DEFAULT_TRIGGER_TOKENS } = await import(`file://${path.join(here, 'handoff.js').replace(/\\/g, '/')}`)
+const { createHandoff, DEFAULT_TRIGGER_TOKENS, DEFAULT_STARTUP_PROMPT } = await import(
+  `file://${path.join(here, 'handoff.js').replace(/\\/g, '/')}`
+)
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-memory-handoff-'))
 let clock = Date.parse('2026-10-20T12:00:00.000Z')
@@ -19,10 +21,21 @@ assert.equal(config.triggerTokens, 300000)
 assert.equal(config.remindEverySteps, 2)
 assert.equal(config.exportDir, '')
 assert.equal(config.autoSwitch, false)
+assert.equal(config.startupPrompt, DEFAULT_STARTUP_PROMPT)
+assert.ok(config.startupPrompt.includes('agent_journal'))
 handoff.saveConfig({ autoSwitch: true })
 assert.equal(handoff.config().autoSwitch, true)
 handoff.saveConfig({ autoSwitch: false })
 assert.equal(handoff.config().autoSwitch, false)
+// the startup instruction is editable, explicit clearing means "send nothing",
+// and an overlong value is capped instead of bloating handoff.json
+handoff.saveConfig({ startupPrompt: '  继续上次的工作。  ' })
+assert.equal(handoff.config().startupPrompt, '继续上次的工作。')
+handoff.saveConfig({ startupPrompt: '' })
+assert.equal(handoff.config().startupPrompt, '')
+handoff.saveConfig({ startupPrompt: 'x'.repeat(3000) })
+assert.equal(handoff.config().startupPrompt.length, 2000)
+handoff.saveConfig({ startupPrompt: DEFAULT_STARTUP_PROMPT })
 
 // below the threshold: nothing happens
 assert.equal(handoff.evaluate({ sessionId: 's1', tokens: 1000 }).stage, 'watching')
@@ -85,6 +98,7 @@ handoff.armNext('s1', {
   cwd: 'E:\\work',
   approval: 'never',
   model: { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' },
+  startupPrompt: '接着做。',
 })
 assert.equal(handoff.nextOf('s1').agentId, 'alpha')
 assert.equal(handoff.takeNext({ cwd: 'E:\\other' }), null)
@@ -93,6 +107,7 @@ const taken = handoff.takeNext({ cwd: 'E:\\work' })
 assert.equal(taken.sessionId, 's1')
 assert.equal(taken.agentId, 'alpha')
 assert.equal(taken.approval, 'never')
+assert.equal(taken.startupPrompt, '接着做。')
 assert.deepEqual(taken.model, { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' })
 assert.equal(handoff.takeNext({ cwd: 'E:\\work' }), null)
 assert.equal(handoff.nextOf('s1'), null)
