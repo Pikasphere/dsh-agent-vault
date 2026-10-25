@@ -17,6 +17,9 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const { useState, useEffect, useMemo, useCallback, useRef } = React
 
+    /** Sidebar → panel commands: "+" opens the panel's create form. */
+    const sidebarBridge = { createAgent: false, onRequestCreateAgent: null }
+
     const NS = 'agentMemory'
 
     // ── copy ────────────────────────────────────────────────────────────────
@@ -162,6 +165,18 @@ window.__ModuleLoader__.load({
         sidebarPanel: '打开智能体面板',
         sideArchived: '只读',
         sideRunning: '运行中',
+        sideView: '视图选项',
+        sideAddAgent: '添加智能体',
+        sideSearch: '搜索智能体或对话',
+        sideSearchEmpty: '没有匹配的对话',
+        sideSort: '排序',
+        sideSortRecent: '最近活动',
+        sideSortName: '按名称',
+        sideShow: '显示',
+        sideShowArchived: '显示归档对话',
+        sideGroup: '分组',
+        sideCollapseAll: '全部收起',
+        sideExpandAll: '全部展开',
         archiveWeak: '归档',
         archiveStrong: '强归档',
         archiveCancel: '取消归档',
@@ -314,6 +329,18 @@ window.__ModuleLoader__.load({
         sidebarPanel: 'Open the Agents panel',
         sideArchived: 'read-only',
         sideRunning: 'running',
+        sideView: 'View options',
+        sideAddAgent: 'Add agent',
+        sideSearch: 'Search agents or conversations',
+        sideSearchEmpty: 'No matching conversations',
+        sideSort: 'Sort',
+        sideSortRecent: 'Recent activity',
+        sideSortName: 'Name',
+        sideShow: 'Show',
+        sideShowArchived: 'Archived conversations',
+        sideGroup: 'Groups',
+        sideCollapseAll: 'Collapse all',
+        sideExpandAll: 'Expand all',
         archiveWeak: 'archived',
         archiveStrong: 'strong archive',
         archiveCancel: 'Cancel archive',
@@ -393,7 +420,7 @@ window.__ModuleLoader__.load({
 .am-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .am-usage-title{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .am-side-agents{flex:none;display:flex;flex-direction:column;padding:6px 10px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
-.am-side-agents.is-collapsed .am-side-agents-list{display:none}
+.am-side-agents.is-collapsed .am-side-agents-list,.am-side-agents.is-collapsed .am-side-search,.am-side-agents.is-collapsed .am-side-view{display:none}
 .am-side-agents-head{display:flex;align-items:center;gap:6px;padding:5px 4px 7px}
 .am-side-agents-title{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
 .am-side-agents-title:hover{color:var(--dsw-alias-label-primary)}
@@ -419,6 +446,21 @@ window.__ModuleLoader__.load({
 .am-side-session-tag{font-size:9.5px;padding:1px 5px;border-radius:5px;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 65%,transparent)}
 .am-side-session.is-weak{opacity:.6}
 .am-side-session.is-running .am-side-session-title{color:var(--dsw-alias-label-primary)}
+.am-side-agents-actions{display:flex;align-items:center;gap:2px}
+.am-side-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;font-size:11px;line-height:1}
+.am-side-icon-btn:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent)}
+.am-side-search{padding:0 4px 6px}
+.am-side-search-input{width:100%;box-sizing:border-box;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 70%,transparent);color:inherit;font:inherit;font-size:12px;outline:none}
+.am-side-search-input:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,var(--dsw-alias-border-l1))}
+.am-side-search-input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.am-side-view{display:flex;flex-direction:column;gap:2px;margin:0 4px 6px;padding:6px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 92%,transparent)}
+.am-side-view[hidden]{display:none}
+.am-side-view-title{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);padding:2px 4px}
+.am-side-view-item{display:flex;align-items:center;justify-content:space-between;width:100%;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;text-align:left}
+.am-side-view-item:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent);color:var(--dsw-alias-label-primary)}
+.am-side-view-item.is-active{color:var(--dsw-alias-label-primary);font-weight:600}
+.am-side-view-item.is-active::after{content:'✓';font-size:10px;color:var(--dsw-alias-state-business-primary)}
+.am-side-empty{padding:10px 8px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);text-align:center}
 .am-card.is-strong{opacity:.5}
 .am-archive-banner{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent);box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:12px;color:var(--dsw-alias-label-secondary)}
 .am-view-tabs{display:flex;gap:4px;padding:0 10px 8px}
@@ -577,6 +619,26 @@ window.__ModuleLoader__.load({
         alive.current = true
         return () => {
           alive.current = false
+        }
+      }, [])
+
+      // The sidebar "+" button opens this panel and asks for the create form.
+      // The panel may not be mounted yet, so the request is kept until it is.
+      useEffect(() => {
+        const handler = () => {
+          setView('agents')
+          setTab('memory')
+          setCreating(true)
+          setDraftName('')
+          setDraftDesc('')
+        }
+        sidebarBridge.onRequestCreateAgent = handler
+        if (sidebarBridge.createAgent) {
+          sidebarBridge.createAgent = false
+          handler()
+        }
+        return () => {
+          if (sidebarBridge.onRequestCreateAgent === handler) sidebarBridge.onRequestCreateAgent = null
         }
       }, [])
 
@@ -2124,75 +2186,177 @@ window.__ModuleLoader__.load({
         let observer = null
         let observedRoot = null
         const collapsed = new Set()
-        let lastSignature = ''
+        let lastListSignature = ''
+        let searchQuery = ''
+        let sortMode = 'recent'
+        let showArchived = true
+        let viewOpen = false
+        const prefsKey = 'agent-memory:sidebar'
+        try {
+          const saved = JSON.parse(window.localStorage.getItem(prefsKey) ?? '{}')
+          if (saved?.sort === 'recent' || saved?.sort === 'name') sortMode = saved.sort
+          if (typeof saved?.showArchived === 'boolean') showArchived = saved.showArchived
+          if (typeof saved?.sectionOpen === 'boolean') sectionOpen = saved.sectionOpen
+        } catch {
+          /* storage can be unavailable in hardened compositions */
+        }
         const escape = value =>
           String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
+        const savePrefs = () => {
+          try {
+            window.localStorage.setItem(prefsKey, JSON.stringify({ sort: sortMode, showArchived, sectionOpen }))
+          } catch {
+            /* ignore */
+          }
+        }
+        const openCreateAgent = () => {
+          const layout = ctx.get('layout')
+          if (layout !== undefined && typeof layout.selectPanel === 'function') {
+            try {
+              layout.selectPanel('agent-memory')
+            } catch {
+              /* panel id moved in a newer shell */
+            }
+          }
+          if (typeof sidebarBridge.onRequestCreateAgent === 'function') sidebarBridge.onRequestCreateAgent()
+          else sidebarBridge.createAgent = true
+        }
+
+        /** Header, search and view menu are created once so typing keeps focus. */
+        const ensureChrome = host => {
+          if (host.dataset.chrome === '1') return
+          host.dataset.chrome = '1'
+          host.innerHTML =
+            `<div class="am-side-agents-head">` +
+            `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('sidebarAgents'))}</button>` +
+            `<span class="am-side-agents-count" title="0">0</span>` +
+            `<span class="am-side-agents-actions">` +
+            `<button type="button" class="am-side-icon-btn" data-action="view" title="${escape(t('sideView'))}" aria-label="${escape(t('sideView'))}">⋯</button>` +
+            `<button type="button" class="am-side-icon-btn" data-action="add-agent" title="${escape(t('sideAddAgent'))}" aria-label="${escape(t('sideAddAgent'))}">＋</button>` +
+            `<button type="button" class="am-side-agents-toggle" data-action="toggle-section" title="${escape(t('sidebarCollapse'))}" aria-label="${escape(t('sidebarCollapse'))}">▾</button>` +
+            `</span>` +
+            `</div>` +
+            `<div class="am-side-search">` +
+            `<input class="am-side-search-input" type="search" spellcheck="false" placeholder="${escape(t('sideSearch'))}" />` +
+            `</div>` +
+            `<div class="am-side-view" hidden>` +
+            `<div class="am-side-view-title">${escape(t('sideSort'))}</div>` +
+            `<button type="button" class="am-side-view-item" data-action="sort" data-sort="recent">${escape(t('sideSortRecent'))}</button>` +
+            `<button type="button" class="am-side-view-item" data-action="sort" data-sort="name">${escape(t('sideSortName'))}</button>` +
+            `<div class="am-side-view-title">${escape(t('sideShow'))}</div>` +
+            `<button type="button" class="am-side-view-item" data-action="toggle-archived" aria-pressed="true">${escape(t('sideShowArchived'))}</button>` +
+            `<div class="am-side-view-title">${escape(t('sideGroup'))}</div>` +
+            `<button type="button" class="am-side-view-item" data-action="collapse-all">${escape(t('sideCollapseAll'))}</button>` +
+            `<button type="button" class="am-side-view-item" data-action="expand-all">${escape(t('sideExpandAll'))}</button>` +
+            `</div>` +
+            `<div class="am-side-agents-list"></div>`
+          const input = host.querySelector('.am-side-search-input')
+          input.addEventListener('input', () => {
+            searchQuery = input.value
+            renderSection(host)
+          })
+          input.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return
+            input.value = ''
+            searchQuery = ''
+            renderSection(host)
+          })
+        }
 
         const renderSection = host => {
-          const signature = JSON.stringify([sectionOpen, [...collapsed], lastAgents])
-          if (signature === lastSignature) return
-          lastSignature = signature
+          ensureChrome(host)
+          const query = searchQuery.trim().toLowerCase()
+          const matches = session =>
+            String(session.title ?? '').toLowerCase().includes(query) ||
+            String(session.workspaceTitle ?? '').toLowerCase().includes(query)
           const visible = lastAgents
+            .map(agent => {
+              const nameHit = query !== '' && String(agent.name ?? '').toLowerCase().includes(query)
+              const sessions = agent.sessions
+                .filter(session => session.archive !== 'strong')
+                .filter(session => showArchived || session.archive !== 'weak')
+                .filter(session => query === '' || nameHit || matches(session))
+              return { ...agent, sessions }
+            })
+            .filter(agent => agent.sessions.length > 0)
             .map(agent => ({
               ...agent,
-              sessions: agent.sessions.filter(session => session.archive !== 'strong'),
+              sessions: [...agent.sessions].sort(
+                (left, right) => (Number(right.updatedAt) || 0) - (Number(left.updatedAt) || 0),
+              ),
             }))
-            .filter(agent => agent.sessions.length > 0)
-          if (visible.length === 0) {
+          if (visible.length === 0 && lastAgents.length === 0) {
             host.hidden = true
-            host.innerHTML = ''
             return
           }
           host.hidden = false
-          host.classList.toggle('is-collapsed', !sectionOpen)
+          if (sortMode === 'name') visible.sort((left, right) => String(left.name).localeCompare(String(right.name), 'zh'))
+          else {
+            visible.sort(
+              (left, right) =>
+                (Number(right.sessions[0]?.updatedAt) || 0) - (Number(left.sessions[0]?.updatedAt) || 0),
+            )
+          }
+
           const total = visible.reduce((sum, agent) => sum + agent.sessions.length, 0)
-          const head =
-            `<div class="am-side-agents-head">` +
-            `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('sidebarAgents'))}</button>` +
-            `<span class="am-side-agents-count" title="${escape(String(total))}">${total}</span>` +
-            `<button type="button" class="am-side-agents-toggle" data-action="toggle-section" aria-label="${escape(sectionOpen ? t('sidebarCollapse') : t('sidebarExpand'))}">${sectionOpen ? '▾' : '▸'}</button>` +
-            `</div>`
-          const body = sectionOpen
-            ? `<div class="am-side-agents-list">` +
-              visible
-                .map(agent => {
-                  const open = !collapsed.has(agent.agentId)
-                  const initial = Array.from(agent.name || '?')[0] || '?'
-                  const rows = open
-                    ? `<div class="am-side-sessions">` +
-                      agent.sessions
-                        .map(session => {
-                          const weak = session.archive === 'weak'
-                          const state =
-                            (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
-                            (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
-                          return (
-                            `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${session.running ? ' is-running' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
-                            `<span class="am-side-session-body">` +
-                            `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
-                            `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
-                            `</span>` +
-                            (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
-                            `</button>`
-                          )
-                        })
-                        .join('') +
-                      `</div>`
-                    : ''
-                  return (
-                    `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
-                    `<button type="button" class="am-side-agent-row" data-action="toggle-agent">` +
-                    `<span class="am-side-agent-chevron">${open ? '▾' : '▸'}</span>` +
-                    `<span class="am-side-agent-avatar">${escape(initial)}</span>` +
-                    `<span class="am-side-agent-name">${escape(agent.name)}</span>` +
-                    `<span class="am-side-agent-count">${agent.sessions.length}</span>` +
-                    `</button>${rows}</div>`
-                  )
-                })
-                .join('') +
-              `</div>`
-            : ''
-          host.innerHTML = head + body
+          const count = host.querySelector('.am-side-agents-count')
+          count.textContent = String(total)
+          count.title = String(total)
+          const toggle = host.querySelector('.am-side-agents-toggle')
+          toggle.textContent = sectionOpen ? '▾' : '▸'
+          toggle.title = sectionOpen ? t('sidebarCollapse') : t('sidebarExpand')
+          host.classList.toggle('is-collapsed', !sectionOpen)
+          const view = host.querySelector('.am-side-view')
+          view.hidden = !viewOpen
+          for (const item of view.querySelectorAll('[data-action="sort"]')) {
+            item.classList.toggle('is-active', item.getAttribute('data-sort') === sortMode)
+          }
+          view.querySelector('[data-action="toggle-archived"]').classList.toggle('is-active', showArchived)
+
+          const list = host.querySelector('.am-side-agents-list')
+          const signature = JSON.stringify([sectionOpen, [...collapsed], query, sortMode, showArchived, visible])
+          if (signature === lastListSignature) return
+          lastListSignature = signature
+          if (visible.length === 0) {
+            list.innerHTML = `<div class="am-side-empty">${escape(t('sideSearchEmpty'))}</div>`
+            return
+          }
+          list.innerHTML = visible
+            .map(agent => {
+              const open = !collapsed.has(agent.agentId)
+              const initial = Array.from(agent.name || '?')[0] || '?'
+              const rows = open
+                ? `<div class="am-side-sessions">` +
+                  agent.sessions
+                    .map(session => {
+                      const weak = session.archive === 'weak'
+                      const state =
+                        (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
+                        (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
+                      return (
+                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${session.running ? ' is-running' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
+                        `<span class="am-side-session-body">` +
+                        `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
+                        `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
+                        `</span>` +
+                        (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
+                        `</button>`
+                      )
+                    })
+                    .join('') +
+                  `</div>`
+                : ''
+              return (
+                `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
+                `<button type="button" class="am-side-agent-row" data-action="toggle-agent">` +
+                `<span class="am-side-agent-chevron">${open ? '▾' : '▸'}</span>` +
+                `<span class="am-side-agent-avatar">${escape(initial)}</span>` +
+                `<span class="am-side-agent-name">${escape(agent.name)}</span>` +
+                `<span class="am-side-agent-count">${agent.sessions.length}</span>` +
+                `</button>${rows}</div>`
+              )
+            })
+            .join('')
         }
 
         const mount = () => {
@@ -2204,7 +2368,7 @@ window.__ModuleLoader__.load({
             host = document.createElement('div')
             host.id = 'am-sidebar-agents'
             host.className = 'am-side-agents'
-            lastSignature = ''
+            lastListSignature = ''
             host.addEventListener('click', event => {
               const target = event.target.closest('[data-action]')
               if (target === null) return
@@ -2218,8 +2382,31 @@ window.__ModuleLoader__.load({
                     /* panel id moved in a newer shell */
                   }
                 }
+              } else if (action === 'view') {
+                viewOpen = !viewOpen
+                renderSection(host)
+              } else if (action === 'sort') {
+                sortMode = target.getAttribute('data-sort') === 'name' ? 'name' : 'recent'
+                viewOpen = false
+                savePrefs()
+                renderSection(host)
+              } else if (action === 'toggle-archived') {
+                showArchived = !showArchived
+                savePrefs()
+                renderSection(host)
+              } else if (action === 'collapse-all') {
+                for (const agent of lastAgents) collapsed.add(agent.agentId)
+                viewOpen = false
+                renderSection(host)
+              } else if (action === 'expand-all') {
+                collapsed.clear()
+                viewOpen = false
+                renderSection(host)
+              } else if (action === 'add-agent') {
+                openCreateAgent()
               } else if (action === 'toggle-section') {
                 sectionOpen = !sectionOpen
+                savePrefs()
                 renderSection(host)
               } else if (action === 'toggle-agent') {
                 const agentId = target.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
