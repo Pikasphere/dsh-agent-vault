@@ -1131,8 +1131,15 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
 }
 
 function registerApi(ctx, store, rooms, journals, handoff, archives, hints) {
-  /** Store state plus the capabilities this host build exposes to the panel. */
-  const publicState = () => ({ ...store.state(), capabilities: { sessions: true, bound: true, archive: true } })
+  /**
+   * Store state plus the capabilities this host build exposes to the panel.
+   * `arm` gates the client's automatic switch, so it must be declared here as
+   * well as on `handoff.status` — the poll reads `/state` first.
+   */
+  const publicState = () => ({
+    ...store.state(),
+    capabilities: { sessions: true, bound: true, archive: true, arm: true, startPrompt: true },
+  })
   // `webServer` is published after plugins load in the Web composition, so this
   // must pend on the service instead of reading it once at apply time.
   ctx.inject(['webServer'], scoped => {

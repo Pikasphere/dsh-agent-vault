@@ -160,6 +160,8 @@ window.__ModuleLoader__.load({
         sidebarCollapse: '收起',
         sidebarExpand: '展开',
         sidebarPanel: '打开智能体面板',
+        sideArchived: '只读',
+        sideRunning: '运行中',
         archiveWeak: '归档',
         archiveStrong: '强归档',
         archiveCancel: '取消归档',
@@ -310,6 +312,8 @@ window.__ModuleLoader__.load({
         sidebarCollapse: 'Collapse',
         sidebarExpand: 'Expand',
         sidebarPanel: 'Open the Agents panel',
+        sideArchived: 'read-only',
+        sideRunning: 'running',
         archiveWeak: 'archived',
         archiveStrong: 'strong archive',
         archiveCancel: 'Cancel archive',
@@ -388,26 +392,33 @@ window.__ModuleLoader__.load({
 .am-divider{height:1px;background:var(--dsw-alias-border-l1);margin:4px 0}
 .am-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .am-usage-title{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-agents{flex:none;display:flex;flex-direction:column;padding:8px 12px 6px;border-top:1px solid var(--dsw-alias-border-l1)}
+.am-side-agents{flex:none;display:flex;flex-direction:column;padding:6px 10px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
 .am-side-agents.is-collapsed .am-side-agents-list{display:none}
-.am-side-agents-head{display:flex;align-items:center;gap:6px;padding:2px 2px 6px}
-.am-side-agents-title{font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
+.am-side-agents-head{display:flex;align-items:center;gap:6px;padding:5px 4px 7px}
+.am-side-agents-title{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
 .am-side-agents-title:hover{color:var(--dsw-alias-label-primary)}
-.am-side-agents-count{margin-left:auto;font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
-.am-side-agents-toggle{background:none;border:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;padding:0 2px;line-height:1}
-.am-side-agents-list{display:flex;flex-direction:column;gap:1px;max-height:240px;overflow:auto}
+.am-side-agents-count{margin-left:auto;min-width:18px;height:18px;box-sizing:border-box;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 70%,transparent)}
+.am-side-agents-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;font-size:10px;line-height:1;padding:0}
+.am-side-agents-toggle:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent)}
+.am-side-agents-list{display:flex;flex-direction:column;gap:2px;max-height:min(52vh,420px);overflow:auto;scrollbar-width:thin}
 .am-side-agent{display:flex;flex-direction:column}
-.am-side-agent-row{display:flex;align-items:center;gap:6px;width:100%;padding:5px 6px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
-.am-side-agent-row:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent)}
+.am-side-agent-row{display:flex;align-items:center;gap:7px;width:100%;padding:6px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+.am-side-agent-row:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent)}
+.am-side-agent-chevron{flex:none;width:11px;font-size:9px;line-height:1;color:var(--dsw-alias-label-tertiary)}
+.am-side-agent-avatar{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;font-size:10px;font-weight:650;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 18%,transparent)}
 .am-side-agent-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.am-side-agent-count{font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
-.am-side-sessions{display:flex;flex-direction:column;gap:1px;padding:0 0 3px 10px}
-.am-side-session{display:flex;align-items:center;gap:6px;width:100%;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;cursor:pointer;text-align:left}
-.am-side-session:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent);color:var(--dsw-alias-label-primary)}
-.am-side-session-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-session-ws{font-size:10px;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-session-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary);flex:none}
-.am-side-session.is-weak{opacity:.55}
+.am-side-agent-count{flex:none;font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.am-side-sessions{display:flex;flex-direction:column;gap:1px;margin:1px 0 5px 17px;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l1)}
+.am-side-session{display:flex;align-items:center;gap:8px;width:100%;padding:5px 6px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;text-align:left;cursor:pointer}
+.am-side-session:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent);color:var(--dsw-alias-label-primary)}
+.am-side-session-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.am-side-session-title{font-size:12.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-side-session-meta{font-size:10.5px;line-height:1.3;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-side-session-state{flex:none;display:inline-flex;align-items:center;gap:4px}
+.am-side-session-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}
+.am-side-session-tag{font-size:9.5px;padding:1px 5px;border-radius:5px;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 65%,transparent)}
+.am-side-session.is-weak{opacity:.6}
+.am-side-session.is-running .am-side-session-title{color:var(--dsw-alias-label-primary)}
 .am-card.is-strong{opacity:.5}
 .am-archive-banner{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent);box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:12px;color:var(--dsw-alias-label-secondary)}
 .am-view-tabs{display:flex;gap:4px;padding:0 10px 8px}
@@ -2138,7 +2149,7 @@ window.__ModuleLoader__.load({
           const head =
             `<div class="am-side-agents-head">` +
             `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('sidebarAgents'))}</button>` +
-            `<span class="am-side-agents-count">${total}</span>` +
+            `<span class="am-side-agents-count" title="${escape(String(total))}">${total}</span>` +
             `<button type="button" class="am-side-agents-toggle" data-action="toggle-section" aria-label="${escape(sectionOpen ? t('sidebarCollapse') : t('sidebarExpand'))}">${sectionOpen ? '▾' : '▸'}</button>` +
             `</div>`
           const body = sectionOpen
@@ -2146,16 +2157,22 @@ window.__ModuleLoader__.load({
               visible
                 .map(agent => {
                   const open = !collapsed.has(agent.agentId)
+                  const initial = Array.from(agent.name || '?')[0] || '?'
                   const rows = open
                     ? `<div class="am-side-sessions">` +
                       agent.sessions
                         .map(session => {
                           const weak = session.archive === 'weak'
+                          const state =
+                            (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
+                            (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
                           return (
-                            `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
+                            `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${session.running ? ' is-running' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
+                            `<span class="am-side-session-body">` +
                             `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
-                            `<span class="am-side-session-ws">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
-                            (session.running ? '<span class="am-side-session-dot"></span>' : '') +
+                            `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
+                            `</span>` +
+                            (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
                             `</button>`
                           )
                         })
@@ -2165,6 +2182,8 @@ window.__ModuleLoader__.load({
                   return (
                     `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
                     `<button type="button" class="am-side-agent-row" data-action="toggle-agent">` +
+                    `<span class="am-side-agent-chevron">${open ? '▾' : '▸'}</span>` +
+                    `<span class="am-side-agent-avatar">${escape(initial)}</span>` +
                     `<span class="am-side-agent-name">${escape(agent.name)}</span>` +
                     `<span class="am-side-agent-count">${agent.sessions.length}</span>` +
                     `</button>${rows}</div>`

@@ -136,6 +136,10 @@ async function call(method, route, body) {
 const initial = await call('GET', '/state')
 assert.equal(initial.status, 200)
 assert.equal(initial.payload.state.vaults.length, 0)
+// The client's automatic switch polls /state first and only runs when the
+// host advertises `arm`; dropping it here silently disabled the feature.
+assert.equal(initial.payload.state.capabilities.arm, true)
+assert.equal(initial.payload.state.capabilities.startPrompt, true)
 console.log('GET /state ok')
 
 const created = await call('POST', '/op', { op: 'vault.create', args: { name: '重构助手' } })
