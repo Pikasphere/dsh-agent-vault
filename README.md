@@ -217,7 +217,7 @@ node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本
 
 ## 致谢
 
-- **[dsh-degeneration-kit](https://github.com/walkls/dsh-degeneration-kit)** —— 「接力」的思路来源：它让上下文不空转，这里负责换会话时不丢上下文。
+- **[dsh-degeneration-kit](https://github.com/walksls/dsh-degeneration-kit)** —— 「接力」的思路来源：它让上下文不空转，这里负责换会话时不丢上下文。
 
 ## 许可
 
