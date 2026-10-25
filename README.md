@@ -215,6 +215,10 @@ node test-journal.mjs    # 私有日志与跨智能体隔离
 node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本、启动指令与导出
 ```
 
+## 致谢
+
+- **[dsh-degeneration-kit](https://github.com/walkls/dsh-degeneration-kit)** —— 「接力」的思路来源：它让上下文不空转，这里负责换会话时不丢上下文。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。
