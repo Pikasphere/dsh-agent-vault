@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.3-beta.5 — 2026-10-26
+
+### 修复
+
+- **自动切换从来没真正触发过（三处独立原因，叠加在一起）**：
+  1. **客户端拿不到 `uiWorkspace`**：cordis 只从声明了注入的 fiber 解析服务，`client.js` 的 `inject` 只有 `['slots','locale']`，所以 `ctx.get('uiWorkspace')` 失败，而外层 `catch {}` 把它吞了——每 5 秒轮询一次，一次也没走到 `startSession`。已把 `uiWorkspace` 加进注入，并让 `startSession` 的异常不再静默。
+  2. **传了 `{ agentPreset }` 就走进了 DSH 的「复用空白会话」路径**：`uiWorkspace.startSession(workspaceId, options)` 在 `options` 非空时调用 `connectBlank(workspaceId, reuse)`，它会在同工作区里找一个已存在的 blank 复用之，只准备草稿——**不会创建 Agent**，于是 `agent/created` 不触发，绑定、归档、启动指令全都不发生。beta.4 把 preset 传给 `startSession` 的做法本身就是错的。现在客户端**不传 options**（保证走 `sessions.create` 真新建），preset 改为随交接意图传给宿主。
+  3. **preset 由宿主在首回合前应用**：`agent/created` 里用 `agentPresets.select(agent, preset)` 继承源会话的模式（与已有的 model / approval 继承放在一起）。DSH 的该接口只允许在「会话还没开始第一回合」时调用，`agent/created` 正是唯一的窗口。
+
+### 说明
+
+- 判定新会话的模式不要读 session header：header 的 `agentPreset` 是创建时的不可变值，之后只会被 `agent-preset/selected` 事件推进。真值看会话投影（`session_projcache` 的 `record.rows.agentPreset.val`）或日志里的 `agent-preset/selected` 事件。
+- 实测（2026-10-26 17:48）：自动切换建出 `session-332ee334`，`agent-preset/selected` 事件为 `cordis`，绑定 `demo-agent`，启动指令送达，旧会话弱归档。
+
 ## 1.3.3-beta.4 — 2026-10-26
 
 ### 修复

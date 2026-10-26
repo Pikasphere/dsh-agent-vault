@@ -2568,19 +2568,26 @@ window.__ModuleLoader__.load({
                       !autoSwitched.has(row.sessionId),
                   )
                   .sort((left, right) => String(right.armedAt ?? '').localeCompare(String(left.armedAt ?? '')))[0]
-                const ui = ctx.get('uiWorkspace')
+                let ui
+                try {
+                  ui = ctx.get('uiWorkspace')
+                } catch (error) {
+                  console.log('[am-autoswitch] uiWorkspace lookup failed:', String(error))
+                }
                 if (!busy && pick !== undefined && ui !== undefined && typeof ui.startSession === 'function') {
                   autoSwitched.add(pick.sessionId)
                   const open = () => {
                     if (stopped) return
                     try {
-                      // Keep the conversation's mode: a fresh Session starts on
-                      // the default preset unless we pass the source one along.
-                      ui.startSession(
-                        pick.workspaceId || undefined,
-                        pick.agentPreset ? { agentPreset: pick.agentPreset } : undefined,
-                      )
-                    } catch {
+                      // Deliberately no options: `startSession(workspaceId,
+                      // { agentPreset })` takes DSH's *reuse-a-blank* path, which
+                      // only prepares a draft — no Agent is created, so nothing
+                      // inherits the binding and the startup instruction is never
+                      // delivered. The Host inherits the preset on `agent/created`
+                      // instead, before the first turn.
+                      ui.startSession(pick.workspaceId || undefined)
+                    } catch (error) {
+                      console.log('[am-autoswitch] startSession threw:', String(error))
                       autoSwitched.delete(pick.sessionId)
                     }
                   }
@@ -2648,6 +2655,10 @@ window.__ModuleLoader__.load({
       )
     }
 
-    return { inject: ['slots', 'locale'], name: 'agent-memory', apply }
+    // `uiWorkspace` is a client service: cordis only resolves a service from a
+    // fiber that injects it. Without this entry `ctx.get('uiWorkspace')` throws
+    // and both the auto-switch poll and the panel's `uiWorkspace` prop fall into
+    // their catch blocks — so the switch never happens at all.
+    return { inject: ['slots', 'locale', 'uiWorkspace'], name: 'agent-memory', apply }
   },
 })

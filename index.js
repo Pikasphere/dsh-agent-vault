@@ -706,6 +706,13 @@ function writeCheckpoint(ctx, store, journals, handoff, input) {
       cwd: sessionCwd(ctx, input.sessionId),
       approval: approvalOf(ctx, input.sessionId),
       model: modelOf(ctx, input.sessionId),
+      // The Agent preset has to travel with the intent. A fresh Session starts
+      // on the default preset, and the client must not pass one along: DSH's
+      // `startSession(workspaceId, { agentPreset })` takes the *reuse-a-blank*
+      // path, which yields a draft with no Agent — so nothing would inherit the
+      // binding or receive the startup instruction. Applying the preset here,
+      // before the first turn, is the supported way (`agentPresets.select`).
+      agentPreset: agentPresetOf(ctx, input.sessionId),
     })
   } catch (error) {
     recordError(store, 'handoff/checkpoint', error)
@@ -876,6 +883,20 @@ function registerHandoff(ctx, store, journals, handoff, archives, hints) {
           if (taken.approval !== undefined) {
             const approval = ctx.get('approval')
             if (approval !== undefined && typeof approval.setPolicy === 'function') approval.setPolicy(agent, taken.approval)
+          }
+          // Inherit the source Session's Agent preset before the first turn: the
+          // preset decides which tools and prompt sections the model sees, and
+          // `agentPresets.select` refuses once a turn has started, so this is the
+          // only window. Failure is not fatal — the Session just runs default.
+          if (typeof taken.agentPreset === 'string' && taken.agentPreset !== '') {
+            const presets = ctx.get('agentPresets')
+            if (presets !== undefined && typeof presets.select === 'function') {
+              try {
+                await presets.select(agent, taken.agentPreset)
+              } catch (error) {
+                recordError(store, 'handoff/select-preset', error)
+              }
+            }
           }
           if (taken.model !== undefined && taken.model !== null) {
             const controller = ctx.get('sessionController')
@@ -1098,6 +1119,7 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
         cwd,
         approval: approvalOf(ctx, sessionId),
         model: modelOf(ctx, sessionId),
+        agentPreset: agentPresetOf(ctx, sessionId),
         ...(startupPrompt === '' ? {} : { startupPrompt }),
       })
       return {
