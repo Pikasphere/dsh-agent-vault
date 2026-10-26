@@ -2193,6 +2193,8 @@ window.__ModuleLoader__.load({
         let sortMode = 'recent'
         let showArchived = true
         let viewOpen = false
+        /** Only a checkpoint written within this window is worth an auto switch. */
+        const AUTO_SWITCH_FRESH_MS = 30 * 60 * 1000
         const prefsKey = 'agent-memory:sidebar'
         try {
           const saved = JSON.parse(window.localStorage.getItem(prefsKey) ?? '{}')
@@ -2549,12 +2551,20 @@ window.__ModuleLoader__.load({
               if (status?.config?.autoSwitch === true) {
                 const rows = Array.isArray(status.sessions) ? status.sessions : []
                 const busy = rows.some(row => row.running === true)
+                // A checkpoint is only worth handing off right after it was
+                // written: the context just overflowed while the work was still
+                // in flight. A session settled days ago is finished business.
+                const fresh = row => {
+                  const at = Date.parse(row?.settledAt ?? '')
+                  return Number.isFinite(at) && Date.now() - at <= AUTO_SWITCH_FRESH_MS
+                }
                 const pick = rows
                   .filter(
                     row =>
                       row.stage === 'settled' &&
                       row.armed === true &&
                       row.running !== true &&
+                      fresh(row) &&
                       !autoSwitched.has(row.sessionId),
                   )
                   .sort((left, right) => String(right.armedAt ?? '').localeCompare(String(left.armedAt ?? '')))[0]

@@ -475,23 +475,36 @@ function sessionCwd(ctx, sessionId) {
 /**
  * The Agent preset a Session actually runs. DSH keeps this in the
  * `agentPreset` projection (a live preset switch appends an event without
- * touching the immutable header), so read the projection first and only fall
- * back to the header on older hosts.
+ * touching the immutable header), so read the projection first, then the
+ * persisted projection cache for cold Sessions (the header only records the
+ * creation-time value and is wrong after a live switch), and the header last.
  */
 function agentPresetOf(ctx, sessionId) {
+  const key = String(sessionId ?? '')
+  if (key === '') return ''
   try {
-    const session = sessionOf(ctx, sessionId)
-    if (session === undefined) return ''
-    const projections = ctx.get('sessionProjections')
-    if (projections !== undefined && typeof projections.stateOf === 'function') {
-      const value = projections.stateOf(session, 'agentPreset')
-      if (typeof value === 'string' && value !== '') return value
+    const session = sessionOf(ctx, key)
+    if (session !== undefined) {
+      const projections = ctx.get('sessionProjections')
+      if (projections !== undefined && typeof projections.stateOf === 'function') {
+        const value = projections.stateOf(session, 'agentPreset')
+        if (typeof value === 'string' && value !== '') return value
+      }
+      const headerPreset = session.header?.agentPreset
+      if (typeof headerPreset === 'string' && headerPreset !== '') return headerPreset
     }
-    const headerPreset = session.header?.agentPreset
-    return typeof headerPreset === 'string' ? headerPreset : ''
   } catch {
-    return ''
+    /* fall through to the persisted cache */
   }
+  try {
+    const file = path.join(os.homedir(), '.dsh', 'storages', 'session_projcache', 'sessions', `${key}.json`)
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const value = data?.record?.rows?.agentPreset?.val
+    if (typeof value === 'string') return value
+  } catch {
+    /* no cache for this session */
+  }
+  return ''
 }
 
 function approvalOf(ctx, sessionId) {
