@@ -168,6 +168,7 @@ window.__ModuleLoader__.load({
         sideView: '视图选项',
         sideAddAgent: '添加智能体',
         sideSearch: '搜索智能体或对话',
+        sideClose: '关闭搜索',
         sideSearchEmpty: '没有匹配的对话',
         sideSort: '排序',
         sideSortRecent: '最近活动',
@@ -332,6 +333,7 @@ window.__ModuleLoader__.load({
         sideView: 'View options',
         sideAddAgent: 'Add agent',
         sideSearch: 'Search agents or conversations',
+        sideClose: 'Close search',
         sideSearchEmpty: 'No matching conversations',
         sideSort: 'Sort',
         sideSortRecent: 'Recent activity',
@@ -419,48 +421,47 @@ window.__ModuleLoader__.load({
 .am-divider{height:1px;background:var(--dsw-alias-border-l1);margin:4px 0}
 .am-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .am-usage-title{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-agents{flex:none;display:flex;flex-direction:column;padding:6px 10px 10px;border-top:1px solid var(--dsw-alias-border-l1)}
-.am-side-agents.is-collapsed .am-side-agents-list,.am-side-agents.is-collapsed .am-side-search,.am-side-agents.is-collapsed .am-side-view{display:none}
-.am-side-agents-head{display:flex;align-items:center;gap:6px;padding:5px 4px 7px}
-.am-side-agents-title{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
-.am-side-agents-title:hover{color:var(--dsw-alias-label-primary)}
-.am-side-agents-count{margin-left:auto;min-width:18px;height:18px;box-sizing:border-box;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 70%,transparent)}
-.am-side-agents-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;font-size:10px;line-height:1;padding:0}
-.am-side-agents-toggle:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent)}
-.am-side-agents-list{display:flex;flex-direction:column;gap:2px;max-height:min(52vh,420px);overflow:auto;scrollbar-width:thin}
+.am-side-agents{flex:none;display:flex;flex-direction:column;padding:0;margin:2px 0 4px}
+.am-side-agents.is-collapsed .am-side-agents-list,.am-side-agents.is-collapsed .am-side-view{display:none}
+.am-side-agents-head{box-sizing:border-box;display:flex;align-items:center;gap:4px;height:36px;margin:0 0 4px;padding-left:4px;color:var(--dsw-alias-label-tertiary);overflow:hidden}
+.am-side-agents-title{font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+.am-side-agents-title:hover{color:var(--dsw-alias-label-secondary)}
+.am-side-agents-count{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.am-side-agents-actions{margin-left:auto;display:flex;align-items:center;gap:4px;flex:none}
+.am-side-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;font-family:inherit;font-size:13px;line-height:1}
+.am-side-icon-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-side-agents-toggle svg{transition:transform .15s var(--ds-ease-in-out)}
+.am-side-agents-toggle.is-open svg{transform:rotate(90deg)}
+.am-side-search{display:none;flex:1;min-width:0;align-items:center;gap:2px}
+.am-side-agents-head.is-searching .am-side-agents-title,.am-side-agents-head.is-searching .am-side-agents-count,.am-side-agents-head.is-searching .am-side-agents-actions{display:none}
+.am-side-agents-head.is-searching .am-side-search{display:flex}
+.am-side-search-input{flex:1;min-width:0;height:28px;padding:0;border:0;outline:none;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px}
+.am-side-search-input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.am-side-agents-list{display:flex;flex-direction:column;max-height:min(52vh,420px);overflow:auto;scrollbar-width:thin}
 .am-side-agent{display:flex;flex-direction:column}
-.am-side-agent-row{display:flex;align-items:center;gap:7px;width:100%;padding:6px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
-.am-side-agent-row:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent)}
-.am-side-agent-chevron{flex:none;width:11px;font-size:9px;line-height:1;color:var(--dsw-alias-label-tertiary)}
-.am-side-agent-avatar{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;font-size:10px;font-weight:650;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 18%,transparent)}
-.am-side-agent-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.am-side-agent-count{flex:none;font-size:10.5px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
-.am-side-sessions{display:flex;flex-direction:column;gap:1px;margin:1px 0 5px 17px;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l1)}
-.am-side-session{display:flex;align-items:center;gap:8px;width:100%;padding:5px 6px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;text-align:left;cursor:pointer}
-.am-side-session:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent);color:var(--dsw-alias-label-primary)}
-.am-side-session-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.am-side-session-title{font-size:12.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-session-meta{font-size:10.5px;line-height:1.3;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-side-agent-row{display:flex;align-items:center;gap:6px;width:100%;height:34px;padding:0 8px;border:0;border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;text-align:left;user-select:none}
+.am-side-agent-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-side-agent-chevron{width:14px;height:14px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);transition:transform .15s var(--ds-ease-in-out)}
+.am-side-agent-chevron.is-open{transform:rotate(90deg)}
+.am-side-agent-slot{width:16px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}
+.am-side-agent-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-side-agent-count{flex:none;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.am-side-sessions{display:flex;flex-direction:column;padding:0 0 2px 14px}
+.am-side-session{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 8px;border:0;border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;text-align:left;user-select:none}
+.am-side-session:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-side-session-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-side-session-meta{flex:none;max-width:45%;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .am-side-session-state{flex:none;display:inline-flex;align-items:center;gap:4px}
 .am-side-session-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}
-.am-side-session-tag{font-size:9.5px;padding:1px 5px;border-radius:5px;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 65%,transparent)}
+.am-side-session-tag{font-size:10px;line-height:16px;padding:0 4px;border-radius:4px;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1)}
 .am-side-session.is-weak{opacity:.6}
-.am-side-session.is-running .am-side-session-title{color:var(--dsw-alias-label-primary)}
-.am-side-agents-actions{display:flex;align-items:center;gap:2px}
-.am-side-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;font-size:11px;line-height:1}
-.am-side-icon-btn:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 80%,transparent)}
-.am-side-search{padding:0 4px 6px}
-.am-side-search-input{width:100%;box-sizing:border-box;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 70%,transparent);color:inherit;font:inherit;font-size:12px;outline:none}
-.am-side-search-input:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,var(--dsw-alias-border-l1))}
-.am-side-search-input::placeholder{color:var(--dsw-alias-label-tertiary)}
-.am-side-view{display:flex;flex-direction:column;gap:2px;margin:0 4px 6px;padding:6px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 92%,transparent)}
+.am-side-view{display:flex;flex-direction:column;gap:1px;margin:0 4px 6px;padding:4px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l2);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);box-shadow:0 8px 24px rgba(0,0,0,.18)}
 .am-side-view[hidden]{display:none}
-.am-side-view-title{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);padding:2px 4px}
-.am-side-view-item{display:flex;align-items:center;justify-content:space-between;width:100%;padding:4px 6px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;text-align:left}
-.am-side-view-item:hover{background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 85%,transparent);color:var(--dsw-alias-label-primary)}
-.am-side-view-item.is-active{color:var(--dsw-alias-label-primary);font-weight:600}
-.am-side-view-item.is-active::after{content:'✓';font-size:10px;color:var(--dsw-alias-state-business-primary)}
-.am-side-empty{padding:10px 8px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);text-align:center}
+.am-side-view-title{padding:6px 8px 2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
+.am-side-view-item{display:flex;align-items:center;justify-content:space-between;width:100%;height:28px;padding:0 8px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px;cursor:pointer;text-align:left}
+.am-side-view-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-side-view-item.is-active::after{content:'✓';font-size:11px;color:var(--dsw-alias-state-business-primary)}
+.am-side-empty{padding:12px 8px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);text-align:center}
 .am-card.is-strong{opacity:.5}
 .am-archive-banner{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 94%,transparent);box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:12px;color:var(--dsw-alias-label-secondary)}
 .am-view-tabs{display:flex;gap:4px;padding:0 10px 8px}
@@ -2188,6 +2189,7 @@ window.__ModuleLoader__.load({
         const collapsed = new Set()
         let lastListSignature = ''
         let searchQuery = ''
+        let searchOpen = false
         let sortMode = 'recent'
         let showArchived = true
         let viewOpen = false
@@ -2221,6 +2223,17 @@ window.__ModuleLoader__.load({
           if (typeof sidebarBridge.onRequestCreateAgent === 'function') sidebarBridge.onRequestCreateAgent()
           else sidebarBridge.createAgent = true
         }
+        // Same glyph language as the shell: 14px stroked icons, no emoji.
+        const ICON = {
+          search:
+            '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="M10.6 10.6 13.7 13.7"/></svg>',
+          view:
+            '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 5h11M2.5 11h11"/><circle cx="10.5" cy="5" r="1.7"/><circle cx="5.5" cy="11" r="1.7"/></svg>',
+          add:
+            '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>',
+          chevron:
+            '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
+        }
 
         /** Header, search and view menu are created once so typing keeps focus. */
         const ensureChrome = host => {
@@ -2231,13 +2244,15 @@ window.__ModuleLoader__.load({
             `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('sidebarAgents'))}</button>` +
             `<span class="am-side-agents-count" title="0">0</span>` +
             `<span class="am-side-agents-actions">` +
-            `<button type="button" class="am-side-icon-btn" data-action="view" title="${escape(t('sideView'))}" aria-label="${escape(t('sideView'))}">⋯</button>` +
-            `<button type="button" class="am-side-icon-btn" data-action="add-agent" title="${escape(t('sideAddAgent'))}" aria-label="${escape(t('sideAddAgent'))}">＋</button>` +
-            `<button type="button" class="am-side-agents-toggle" data-action="toggle-section" title="${escape(t('sidebarCollapse'))}" aria-label="${escape(t('sidebarCollapse'))}">▾</button>` +
+            `<button type="button" class="am-side-icon-btn" data-action="search" title="${escape(t('sideSearch'))}" aria-label="${escape(t('sideSearch'))}">${ICON.search}</button>` +
+            `<button type="button" class="am-side-icon-btn" data-action="view" title="${escape(t('sideView'))}" aria-label="${escape(t('sideView'))}">${ICON.view}</button>` +
+            `<button type="button" class="am-side-icon-btn" data-action="add-agent" title="${escape(t('sideAddAgent'))}" aria-label="${escape(t('sideAddAgent'))}">${ICON.add}</button>` +
+            `<button type="button" class="am-side-icon-btn am-side-agents-toggle is-open" data-action="toggle-section" title="${escape(t('sidebarCollapse'))}" aria-label="${escape(t('sidebarCollapse'))}">${ICON.chevron}</button>` +
             `</span>` +
-            `</div>` +
-            `<div class="am-side-search">` +
+            `<span class="am-side-search">` +
             `<input class="am-side-search-input" type="search" spellcheck="false" placeholder="${escape(t('sideSearch'))}" />` +
+            `<button type="button" class="am-side-icon-btn" data-action="close-search" title="${escape(t('sideClose'))}" aria-label="${escape(t('sideClose'))}">×</button>` +
+            `</span>` +
             `</div>` +
             `<div class="am-side-view" hidden>` +
             `<div class="am-side-view-title">${escape(t('sideSort'))}</div>` +
@@ -2257,8 +2272,12 @@ window.__ModuleLoader__.load({
           })
           input.addEventListener('keydown', event => {
             if (event.key !== 'Escape') return
-            input.value = ''
-            searchQuery = ''
+            if (input.value !== '') {
+              input.value = ''
+              searchQuery = ''
+            } else {
+              searchOpen = false
+            }
             renderSection(host)
           })
         }
@@ -2302,12 +2321,13 @@ window.__ModuleLoader__.load({
           const count = host.querySelector('.am-side-agents-count')
           count.textContent = String(total)
           count.title = String(total)
+          host.querySelector('.am-side-agents-head').classList.toggle('is-searching', searchOpen)
           const toggle = host.querySelector('.am-side-agents-toggle')
-          toggle.textContent = sectionOpen ? '▾' : '▸'
+          toggle.classList.toggle('is-open', sectionOpen)
           toggle.title = sectionOpen ? t('sidebarCollapse') : t('sidebarExpand')
           host.classList.toggle('is-collapsed', !sectionOpen)
           const view = host.querySelector('.am-side-view')
-          view.hidden = !viewOpen
+          view.hidden = !viewOpen || searchOpen
           for (const item of view.querySelectorAll('[data-action="sort"]')) {
             item.classList.toggle('is-active', item.getAttribute('data-sort') === sortMode)
           }
@@ -2334,11 +2354,9 @@ window.__ModuleLoader__.load({
                         (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
                         (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
                       return (
-                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${session.running ? ' is-running' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
-                        `<span class="am-side-session-body">` +
+                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
                         `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
                         `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
-                        `</span>` +
                         (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
                         `</button>`
                       )
@@ -2349,8 +2367,8 @@ window.__ModuleLoader__.load({
               return (
                 `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
                 `<button type="button" class="am-side-agent-row" data-action="toggle-agent">` +
-                `<span class="am-side-agent-chevron">${open ? '▾' : '▸'}</span>` +
-                `<span class="am-side-agent-avatar">${escape(initial)}</span>` +
+                `<span class="am-side-agent-chevron${open ? ' is-open' : ''}">${ICON.chevron}</span>` +
+                `<span class="am-side-agent-slot">${escape(initial)}</span>` +
                 `<span class="am-side-agent-name">${escape(agent.name)}</span>` +
                 `<span class="am-side-agent-count">${agent.sessions.length}</span>` +
                 `</button>${rows}</div>`
@@ -2382,6 +2400,24 @@ window.__ModuleLoader__.load({
                     /* panel id moved in a newer shell */
                   }
                 }
+              } else if (action === 'search') {
+                searchOpen = true
+                viewOpen = false
+                renderSection(host)
+                const input = host.querySelector('.am-side-search-input')
+                if (input !== null) {
+                  try {
+                    input.focus()
+                  } catch {
+                    /* focus can be refused while the panel repaints */
+                  }
+                }
+              } else if (action === 'close-search') {
+                searchOpen = false
+                searchQuery = ''
+                const input = host.querySelector('.am-side-search-input')
+                if (input !== null) input.value = ''
+                renderSection(host)
               } else if (action === 'view') {
                 viewOpen = !viewOpen
                 renderSection(host)
