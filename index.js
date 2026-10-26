@@ -23,7 +23,7 @@ import path from 'node:path'
 import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
-import { createHandoff } from './handoff.js'
+import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 
 const API_BASE = '/api/agent-memory'
@@ -728,12 +728,26 @@ async function sendStartupPrompt(ctx, store, sessionId, text) {
   }
 }
 
-function handoffStatus(ctx, store, handoff) {
+/**
+ * Handoff status for every bound session, live or cold.
+ *
+ * The auto switch must work for a session the user merely opened — or for one
+ * that settled earlier and is not open at all — so the row set comes from the
+ * bindings joined with persisted session summaries, not from `agents.list()`
+ * (which only carries Agents that were resumed into this process).
+ */
+async function handoffStatus(ctx, store, handoff) {
   const config = handoff.config()
-  const agents = ctx.get('agents')
-  const list = agents !== undefined && typeof agents.list === 'function' ? agents.list() : []
-  const sessions = list.map(agent => {
-    const sessionId = String(agent.id)
+  const summaries = await sessionSummaries(ctx)
+  const summaryById = new Map(summaries.map(item => [String(item.sessionId), item]))
+  const live = ctx.get('agents')
+  const liveIds = new Set(
+    (live !== undefined && typeof live.list === 'function' ? live.list() : []).map(agent => String(agent.id)),
+  )
+  const ids = new Set(store.listBindings().map(item => item.sessionId))
+  for (const id of liveIds) if (store.bindingOf(id) !== '') ids.add(id)
+  const sessions = [...ids].map(sessionId => {
+    const summary = summaryById.get(sessionId)
     const tokens = measureTokens(ctx, sessionId)
     const state = handoff.stateOf(sessionId)
     const bound = store.bindingOf(sessionId)
@@ -744,20 +758,30 @@ function handoffStatus(ctx, store, handoff) {
         : tokens >= config.triggerTokens
           ? 'due'
           : 'watching'
+    const cwd = sessionCwd(ctx, sessionId) ?? (typeof summary?.cwd === 'string' ? summary.cwd : undefined)
+    // An expired intent is not "armed": the client would open a new session
+    // and then `takeNext` would drop the intent, leaving it unbound.
+    const next = state?.next
+    const armed =
+      next !== undefined &&
+      next !== null &&
+      Number.isFinite(Date.parse(next.at)) &&
+      Date.parse(next.at) >= Date.now() - DEFAULT_NEXT_TTL_MS
     return {
       sessionId,
       title: sessionTitleOf(ctx, sessionId),
       tokens,
       agentId: bound,
       stage,
-      workspaceId: workspaceIdOf(ctx, sessionCwd(ctx, sessionId)),
+      workspaceId: workspaceIdOf(ctx, cwd),
       agentPreset: agentPresetOf(ctx, sessionId),
+      running: summary?.running === true,
       requestedAt: state?.requestedAt,
       settledAt: state?.settledAt,
       checkpoint: state?.checkpoint,
       exported: state?.exported,
-      armed: Boolean(state?.next),
-      armedAt: state?.next?.at,
+      armed,
+      armedAt: armed ? next.at : undefined,
     }
   })
   return { config, capabilities: { arm: true, startPrompt: true }, sessions }

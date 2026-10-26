@@ -2535,9 +2535,10 @@ window.__ModuleLoader__.load({
             } else if (banner !== null) {
               banner.remove()
             }
-            // Auto handoff: when the selected session has just written a
-            // checkpoint and its turn is over, open a fresh conversation.
-            if (state?.capabilities?.arm === true && selectedId !== '') {
+            // Auto handoff: any settled session that still holds a live handoff
+            // intent gets a fresh conversation — no need to keep that session
+            // selected. Skip the whole poll while any turn is running.
+            if (state?.capabilities?.arm === true) {
               const statusPayload = await request('/op', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -2546,40 +2547,46 @@ window.__ModuleLoader__.load({
               if (stopped) return
               const status = statusPayload.value
               if (status?.config?.autoSwitch === true) {
-                const row = (status.sessions ?? []).find(item => item.sessionId === selectedId)
-                const running =
-                  lastAgents.flatMap(agent => agent.sessions).find(item => item.sessionId === selectedId)?.running === true
-                if (row?.stage === 'settled' && row.armed === true && !running && !autoSwitched.has(selectedId)) {
-                  const ui = ctx.get('uiWorkspace')
-                  if (ui !== undefined && typeof ui.startSession === 'function') {
-                    autoSwitched.add(selectedId)
-                    const open = () => {
-                      if (stopped) return
-                      try {
-                        // Keep the conversation's mode: a fresh Session starts on
-                        // the default preset unless we pass the source one along.
-                        ui.startSession(
-                          row.workspaceId || undefined,
-                          row.agentPreset ? { agentPreset: row.agentPreset } : undefined,
-                        )
-                      } catch {
-                        autoSwitched.delete(selectedId)
-                      }
+                const rows = Array.isArray(status.sessions) ? status.sessions : []
+                const busy = rows.some(row => row.running === true)
+                const pick = rows
+                  .filter(
+                    row =>
+                      row.stage === 'settled' &&
+                      row.armed === true &&
+                      row.running !== true &&
+                      !autoSwitched.has(row.sessionId),
+                  )
+                  .sort((left, right) => String(right.armedAt ?? '').localeCompare(String(left.armedAt ?? '')))[0]
+                const ui = ctx.get('uiWorkspace')
+                if (!busy && pick !== undefined && ui !== undefined && typeof ui.startSession === 'function') {
+                  autoSwitched.add(pick.sessionId)
+                  const open = () => {
+                    if (stopped) return
+                    try {
+                      // Keep the conversation's mode: a fresh Session starts on
+                      // the default preset unless we pass the source one along.
+                      ui.startSession(
+                        pick.workspaceId || undefined,
+                        pick.agentPreset ? { agentPreset: pick.agentPreset } : undefined,
+                      )
+                    } catch {
+                      autoSwitched.delete(pick.sessionId)
                     }
-                    if (status?.capabilities?.startPrompt === true) {
-                      // Attach the startup instruction to the handoff intent
-                      // first: the Host sends it after the new session inherits
-                      // the binding, approval policy and model. A failed arm
-                      // still opens the conversation, just without a message.
-                      void request('/op', {
-                        method: 'POST',
-                        headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({ op: 'handoff.arm', args: { sessionId: selectedId, autoStart: true } }),
-                      })
-                        .then(open, open)
-                    } else {
-                      open()
-                    }
+                  }
+                  if (status?.capabilities?.startPrompt === true) {
+                    // Attach the startup instruction to the handoff intent
+                    // first: the Host sends it after the new session inherits
+                    // the binding, approval policy and model. A failed arm
+                    // still opens the conversation, just without a message.
+                    void request('/op', {
+                      method: 'POST',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ op: 'handoff.arm', args: { sessionId: pick.sessionId, autoStart: true } }),
+                    })
+                      .then(open, open)
+                  } else {
+                    open()
                   }
                 }
               }

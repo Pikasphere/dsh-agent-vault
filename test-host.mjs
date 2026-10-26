@@ -309,6 +309,23 @@ assert.equal(status.payload.value.sessions[0].workspaceId, 'w-work')
 assert.equal(status.payload.value.sessions[0].agentPreset, 'cordis')
 assert.ok(status.payload.value.sessions[0].requestedAt)
 assert.equal(status.payload.value.sessions[0].checkpoint, undefined)
+
+// The auto switch must find a settled session that is NOT open in the browser:
+// rows come from bindings + persisted summaries, not from live Agents.
+const realGet = ctx.get
+ctx.get = name => {
+  if (name === 'agents') return { list: () => [] }
+  if (name === 'sessions') return { get: () => undefined }
+  return realGet(name)
+}
+const coldStored = await call('POST', '/op', { op: 'handoff.status', args: {} })
+ctx.get = realGet
+assert.equal(coldStored.payload.value.sessions.length, 1)
+assert.equal(coldStored.payload.value.sessions[0].sessionId, 'session-test-1234')
+assert.equal(coldStored.payload.value.sessions[0].workspaceId, 'w-work')
+assert.equal(coldStored.payload.value.sessions[0].running, true)
+console.log('handoff cold session ok')
+
 const autoSaved = await call('POST', '/op', { op: 'handoff.save', args: { autoSwitch: true } })
 assert.equal(autoSaved.payload.value.autoSwitch, true)
 const promptSaved = await call('POST', '/op', {
