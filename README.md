@@ -40,7 +40,7 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 
 DSH 插件以 profile 包的形式安装。任选一种：
 
-> **npm 版本注意**：已发布的 1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），安装后 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。请使用 1.3.1；在 1.3.1 发布前，用源码目录安装（`dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault`）或 `link:` 安装。
+> **npm 版本注意**：1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。请用 **1.3.3**（当前正式版；1.3.1 起已修好打包，1.3.3 另含右键菜单与交接修复）。要从源码改代码，用目录或 `link:` 安装。
 
 ### 方式一：从目录安装
 
