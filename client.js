@@ -188,6 +188,25 @@ window.__ModuleLoader__.load({
         archiveStrongHint: '强归档：彻底隐藏，侧栏不显示、列表灰色、不能打开；可以转回普通归档。',
         archiveBanner: '该对话已归档（只读）：发送会被拒绝',
         archiveDoHint: '归档为只读，可以随时取消。',
+        ctxOpen: '打开',
+        ctxArchive: '归档',
+        ctxArchiveHint: '只读：可读历史，发送被拒绝',
+        ctxToStrong: '转化为强归档',
+        ctxToStrongHint: '从侧栏隐藏，面板灰显',
+        ctxUnarchive: '取消归档',
+        ctxUnarchiveHint: '恢复为普通对话',
+        ctxNewSession: '在智能体名下创建新对话',
+        ctxNewSessionHint: '新建并自动绑定这个智能体',
+        ctxCollapse: '收起该智能体',
+        ctxExpand: '展开该智能体',
+        ctxSelected: '已选',
+        ctxUnit: '个对话',
+        ctxDoneArchive: '已归档',
+        ctxDoneStrong: '已强归档',
+        ctxDoneUnarchive: '已取消归档',
+        ctxDoneNew: '已新建对话并绑定',
+        ctxFailed: '操作失败',
+        ctxTip: '右键对话可归档、强归档、取消归档或新建对话；Ctrl / Shift 点击可多选',
       },
       en: {
         nav: 'Agents',
@@ -353,6 +372,25 @@ window.__ModuleLoader__.load({
         archiveStrongHint: 'Strong archive: fully hidden — grey here, absent from the sidebar, cannot open. Can be turned back to a normal archive.',
         archiveBanner: 'This conversation is archived (read-only): sending is blocked',
         archiveDoHint: 'Archive as read-only; you can cancel later.',
+        ctxOpen: 'Open',
+        ctxArchive: 'Archive',
+        ctxArchiveHint: 'Read-only: history readable, sending rejected',
+        ctxToStrong: 'Make strong archive',
+        ctxToStrongHint: 'Hidden from the sidebar, greyed in the panel',
+        ctxUnarchive: 'Cancel archive',
+        ctxUnarchiveHint: 'Back to a normal conversation',
+        ctxNewSession: 'New conversation under this agent',
+        ctxNewSessionHint: 'Creates and binds it to this agent',
+        ctxCollapse: 'Collapse this agent',
+        ctxExpand: 'Expand this agent',
+        ctxSelected: 'Selected',
+        ctxUnit: 'conversations',
+        ctxDoneArchive: 'Archived',
+        ctxDoneStrong: 'Strong-archived',
+        ctxDoneUnarchive: 'Archive cancelled',
+        ctxDoneNew: 'New conversation created and bound',
+        ctxFailed: 'Action failed',
+        ctxTip: 'Right-click a conversation to archive, strong-archive, cancel the archive, or start a new one; Ctrl / Shift click multi-selects',
       },
     }
 
@@ -484,6 +522,17 @@ window.__ModuleLoader__.load({
 .am-hero{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary)}
 .am-hero select{font:inherit;font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 70%,transparent);color:var(--dsw-alias-label-primary);outline:none;max-width:150px}
 .am-hero select:focus{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,var(--dsw-alias-border-l1))}
+.am-ctx{position:fixed;z-index:90;display:flex;flex-direction:column;gap:1px;min-width:212px;max-width:min(320px,90vw);padding:4px;border-radius:10px;border:.5px solid var(--dsw-alias-border-l2);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 98%,transparent);box-shadow:0 12px 32px rgba(0,0,0,.3);font-family:inherit}
+.am-ctx-head{padding:6px 10px 4px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-ctx-item{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;box-sizing:border-box;padding:6px 10px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
+.am-ctx-item:hover:not(:disabled),.am-ctx-item:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}
+.am-ctx-item:disabled{opacity:.45;cursor:default}
+.am-ctx-hint{font-size:11px;line-height:15px;color:var(--dsw-alias-label-tertiary)}
+.am-ctx-sep{height:1px;margin:3px 4px;background:var(--dsw-alias-border-l1)}
+.am-side-session.is-selected,.am-side-agent-row.is-selected{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 15%,transparent)}
+.am-side-session.is-selected:hover,.am-side-agent-row.is-selected:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 22%,transparent)}
+.am-toast-bar{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:90;padding:7px 14px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);box-shadow:0 8px 26px rgba(0,0,0,.24);font-size:12px;color:var(--dsw-alias-label-secondary);pointer-events:none}
+.am-toast-bar.is-failed{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));border-color:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-border-l2)) 45%,transparent)}
 `
 
     // ── locale ──────────────────────────────────────────────────────────────
@@ -2237,6 +2286,252 @@ window.__ModuleLoader__.load({
             '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
         }
 
+        // ── right-click menu, multi-select and the actions on them ───────────
+        // Selection lives outside the DOM: the section repaints on every sync
+        // and every filter change, and a lost selection would lose the menu's
+        // target halfway through.
+        const ctxSelected = new Set()
+        let ctxAgentId = ''
+        let ctxAnchor = { agentId: '', sessionId: '' }
+        let ctxMenu = null
+        let ctxDetach = null
+        let ctxToast = null
+        let ctxToastTimer = 0
+        let visibleSessions = []
+
+        const postOp = (op, args) =>
+          request('/op', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ op, args }),
+          })
+
+        const showToast = (text, failed = false) => {
+          if (ctxToast !== null) ctxToast.remove()
+          window.clearTimeout(ctxToastTimer)
+          ctxToast = document.createElement('div')
+          ctxToast.className = `am-toast-bar${failed ? ' is-failed' : ''}`
+          ctxToast.textContent = text
+          document.body.appendChild(ctxToast)
+          ctxToastTimer = window.setTimeout(() => {
+            ctxToast?.remove()
+            ctxToast = null
+          }, 2400)
+        }
+
+        const closeContextMenu = () => {
+          if (ctxDetach !== null) {
+            ctxDetach()
+            ctxDetach = null
+          }
+          if (ctxMenu !== null) {
+            ctxMenu.remove()
+            ctxMenu = null
+          }
+        }
+
+        /** `items` are { head } | { separator: true } | { label, hint?, disabled?, run }. */
+        const openContextMenu = (event, items) => {
+          closeContextMenu()
+          const menu = document.createElement('div')
+          menu.className = 'am-ctx'
+          menu.setAttribute('role', 'menu')
+          menu.innerHTML = items
+            .map((item, index) => {
+              if (item.separator === true) return '<div class="am-ctx-sep" role="separator"></div>'
+              if (typeof item.head === 'string') return `<div class="am-ctx-head">${escape(item.head)}</div>`
+              return (
+                `<button type="button" class="am-ctx-item" role="menuitem" data-ctx="${index}"${item.disabled === true ? ' disabled' : ''}>` +
+                `<span class="am-ctx-label">${escape(item.label)}</span>` +
+                (item.hint ? `<span class="am-ctx-hint">${escape(item.hint)}</span>` : '') +
+                `</button>`
+              )
+            })
+            .join('')
+          document.body.appendChild(menu)
+          // Measure before showing so the first paint never flashes at 0,0.
+          menu.style.visibility = 'hidden'
+          const box = menu.getBoundingClientRect()
+          const left = Math.min(Math.max(8, event.clientX), Math.max(8, window.innerWidth - box.width - 8))
+          const top = Math.min(Math.max(8, event.clientY), Math.max(8, window.innerHeight - box.height - 8))
+          menu.style.left = `${left}px`
+          menu.style.top = `${top}px`
+          menu.style.visibility = ''
+          menu.addEventListener('click', clicked => {
+            const button = clicked.target.closest('[data-ctx]')
+            if (button === null || button.disabled === true) return
+            const item = items[Number(button.getAttribute('data-ctx'))]
+            if (item === undefined || typeof item.run !== 'function') return
+            closeContextMenu()
+            item.run()
+          })
+          menu.addEventListener('keydown', key => {
+            if (key.key !== 'ArrowDown' && key.key !== 'ArrowUp') return
+            key.preventDefault()
+            const buttons = [...menu.querySelectorAll('.am-ctx-item:not([disabled])')]
+            if (buttons.length === 0) return
+            const current = buttons.indexOf(document.activeElement)
+            const next =
+              key.key === 'ArrowDown' ? (current + 1) % buttons.length : (current - 1 + buttons.length) % buttons.length
+            buttons[next].focus()
+          })
+          const first = menu.querySelector('.am-ctx-item:not([disabled])')
+          if (first !== null) {
+            try {
+              first.focus()
+            } catch {
+              /* focus can be refused while the sidebar repaints */
+            }
+          }
+          ctxMenu = menu
+          const onDown = down => {
+            if (!menu.contains(down.target)) closeContextMenu()
+          }
+          const onKey = down => {
+            if (down.key !== 'Escape') return
+            down.preventDefault()
+            closeContextMenu()
+          }
+          const onAway = () => closeContextMenu()
+          window.addEventListener('pointerdown', onDown, true)
+          window.addEventListener('keydown', onKey, true)
+          window.addEventListener('resize', onAway)
+          window.addEventListener('blur', onAway)
+          document.addEventListener('scroll', onAway, true)
+          ctxDetach = () => {
+            window.removeEventListener('pointerdown', onDown, true)
+            window.removeEventListener('keydown', onKey, true)
+            window.removeEventListener('resize', onAway)
+            window.removeEventListener('blur', onAway)
+            document.removeEventListener('scroll', onAway, true)
+          }
+        }
+
+        const agentNameOf = agentId => lastAgents.find(agent => agent.agentId === agentId)?.name ?? ''
+        const levelOfSession = sessionId => {
+          for (const agent of lastAgents) {
+            const found = agent.sessions.find(item => item.sessionId === sessionId)
+            if (found !== undefined) return found.archive ?? ''
+          }
+          return ''
+        }
+
+        const openSession = sessionId => {
+          const ui = ctx.get('uiWorkspace')
+          if (sessionId !== '' && ui !== undefined && typeof ui.openSession === 'function') ui.openSession(sessionId)
+        }
+
+        const runArchive = async level => {
+          const ids = [...ctxSelected]
+          if (ids.length === 0) return
+          const results = await Promise.allSettled(ids.map(sessionId => postOp('archive.set', { sessionId, level })))
+          const failed = results.find(result => result.status === 'rejected')
+          if (failed !== undefined) {
+            showToast(`${t('ctxFailed')}：${String(failed.reason?.message ?? failed.reason ?? '')}`, true)
+          } else {
+            showToast(level === 'strong' ? t('ctxDoneStrong') : level === 'weak' ? t('ctxDoneArchive') : t('ctxDoneUnarchive'))
+          }
+          // Archiving from here would otherwise make the row vanish and leave the
+          // user with no visible way back, so reveal archived rows once.
+          if (level === 'weak' && !showArchived) {
+            showArchived = true
+            savePrefs()
+          }
+          ctxSelected.clear()
+          ctxAnchor = { agentId: '', sessionId: '' }
+          await sync()
+        }
+
+        const createSessionForAgent = async agentId => {
+          const agent = lastAgents.find(item => item.agentId === agentId)
+          const workspaceId =
+            agent?.sessions.find(item => typeof item.workspaceId === 'string' && item.workspaceId !== '')?.workspaceId ?? ''
+          try {
+            const payload = await postOp('agent.newSession', { id: agentId, workspaceId })
+            const sessionId = String(payload?.value?.sessionId ?? '')
+            if (sessionId !== '') openSession(sessionId)
+            showToast(t('ctxDoneNew'))
+            await sync()
+          } catch (error) {
+            showToast(`${t('ctxFailed')}：${String(error?.message ?? error)}`, true)
+          }
+        }
+
+        const openSessionMenu = event => {
+          const ids = [...ctxSelected]
+          const levels = ids.map(levelOfSession)
+          const agentId = ctxAnchor.agentId
+          const name = agentNameOf(agentId)
+          const items = []
+          if (ids.length > 1) items.push({ head: `${t('ctxSelected')} ${ids.length} ${t('ctxUnit')}` })
+          items.push({ label: t('ctxOpen'), run: () => openSession(ids[0] ?? '') })
+          items.push({ separator: true })
+          items.push({
+            label: t('ctxArchive'),
+            hint: t('ctxArchiveHint'),
+            disabled: levels.every(level => level !== ''),
+            run: () => void runArchive('weak'),
+          })
+          items.push({
+            label: t('ctxToStrong'),
+            hint: t('ctxToStrongHint'),
+            disabled: levels.every(level => level === 'strong'),
+            run: () => void runArchive('strong'),
+          })
+          items.push({
+            label: t('ctxUnarchive'),
+            hint: t('ctxUnarchiveHint'),
+            disabled: levels.every(level => level === ''),
+            run: () => void runArchive(''),
+          })
+          if (agentId !== '') {
+            items.push({ separator: true })
+            items.push({
+              label: name === '' ? t('ctxNewSession') : `${t('ctxNewSession')} · ${name}`,
+              hint: t('ctxNewSessionHint'),
+              run: () => void createSessionForAgent(agentId),
+            })
+          }
+          openContextMenu(event, items)
+        }
+
+        const openAgentMenu = event => {
+          const agentId = ctxAgentId
+          const agent = lastAgents.find(item => item.agentId === agentId)
+          if (agent === undefined) return
+          const open = !collapsed.has(agentId)
+          openContextMenu(event, [
+            { head: agent.name },
+            { label: t('ctxNewSession'), hint: t('ctxNewSessionHint'), run: () => void createSessionForAgent(agentId) },
+            { separator: true },
+            {
+              label: open ? t('ctxCollapse') : t('ctxExpand'),
+              run: () => {
+                if (open) collapsed.add(agentId)
+                else collapsed.delete(agentId)
+                const host = document.getElementById('am-sidebar-agents')
+                if (host !== null) renderSection(host)
+              },
+            },
+          ])
+        }
+
+        /** Ctrl/Cmd toggles one row; Shift extends from the last anchor inside one agent. */
+        const extendSelection = (sessionId, agentId, event) => {
+          if (event.shiftKey && ctxAnchor.agentId === agentId && ctxAnchor.sessionId !== '') {
+            const ids = visibleSessions.filter(item => item.agentId === agentId).map(item => item.sessionId)
+            const from = ids.indexOf(ctxAnchor.sessionId)
+            const to = ids.indexOf(sessionId)
+            if (from !== -1 && to !== -1) {
+              for (const id of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) ctxSelected.add(id)
+              return
+            }
+          }
+          if (ctxSelected.has(sessionId)) ctxSelected.delete(sessionId)
+          else ctxSelected.add(sessionId)
+          ctxAnchor = { agentId, sessionId }
+        }
+
         /** Header, search and view menu are created once so typing keeps focus. */
         const ensureChrome = host => {
           if (host.dataset.chrome === '1') return
@@ -2320,6 +2615,9 @@ window.__ModuleLoader__.load({
           }
 
           const total = visible.reduce((sum, agent) => sum + agent.sessions.length, 0)
+          visibleSessions = visible.flatMap(agent =>
+            agent.sessions.map(session => ({ sessionId: session.sessionId, agentId: agent.agentId })),
+          )
           const count = host.querySelector('.am-side-agents-count')
           count.textContent = String(total)
           count.title = String(total)
@@ -2336,7 +2634,16 @@ window.__ModuleLoader__.load({
           view.querySelector('[data-action="toggle-archived"]').classList.toggle('is-active', showArchived)
 
           const list = host.querySelector('.am-side-agents-list')
-          const signature = JSON.stringify([sectionOpen, [...collapsed], query, sortMode, showArchived, visible])
+          const signature = JSON.stringify([
+            sectionOpen,
+            [...collapsed],
+            query,
+            sortMode,
+            showArchived,
+            [...ctxSelected].sort(),
+            ctxAgentId,
+            visible,
+          ])
           if (signature === lastListSignature) return
           lastListSignature = signature
           if (visible.length === 0) {
@@ -2352,11 +2659,12 @@ window.__ModuleLoader__.load({
                   agent.sessions
                     .map(session => {
                       const weak = session.archive === 'weak'
+                      const picked = ctxSelected.has(session.sessionId)
                       const state =
                         (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
                         (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
                       return (
-                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
+                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${picked ? ' is-selected' : ''}" data-action="open" data-session="${escape(session.sessionId)}" aria-selected="${picked ? 'true' : 'false'}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
                         `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
                         `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
                         (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
@@ -2368,7 +2676,7 @@ window.__ModuleLoader__.load({
                 : ''
               return (
                 `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
-                `<button type="button" class="am-side-agent-row" data-action="toggle-agent">` +
+                `<button type="button" class="am-side-agent-row${ctxAgentId === agent.agentId ? ' is-selected' : ''}" data-action="toggle-agent" aria-selected="${ctxAgentId === agent.agentId ? 'true' : 'false'}">` +
                 `<span class="am-side-agent-chevron${open ? ' is-open' : ''}">${ICON.chevron}</span>` +
                 `<span class="am-side-agent-slot">${escape(initial)}</span>` +
                 `<span class="am-side-agent-name">${escape(agent.name)}</span>` +
@@ -2449,14 +2757,65 @@ window.__ModuleLoader__.load({
               } else if (action === 'toggle-agent') {
                 const agentId = target.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
                 if (agentId === '') return
+                closeContextMenu()
+                ctxAgentId = ''
                 if (collapsed.has(agentId)) collapsed.delete(agentId)
                 else collapsed.add(agentId)
                 renderSection(host)
               } else if (action === 'open') {
                 const sessionId = target.getAttribute('data-session') ?? ''
-                const ui = ctx.get('uiWorkspace')
-                if (sessionId !== '' && ui !== undefined && typeof ui.openSession === 'function') ui.openSession(sessionId)
+                const agentId = target.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
+                closeContextMenu()
+                if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                  ctxAgentId = ''
+                  extendSelection(sessionId, agentId, event)
+                  renderSection(host)
+                  return
+                }
+                ctxSelected.clear()
+                ctxAgentId = ''
+                ctxAnchor = { agentId, sessionId }
+                renderSection(host)
+                openSession(sessionId)
               }
+            })
+            host.addEventListener('contextmenu', event => {
+              const sessionRow = event.target.closest?.('.am-side-session') ?? null
+              const agentRow = event.target.closest?.('.am-side-agent-row') ?? null
+              if (sessionRow === null && agentRow === null) {
+                // A stray right click inside our own section must not raise the
+                // shell's menu for whatever row happens to sit behind it.
+                event.preventDefault()
+                event.stopPropagation()
+                return
+              }
+              event.preventDefault()
+              // The shell owns a context menu for its own session rows; ours is
+              // a different row type, so it must not bubble into that one.
+              event.stopPropagation()
+              closeContextMenu()
+              if (sessionRow !== null) {
+                const sessionId = sessionRow.getAttribute('data-session') ?? ''
+                const agentId = sessionRow.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
+                // Right-clicking inside an existing selection keeps it; anywhere
+                // else it starts a new one on the row under the cursor.
+                if (!ctxSelected.has(sessionId)) {
+                  ctxSelected.clear()
+                  ctxSelected.add(sessionId)
+                }
+                ctxAgentId = ''
+                ctxAnchor = { agentId, sessionId }
+                renderSection(host)
+                openSessionMenu(event)
+                return
+              }
+              const agentId = agentRow.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
+              if (agentId === '') return
+              ctxSelected.clear()
+              ctxAgentId = agentId
+              ctxAnchor = { agentId: '', sessionId: '' }
+              renderSection(host)
+              openAgentMenu(event)
             })
           }
           if (host.parentElement !== root || host.nextElementSibling !== area) root.insertBefore(host, area)
@@ -2621,6 +2980,10 @@ window.__ModuleLoader__.load({
           style.remove()
           document.getElementById('am-sidebar-agents')?.remove()
           document.getElementById('am-archive-banner')?.remove()
+          closeContextMenu()
+          window.clearTimeout(ctxToastTimer)
+          ctxToast?.remove()
+          ctxToast = null
         }
       }, 'agent-memory: hide bound sessions')
 

@@ -661,6 +661,10 @@ async function allBoundSessions(ctx, store, archives) {
         sessionTitleOf(ctx, item.sessionId) ||
         (typeof archiveEntry?.title === 'string' ? archiveEntry.title : ''),
       workspaceTitle: workspace?.title ?? '',
+      // The sidebar's right-click menu creates a conversation "under this
+      // agent" without visiting the panel, so the workspace has to travel with
+      // the group it belongs to.
+      workspaceId: workspace?.id ?? '',
       updatedAt: Number(summary?.updatedAt) || 0,
       running: summary?.running === true,
       archive: archives.levelOf(item.sessionId),
