@@ -191,6 +191,12 @@ const rebuilt = await call('POST', '/op', { op: 'memory.reindex', args: {} })
 assert.ok(rebuilt.payload.value.total >= 2)
 const indexState = await call('POST', '/op', { op: 'memory.index', args: {} })
 assert.equal(indexState.payload.value.builtAt, rebuilt.payload.value.builtAt)
+const opened = await call('POST', '/op', {
+  op: 'memory.open',
+  args: { id, src: 'knowledge', entry: knowledgeOnly.payload.value.results[0].id },
+})
+assert.equal(opened.payload.value.entry.src, 'knowledge')
+assert.ok(opened.payload.value.entry.text.length > 0)
 console.log('recall + reindex ok')
 
 // the library is shared: a second agent sees the first agent's entry

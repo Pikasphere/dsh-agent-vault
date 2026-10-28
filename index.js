@@ -490,9 +490,16 @@ function measureTokens(ctx, sessionId) {
   }
 }
 
-function handoffHint(tokens, threshold) {
+/**
+ * The handoff reminder is injected as a prompt section (order 121), which sits
+ * inside the cached prefix: its text must stay byte-identical across steps or
+ * every step re-bills the whole conversation. So it carries the threshold (a
+ * setting, stable for the session) and never the live token count — the count
+ * changes every step, the wording does not.
+ */
+function handoffHint(threshold) {
   return [
-    `[交接提醒] 当前上下文约 ${tokens.toLocaleString('en-US')} tokens，已到阈值 ${threshold.toLocaleString('en-US')}。`,
+    `[交接提醒] 上下文已到阈值 ${threshold.toLocaleString('en-US')} tokens。`,
     '在这一步先完成两件事，然后继续手上的工作：',
     '1) `agent_memory_save`：写一段不超过 400 字的记忆（下一步做什么、关键决策、遗留问题）',
     '2) `agent_journal` 的 `write`：追加一条详细日志（这次做了什么、为什么、踩了什么坑）',
@@ -894,7 +901,7 @@ function registerHandoff(ctx, store, journals, handoff, archives, hints) {
             memoryAt: store.memoryUpdatedAt(agentId),
             journalAt: journals.latestAt(agentId),
           })
-          if (result.stage === 'requested') hints.set(sessionId, handoffHint(tokens, result.threshold))
+          if (result.stage === 'requested') hints.set(sessionId, handoffHint(result.threshold))
           else hints.delete(sessionId)
           if (result.stage === 'ready') {
             writeCheckpoint(ctx, store, journals, handoff, {
@@ -1112,6 +1119,10 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
         since: args.since,
         expand: args.expand,
       })
+    }
+    case 'memory.open': {
+      const vault = store.resolveVault({ id: args.id })
+      return { entry: recall.open({ id: vault.id, src: args.src, entry: args.entry }) }
     }
     case 'memory.reindex':
       return recall.reindex()

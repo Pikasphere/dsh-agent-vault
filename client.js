@@ -207,6 +207,28 @@ window.__ModuleLoader__.load({
         ctxDoneNew: '已新建对话并绑定',
         ctxFailed: '操作失败',
         ctxTip: '右键对话可归档、强归档、取消归档或新建对话；Ctrl / Shift 点击可多选',
+        recall: '回忆',
+        recallHint: '在当前智能体的日志、记忆审计和共享知识库里按词检索。只查索引，不进提示词，不额外消耗 token。',
+        recallPlaceholder: '找什么？一句话或几个关键词',
+        recallSearch: '检索',
+        recallClear: '清空',
+        recallEmpty: '还没检索。先写几个关键词。',
+        recallNoResult: '没有命中。换个说法，或放宽来源与日期。',
+        recallUnit: '条命中',
+        recallAll: '全部来源',
+        recallSince: '起始日期',
+        recallExpandSoon: '图扩展在 2.0.0-alpha.3 提供',
+        recallIndex: '索引状态',
+        recallIndexTotal: '条目',
+        recallBuilt: '构建于',
+        recallRebuild: '重建索引',
+        recallRebuilt: '索引已重建',
+        recallSrcJournal: '日志',
+        recallSrcLog: '记忆',
+        recallSrcKnowledge: '知识库',
+        recallOpen: '展开全文',
+        recallClose: '收起',
+        recallScore: '得分',
       },
       en: {
         nav: 'Agents',
@@ -391,6 +413,28 @@ window.__ModuleLoader__.load({
         ctxDoneNew: 'New conversation created and bound',
         ctxFailed: 'Action failed',
         ctxTip: 'Right-click a conversation to archive, strong-archive, cancel the archive, or start a new one; Ctrl / Shift click multi-selects',
+        recall: 'Recall',
+        recallHint: 'Keyword search over this agent’s journal, its memory audit log and the shared knowledge base. Index-only: it never enters the prompt and costs no tokens.',
+        recallPlaceholder: 'What are you looking for?',
+        recallSearch: 'Search',
+        recallClear: 'Clear',
+        recallEmpty: 'Nothing searched yet. Type a few keywords.',
+        recallNoResult: 'No hits. Try another wording, or loosen the source and date filters.',
+        recallUnit: 'hits',
+        recallAll: 'All sources',
+        recallSince: 'Since',
+        recallExpandSoon: 'Graph expansion lands in 2.0.0-alpha.3',
+        recallIndex: 'Index status',
+        recallIndexTotal: 'entries',
+        recallBuilt: 'built',
+        recallRebuild: 'Rebuild index',
+        recallRebuilt: 'Index rebuilt',
+        recallSrcJournal: 'journal',
+        recallSrcLog: 'memory',
+        recallSrcKnowledge: 'knowledge',
+        recallOpen: 'Open',
+        recallClose: 'Close',
+        recallScore: 'score',
       },
     }
 
@@ -448,6 +492,8 @@ window.__ModuleLoader__.load({
 .am-label{font-size:11px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
 .am-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .am-list{display:flex;flex-direction:column;gap:6px}
+.am-recall-hit{display:flex;flex-direction:column;gap:6px}
+.am-recall-detail{white-space:pre-wrap;padding:10px 12px;border-radius:10px;border:1px dashed var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent);font-size:12.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);max-height:320px;overflow:auto}
 .am-item{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 45%,transparent);color:inherit;font:inherit;cursor:pointer}
 .am-item:hover{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 40%,var(--dsw-alias-border-l1))}
 .am-item-title{font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -662,6 +708,14 @@ window.__ModuleLoader__.load({
       const [sessionsInfo, setSessionsInfo] = useState({ sessions: [], workspaces: [] })
       const [sessionsWorkspace, setSessionsWorkspace] = useState('')
       const [sessionsVersion, setSessionsVersion] = useState(0)
+      // Recall tab: results are index-only, so they never touch the prompt.
+      const [recallData, setRecallData] = useState(null)
+      const [recallQuery, setRecallQuery] = useState('')
+      const [recallSource, setRecallSource] = useState('')
+      const [recallSince, setRecallSince] = useState('')
+      const [recallDetail, setRecallDetail] = useState(null)
+      const [indexData, setIndexData] = useState(null)
+      const [indexVersion, setIndexVersion] = useState(0)
       const draftKey = useRef('')
       const alive = useRef(true)
 
@@ -909,6 +963,25 @@ window.__ModuleLoader__.load({
       }, [vault?.id, tab, sessionsVersion])
 
       useEffect(() => {
+        if (tab !== 'recall') return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'memory.index', args: {} }),
+        })
+          .then(payload => {
+            if (live) setIndexData(payload.value ?? null)
+          })
+          .catch(error => {
+            if (live) setFailure(String(error?.message ?? error))
+          })
+        return () => {
+          live = false
+        }
+      }, [tab, indexVersion])
+
+      useEffect(() => {
         if (data) setDirDraft(data.knowledgeDirConfigured ?? '')
       }, [data?.knowledgeDirConfigured])
 
@@ -1107,6 +1180,40 @@ window.__ModuleLoader__.load({
       const toggleInherit = async checked => {
         if (!vault) return
         await call('vault.activate', { id: checked ? vault.id : '' })
+      }
+
+      const runRecall = async () => {
+        if (!vault) return
+        const text = recallQuery.trim()
+        if (text === '') {
+          setRecallData(null)
+          setRecallDetail(null)
+          return
+        }
+        const found = await call('memory.recall', {
+          id: vault.id,
+          query: text,
+          limit: 25,
+          source: recallSource === '' ? undefined : recallSource,
+          since: recallSince === '' ? undefined : recallSince,
+        })
+        setRecallData(found ?? null)
+        setRecallDetail(null)
+      }
+
+      const openRecallHit = async hit => {
+        if (!vault) return
+        if (recallDetail !== null && recallDetail.id === hit.id && recallDetail.src === hit.src) {
+          setRecallDetail(null)
+          return
+        }
+        const opened = await call('memory.open', { id: vault.id, src: hit.src, entry: hit.id })
+        setRecallDetail(opened?.entry ?? null)
+      }
+
+      const rebuildIndex = async () => {
+        const rebuilt = await call('memory.reindex', {})
+        if (rebuilt !== undefined) setIndexVersion(current => current + 1)
       }
 
       const search = async () => {
@@ -1788,6 +1895,150 @@ window.__ModuleLoader__.load({
                 }),
               ),
         )
+      } else if (tab === 'recall') {
+        const sourceLabel = src => t(`recallSrc${src.charAt(0).toUpperCase()}${src.slice(1)}`)
+        body = h(
+          'div',
+          { className: 'am-split' },
+          h(
+            'div',
+            { className: 'am-row' },
+            h('span', { className: 'am-label' }, t('recall')),
+            h('span', { className: 'am-badge' }, '2.0 alpha'),
+            h('span', { style: { flex: 1 } }),
+            h(
+              'button',
+              { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => void rebuildIndex() },
+              t('recallRebuild'),
+            ),
+          ),
+          h('p', { className: 'am-note' }, t('recallHint')),
+          h(
+            'div',
+            { className: 'am-row' },
+            h('input', {
+              className: 'am-input',
+              style: { flex: 1, minWidth: 200 },
+              value: recallQuery,
+              placeholder: t('recallPlaceholder'),
+              onChange: event => setRecallQuery(event.target.value),
+              onKeyDown: event => {
+                if (event.key === 'Enter') void runRecall()
+              },
+            }),
+            h(
+              'button',
+              {
+                className: 'am-btn am-btn-sm am-btn-primary',
+                disabled: busy !== '' || recallQuery.trim() === '',
+                onClick: () => void runRecall(),
+              },
+              t('recallSearch'),
+            ),
+            recallData === null
+              ? null
+              : h(
+                  'button',
+                  {
+                    className: 'am-btn am-btn-sm am-btn-ghost',
+                    onClick: () => {
+                      setRecallQuery('')
+                      setRecallData(null)
+                      setRecallDetail(null)
+                    },
+                  },
+                  t('recallClear'),
+                ),
+          ),
+          h(
+            'div',
+            { className: 'am-row' },
+            h(
+              'select',
+              {
+                className: 'am-input',
+                style: { width: 150 },
+                value: recallSource,
+                onChange: event => setRecallSource(event.target.value),
+              },
+              h('option', { value: '' }, t('recallAll')),
+              h('option', { value: 'journal' }, t('recallSrcJournal')),
+              h('option', { value: 'log' }, t('recallSrcLog')),
+              h('option', { value: 'knowledge' }, t('recallSrcKnowledge')),
+            ),
+            h('input', {
+              className: 'am-input',
+              style: { width: 170 },
+              type: 'date',
+              value: recallSince,
+              onChange: event => setRecallSince(event.target.value),
+            }),
+            h('span', { className: 'am-note-dim' }, t('recallSince')),
+            h('span', { style: { flex: 1 } }),
+            recallData === null
+              ? null
+              : h('span', { className: 'am-note-dim' }, `${recallData.total} ${t('recallUnit')}`),
+          ),
+          indexData === null
+            ? null
+            : h(
+                'div',
+                { className: 'am-card' },
+                h(
+                  'div',
+                  { className: 'am-row' },
+                  h('span', { className: 'am-label' }, t('recallIndex')),
+                  h(
+                    'span',
+                    { className: 'am-note-dim' },
+                    indexData.builtAt === '' ? '—' : `${t('recallBuilt')} ${ago(indexData.builtAt, locale)}`,
+                  ),
+                  h('span', { style: { flex: 1 } }),
+                  h('span', { className: 'am-note-dim' }, `${indexData.total ?? 0} ${t('recallIndexTotal')}`),
+                ),
+                h(
+                  'div',
+                  { className: 'am-note-dim' },
+                  Object.entries(indexData.sources ?? {})
+                    .map(([key, count]) => `${key} ${count}`)
+                    .join(' · ') || t('recallEmpty'),
+                ),
+              ),
+          recallData === null
+            ? h('p', { className: 'am-note-dim' }, t('recallEmpty'))
+            : recallData.results.length === 0
+              ? h('p', { className: 'am-note-dim' }, t('recallNoResult'))
+              : h(
+                  'div',
+                  { className: 'am-list' },
+                  recallData.results.map(hit =>
+                    h(
+                      'div',
+                      { key: `${hit.src}:${hit.id}`, className: 'am-recall-hit' },
+                      h(
+                        'button',
+                        { className: 'am-item', onClick: () => void openRecallHit(hit) },
+                        h(
+                          'span',
+                          { className: 'am-item-title' },
+                          hit.title || hit.id,
+                          h('span', { className: 'am-tag' }, sourceLabel(hit.src)),
+                        ),
+                        h('span', { className: 'am-item-snippet' }, hit.preview || '—'),
+                        h(
+                          'span',
+                          { className: 'am-item-meta' },
+                          `${ago(hit.at, locale)} · ${t('recallScore')} ${hit.score}`,
+                        ),
+                      ),
+                      recallDetail !== null && recallDetail.id === hit.id && recallDetail.src === hit.src
+                        ? h('div', { className: 'am-recall-detail' }, recallDetail.text || '—')
+                        : null,
+                    ),
+                  ),
+                ),
+          h('p', { className: 'am-note-dim' }, t('recallExpandSoon')),
+        )
       } else if (tab === 'knowledge') {
         body = editor
           ? h(
@@ -2003,7 +2254,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'nav',
                 { className: 'am-tabs' },
-                ['memory', 'sessions', 'knowledge', 'journal', 'handoff', 'settings']
+                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'handoff', 'settings']
                   .filter(key => key !== 'sessions' || data?.capabilities?.sessions === true)
                   .map(key =>
                   h(

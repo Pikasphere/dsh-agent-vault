@@ -124,6 +124,16 @@ assert.ok(recall.search({ id: agent.id, query: 'obsolete' }).total > 0)
 journals.remove({ id: agent.id, entry: doomed.id })
 assert.equal(recall.search({ id: agent.id, query: 'obsolete' }).total, 0, 'removal is visible immediately')
 
+// ── open: the full record behind a hit (panel expand view) ──────────────────
+const openedKnowledge = recall.open({ id: agent.id, src: 'knowledge', entry: knowledgeOnly.results[0].id })
+assert.equal(openedKnowledge.src, 'knowledge')
+assert.equal(openedKnowledge.text.includes('right-click'), true)
+assert.equal(openedKnowledge.title, 'Sidebar context menu')
+const openedLog = recall.open({ id: agent.id, src: 'log', entry: hits.results.find(item => item.src === 'log').id })
+assert.ok(openedLog.text.length > 0)
+assert.equal(recall.open({ id: agent.id, src: 'log', entry: 'm-999' }), null, 'unknown id returns null')
+assert.equal(recall.open({ id: agent.id, src: 'nope', entry: 'x' }), null, 'unknown source returns null')
+
 // ── index state ─────────────────────────────────────────────────────────────
 const built = recall.reindex()
 assert.ok(built.total >= 3)

@@ -179,6 +179,21 @@ export function createRecall(options = {}) {
     }
   }
 
+  /**
+   * One full record behind a search hit, for the panel's expand view. The id is
+   * only unique inside its own source (the log uses positional ids), so `src`
+   * is required alongside it.
+   */
+  function open(input = {}) {
+    const agentId = String(input.id ?? '')
+    const src = SOURCES.includes(input.src) ? input.src : ''
+    const entry = String(input.entry ?? '')
+    if (src === '' || entry === '') return null
+    const found = collect(agentId, src).find(item => item.id === entry)
+    if (found === undefined) return null
+    return { id: found.id, src: found.src, at: found.at, title: found.title, text: found.text, tags: found.tags }
+  }
+
   function writeState(state) {
     fs.mkdirSync(indexDir, { recursive: true })
     const temp = `${statePath}.${process.pid}.tmp`
@@ -226,5 +241,5 @@ export function createRecall(options = {}) {
     }
   }
 
-  return { search, reindex, state, SOURCES }
+  return { search, open, reindex, state, SOURCES }
 }
