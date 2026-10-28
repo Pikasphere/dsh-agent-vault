@@ -671,6 +671,8 @@ export function createStore(options = {}) {
     readKnowledge,
     saveKnowledge,
     deleteKnowledge,
+    /** Raw parsed entries, for the recall index; the tools use the views above. */
+    allKnowledge: entries,
     resolveVault,
     bindingOf,
     setBinding,

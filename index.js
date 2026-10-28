@@ -2,8 +2,9 @@
  * Agent memory and knowledge — Host half.
  *
  * Contributes three things:
- *   1. four model tools: save a short memory, and search / read / write the
- *      detailed knowledge base (the agent decides those reads on its own);
+ *   1. six model tools: save a short memory; search / read / write the detailed
+ *      knowledge base; recall over the journal layer; and the discussion rooms
+ *      plus the private journal (the agent decides those reads on its own);
  *   2. one prompt section that tells every agent the knowledge base exists and
  *      carries the *user-selected* memory into the session;
  *   3. one same-origin JSON surface (`/api/agent-memory`) for the manager page,
@@ -25,6 +26,7 @@ import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
+import { createRecall } from './recall.js'
 
 const API_BASE = '/api/agent-memory'
 const MAX_BODY_BYTES = 1024 * 1024
@@ -42,15 +44,16 @@ export function apply(ctx, config = {}) {
 
   const rooms = createRooms({ rootDir: store.root })
   const journals = createJournals({ rootDir: store.root })
+  const recall = createRecall({ rootDir: store.root, store, journals })
   const handoff = createHandoff({ rootDir: store.root })
   const archives = createArchives({ rootDir: store.root })
   const hints = new Map()
 
   try {
     registerPrompt(ctx, store)
-    registerTools(ctx, store, rooms, journals)
+    registerTools(ctx, store, rooms, journals, recall)
     registerHandoff(ctx, store, journals, handoff, archives, hints)
-    registerApi(ctx, store, rooms, journals, handoff, archives, hints)
+    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -199,7 +202,7 @@ function vaultOf(store, args, exec) {
   return store.resolveVault({ id: args?.id ?? args?.vault, sessionId: exec?.agent?.id })
 }
 
-function registerTools(ctx, store, rooms, journals) {
+function registerTools(ctx, store, rooms, journals, recall) {
   ctx.inject(['tools'], scoped => {
     const register = (definition, label) => scoped.effect(() => scoped.tools.register(definition), label)
     const limit = store.memoryLimit
@@ -325,6 +328,52 @@ function registerTools(ctx, store, rooms, journals) {
         }),
       },
       'agent-memory: knowledge write tool',
+    )
+
+    register(
+      {
+        name: 'agent_recall',
+        description:
+          'Search this conversation\'s agent material by keyword: its own journal notes, its memory audit log, and the shared knowledge base. ' +
+          'Use it when the short memory or a knowledge search did not turn up something you remember writing down. ' +
+          'Checkpoints are never returned: they are authoritative state injected whole, not recallable material.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Keywords. An empty query lists the most recent entries.' },
+            limit: { type: 'number', description: 'Maximum results (1-25, default 8).' },
+            source: {
+              type: 'string',
+              enum: ['journal', 'log', 'knowledge'],
+              description: 'Restrict to one source: own journal, own memory log, shared knowledge.',
+            },
+            since: { type: 'string', description: 'ISO date; only entries dated on or after it.' },
+            expand: {
+              type: 'number',
+              description: '1 asks for graph expansion, which ships in 2.0.0-alpha.3; today every result is lexical.',
+            },
+          },
+        },
+        output: textOutput({ type: 'object', properties: { results: { type: 'array', items: { type: 'object' } } } }, () => 'recall'),
+        execute: guard(async (args, exec) => {
+          const bound = exec?.agent?.id ? store.bindingOf(exec.agent.id) : ''
+          if (bound === '') {
+            throw new MemoryError('no-agent', 'this conversation has no agent bound; bind one in the New Session row first')
+          }
+          return {
+            ok: true,
+            ...recall.search({
+              id: bound,
+              query: args?.query,
+              limit: args?.limit,
+              source: args?.source,
+              since: args?.since,
+              expand: args?.expand,
+            }),
+          }
+        }),
+      },
+      'agent-memory: recall tool',
     )
 
     registerRoomTools(register, store, rooms)
@@ -1034,7 +1083,7 @@ function rejectionFor(ctx, req) {
   return structuralRejection(req)
 }
 
-async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args) {
+async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, op, args) {
   switch (op) {
     case 'state':
       return store.state()
@@ -1053,6 +1102,21 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
       return store.listBindings()
     case 'memory.save':
       return store.writeMemory({ id: args.id, content: args.content, note: 'panel' })
+    case 'memory.recall': {
+      const vault = store.resolveVault({ id: args.id })
+      return recall.search({
+        id: vault.id,
+        query: args.query,
+        limit: args.limit,
+        source: args.source,
+        since: args.since,
+        expand: args.expand,
+      })
+    }
+    case 'memory.reindex':
+      return recall.reindex()
+    case 'memory.index':
+      return recall.state()
     case 'knowledge.list':
       return store.listKnowledge({ id: args.id })
     case 'knowledge.search':
@@ -1193,7 +1257,7 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, op, args
   }
 }
 
-function registerApi(ctx, store, rooms, journals, handoff, archives, hints) {
+function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
@@ -1226,7 +1290,7 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints) {
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, op, args)
+          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, op, args)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })

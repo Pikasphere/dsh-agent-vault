@@ -1,6 +1,6 @@
 # 记忆召回 v2：日志层检索 + 检查点隔离（设计草案）
 
-> 状态：**草案，未实现**。目标版本 `2.0.0-alpha.1`（alpha 阶段允许破坏性调整；beta 起冻结返回契约）。
+> 状态：**M1 已实现**（`2.0.0-alpha.1`，2026-10-28）；M2/M2.5/M3 未开始。目标版本 `2.0.0-alpha.1`（alpha 阶段允许破坏性调整；beta 起冻结返回契约）。
 > 本文只描述设计与验收口径；落码前请先用 `cordis_inspect_query` 复核文中引用的 API 行号与 DSH 预览版行为。
 
 ## 1. 问题
@@ -96,17 +96,17 @@
 ### 5.2 索引游标
 
 ```json
-{ "version": 2, "builtAt": "2026-10-28T13:20:00.000Z",
-  "sources": { "journal": { "agent-6sbx": 40960 }, "memlog": { "agent-6sbx": 11264 } } }
+{ "version": 1, "builtAt": "2026-10-28T21:40:00.000Z", "total": 61,
+  "sources": { "journal:agent-6sbx": 3, "log:agent-6sbx": 0, "knowledge": 21 } }
 ```
 
-- append-only JSONL 用**字节偏移**做增量：只读 `offset..EOF`，解析新行入索引，再推进偏移。
+- M1 的实际实现是**按文件 `(size, mtimeMs)` 判脏**，变了就整份重建该源，未变直接复用。当前语料（37 条笔记 / 80KB）全量重建只要几毫秒，字节偏移只在语料上万条时才有意义，故推迟到 M2.5 再做（届时改法：`offset` 记住上次读到的字节，只解析新行）。
 - 文件被手工编辑（长度回退 / 内容哈希变化）→ 该源全量重建。
-- `memory.reindex` op 清空偏移并全量重建（面板按钮）。
+- `memory.reindex` op 清空缓存并全量重建，重写 `index/state.json`（面板按钮）。
 
 ### 5.3 迁移
 
-1. `migrate.js` 增加 v1→v2 步骤：扫描 `journal/*.jsonl`，把 `kind==="checkpoint"` 的行原样搬到 `checkpoints/<agentId>.jsonl`，再从源文件重写（去掉这些行）；条目 id / at 保持不变。
+1. **惰性拆分**（仓库没有独立的 `migrate.js`，旧知识库迁移也是 `store.js` 里惰性做的）：`journal.js` 的 `splitCheckpoints(agentId)` 在该智能体的日志第一次被读写时执行——若 `journal/<id>.jsonl` 里还有 `kind:"checkpoint"` 的行，就把它们原样追加到 `checkpoints/<id>.jsonl`，再重写笔记文件去掉这些行。幂等：拆分后笔记文件不再含检查点，探测成本是一次字符串 `includes`。条目 id / at 保持不变。
 2. 写 `index/state.json` 骨架；首次启动惰性建索引。
 3. 降级安全：旧版（1.3.x）读不到 `checkpoints/` 只会丢失"checkpoint 可见性"，不会写坏数据；README 注明"从 2.0 降到 1.3 前请先把 checkpoints 目录并回 journal"。
 
@@ -144,16 +144,29 @@ tokenize(text) →
 
 正文一律 `read` 取；单次最多 25 条，`preview` 硬截 160 字。
 
-### 6.4 评测集（`test-recall.mjs`）
+### 6.4 评测
 
-固定语料 + 断言：
+两层，各管一件事：
 
-- 中文：`query:"归档"` 命中"取消归档 / 强归档"条目；`query:"记忆"` 的 top-1 正确；
-- 英文/混排：`query:"handoff checkpoint"`；
-- 时间：同分时较新者靠前（构造两条同分条目）；
-- 隔离：`query:"checkpoint"` **永远不返回** `ns:"checkpoint"` 条目；
-- 空 query：返回最近 N 条（保持"空查询=最近"的既有约定）；
-- 性能：1000 条语料下 < 20ms（进程内）。
+**机制层 `test-recall.mjs`**（离线、可重复）：分词（CJK 二元组、标识符整体保留、停用词）、标题权重 > 正文重复、覆盖率平方、半衰期、同分时较新靠前、检查点不可召回、旧文件惰性拆分幂等、删除后缓存立刻失效、`source` / `since` / `limit` / `total` 语义、`index/state.json` 落盘。
+
+**真实语料基线 `eval/recall-baseline.mjs`**（对着真实私有日志跑，人肉标注）：
+
+```bash
+node eval/recall-baseline.mjs [--dir <memoryDir>] [--agent demo-agent]
+```
+
+2026-10-28 实测（`demo-agent` 的 28 条笔记，14 条标注查询，`source:"journal"`）：
+
+| 指标 | 值 |
+|---|---|
+| top-1 | **92.9%**（13/14） |
+| top-3 | **100%** |
+| MRR | **0.952** |
+
+唯一失手的是「为什么包名要改」——`j-mvhpevfwfj`（包名被占用）被两条同样提到"改名"的较新笔记（`j-mvqmhvvh9x` 等）挤到第 3。这是词汇检索的典型弱点：字面像但语义不对，正是 §6.5 图扩展要补的那类。
+
+**这就是 `expand:1` 上线前要超越的基线**；M2.5 验收时用同一组查询重跑，命中率不升就是没做成。
 
 ### 6.5 关联扩展（图，M2.5）
 
@@ -283,7 +296,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M1** `2.0.0-alpha.1` | `rank.js`、`agent_recall`（`expand:0` 可用）、`memory.reindex`、checkpoints 迁移、`index/state.json`、`test-recall.mjs`、README 数据布局 | 全量测试通过；**记录纯词汇 top-1 基线**；checkpoint 不可召回；缓存无回归 |
+| **M1** `2.0.0-alpha.1` ✅ | `rank.js`、`agent_recall`（`expand:0` 可用）、`memory.reindex`、checkpoints 迁移、`index/state.json`、`test-recall.mjs`、README 数据布局 | 全量测试通过；**top-1 基线 92.9%**（§6.4）；checkpoint 不可召回；缓存无回归 |
 | **M2** `2.0.0-alpha.2` | 面板「回忆」页签、索引状态卡片、handoff 提示节流 | 面板可用；`acp_cache` 命中率不降 |
 | **M2.5** `2.0.0-alpha.3` | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | §6.5 四条评测全过；扩展不引入缓存失效 |
 | **M3** `2.0.0-alpha.4`（可选） | 对话原文入索引（脱敏、按会话勾选、体积上限） | 密钥/令牌不入索引；单会话增量 < 1s |

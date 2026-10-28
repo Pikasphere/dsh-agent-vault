@@ -96,7 +96,9 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 <memoryDir>/rooms/<roomId>/room.json     讨论室元数据（名称、成员）
 <memoryDir>/rooms/<roomId>/messages.jsonl 讨论室发言（每行一条，带发言人）
-<memoryDir>/journal/<agentId>.jsonl      私有日志（每行一条，只有该智能体可读）
+<memoryDir>/journal/<agentId>.jsonl      私有日志·笔记（每行一条，只有该智能体可读）
+<memoryDir>/checkpoints/<agentId>.jsonl   私有日志·检查点（2.0 起从这里读；旧文件首次访问时自动拆分）
+<memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数）
 <memoryDir>/handoff.json                 接力配置（阈值、导出目录）
 <memoryDir>/handoff-state.json           每会话的接力阶段
 ```
@@ -113,8 +115,13 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 | `agent_knowledge_write` | 新增或按 `entry` 修订已有条目 |
 | `agent_room` | `action`: `list` / `read` / `say` / `join` / `leave`，参与讨论室 |
 | `agent_journal` | `action`: `list` / `search` / `read` / `write`，读写**自己的**私有日志 |
+| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库 |
 
-工具通过调用会话的绑定解析智能体；显式传 `id` 时优先。`agent_journal` 永远只作用于调用方的智能体，**不接受其他智能体 id**，这就是隔离的实现方式。
+工具通过调用会话的绑定解析智能体；显式传 `id` 时优先。`agent_journal` 与 `agent_recall` 永远只作用于调用方的智能体，**不接受其他智能体 id**，这就是隔离的实现方式。
+
+`agent_recall` 永远不返回检查点：检查点是权威状态（整段注入、旧的可能误导），只属于「读取」，不属于「检索」。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
+
+> **2.0.0-alpha**：召回层从 2.0 开始进入 alpha，破坏性只发生在检查点目录分离与 `index/` 新增上；旧数据首次访问会自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点。
 
 ## 接力（交棒检查点）
 

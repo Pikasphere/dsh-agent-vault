@@ -77,6 +77,7 @@ assert.deepEqual(names, [
   'agent_knowledge_search',
   'agent_knowledge_write',
   'agent_memory_save',
+  'agent_recall',
   'agent_room',
 ])
 for (const tool of registered.tools) {
@@ -175,6 +176,22 @@ assert.equal(searched.payload.value.entries.length, 1)
 const read = await call('POST', '/op', { op: 'knowledge.read', args: { id, entry } })
 assert.ok(read.payload.value.content.includes('目录遍历'))
 console.log('knowledge save/search/read ok')
+
+// recall over the same store: the memory audit log and the knowledge base
+const recalled = await call('POST', '/op', { op: 'memory.recall', args: { id, query: '存储层' } })
+assert.equal(recalled.status, 200)
+assert.ok(recalled.payload.value.total >= 1, JSON.stringify(recalled.payload))
+assert.ok(recalled.payload.value.results.some(item => item.src === 'log'))
+const knowledgeOnly = await call('POST', '/op', {
+  op: 'memory.recall',
+  args: { id, query: 'acl', source: 'knowledge' },
+})
+assert.ok(knowledgeOnly.payload.value.results.every(item => item.src === 'knowledge'))
+const rebuilt = await call('POST', '/op', { op: 'memory.reindex', args: {} })
+assert.ok(rebuilt.payload.value.total >= 2)
+const indexState = await call('POST', '/op', { op: 'memory.index', args: {} })
+assert.equal(indexState.payload.value.builtAt, rebuilt.payload.value.builtAt)
+console.log('recall + reindex ok')
 
 // the library is shared: a second agent sees the first agent's entry
 const second = await call('POST', '/op', { op: 'vault.create', args: { name: 'Second agent' } })
