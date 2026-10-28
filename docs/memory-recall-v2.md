@@ -8,7 +8,7 @@
 现在的记忆体系只有两条通道：
 
 - **4K 短记忆**（`store.js:26` `MEMORY_LIMIT = 4000`，覆盖式）——可靠，但容量封顶，写多了只能删；
-- **日志层**（journal / 记忆审计 `*.log.md` / 讨论室 / 知识库）——容量大，但只能被"主动翻"，模型往往想不起来去翻。
+- **日志层**（journal / 记忆审计 `*.log.md` / 知识库；讨论室是半成品，本版不接）——容量大，但只能被"主动翻"，模型往往想不起来去翻。
 
 用户反馈的核心不是"记不下"，而是**不写进 4000 字的内容，模型不够敏感**。把记忆做大只会稀释权威性；正确的做法是把"现状"与"回忆"分成两层：现状继续写死、始终注入；回忆按需检索、按需注入。
 
@@ -18,7 +18,7 @@
 
 | 编号 | 目标 |
 |---|---|
-| G1 | 日志层可检索：一条 query 在 journal、记忆审计、知识库、讨论室上统一召回 |
+| G1 | 日志层可检索：一条 query 在 journal、记忆审计、知识库上统一召回（讨论室是半成品，2.0 明确不接） |
 | G2 | 检查点**结构性隔离**：存储、索引、注入三处都不与日志混流 |
 | G3 | 缓存零伤害：检索结果只能作为工具返回值出现，不得进入 `systemPrompt.section` / `context` |
 | G4 | 索引是派生数据：删掉可全量重建，源文件（JSONL/MD）永远是唯一真相 |
@@ -64,7 +64,7 @@
 |---|---|---|---|---|
 | **L0 检查点** | 每 agent **最新一份** checkpoint 文本 | 是（权威段，固定位置） | ❌ | 仅在 handoff settle 时原子替换 |
 | **L1 短记忆** | `memory/<agentId>.md` | 是（`<agent_memory>` 段） | ❌ | 仅 `agent_memory_save` |
-| **L2 日志** | journal `note`、`*.log.md`、rooms、knowledge | 否（只有检索命中时以工具结果出现） | ✅ | 追加为主 |
+| **L2 日志** | journal `note`、`*.log.md`、knowledge | 否（只有检索命中时以工具结果出现） | ✅ | 追加为主 |
 | **L3 对话原文** | 会话压缩包 | 否 | ❌（2.1 可选） | 只追加 |
 
 规则只有一条：**L0/L1 是权威，L2/L3 是材料**。检索永远不能返回 L0/L1，否则过期快照会被当成现状。
@@ -79,7 +79,7 @@
 <memoryDir>/journal/<agentId>.jsonl      日志（只含 ns:"note"）
 <memoryDir>/checkpoints/<agentId>.jsonl  检查点（新增，从 journal 迁出）
 <memoryDir>/index/state.json             索引游标（新增）
-<memoryDir>/rooms/...                    讨论室（不变）
+<memoryDir>/rooms/...                    讨论室（半成品，不建索引、不参与召回）
 ```
 
 - 条目结构不变：`{ id, at, kind, title, text, meta? }`，新增可选 `ns: "note" | "checkpoint"`，缺省按 `kind` 推断。
@@ -128,7 +128,7 @@ tokenize(text) →
    `final = (Σhit) × (命中 token 数 / 总 token 数)^2`，覆盖率平方压住"只命中一个高频词"的噪声。
 2. **时间衰减**：`decay = 0.5 ** (ageDays / 30)`，30 天半衰期；可被 `pinned`（检查点永远不参与，但知识条目可 pin）。
 
-排序：`score = final × decay × boost`，`boost` 为同 agent 1.0 / 共享知识库 0.9 / 讨论室 0.7。
+排序：`score = final × decay × boost`，`boost` 为同 agent 1.0 / 共享知识库 0.9。
 
 ### 6.3 返回形态
 
@@ -159,7 +159,7 @@ tokenize(text) →
 | `query` | 必填；空串 = 最近 N 条 |
 | `limit` | 1–25，默认 8 |
 | `since` | ISO 日期，过滤下界 |
-| `source` | `journal` / `knowledge` / `rooms` / `memory-log` / 省略=全部 |
+| `source` | `journal` / `knowledge` / `memory-log` / 省略=全部。**2.0 不提供 `rooms`**：讨论室尚未完工（无调度、成员语义还在改），索引它等于把半成品固化进契约 |
 
 host op：`memory.recall`。返回 §6.3 结构。**不返回全文**，避免一次吃进太多 token。
 
@@ -217,7 +217,7 @@ host op：`memory.recall`。返回 §6.3 结构。**不返回全文**，避免�
 
 ## 12. 开放问题
 
-1. `agent_recall` 默认是否包含讨论室？共享内容可能"串味"到私有回忆里（我倾向默认包含、但 `boost` 降到 0.7 并在结果里标 `src`）。
+1. ~~`agent_recall` 默认是否包含讨论室？~~ **已定：不包含**。讨论室目前是半成品（不自动调度、成员语义未稳定），2.0 既不入索引也不开 `source`，等它完工后按 `src:"rooms"` 加回，`rank.js` 的 `boost` 表已为它留位（0.7）。
 2. 是否允许跨 agent 召回？倾向**否**（journal 的隔离语义不能破），管理员视图另做。
 3. 检查点历史是否需要面板可读（只读时间线）？倾向 M2 做只读列表，但**永不进 prompt**。
 4. `agent_journal list` 的 AND 语义改成 OR 后，是否影响既有调用方的预期？需要一次 CHANGELOG 明示。
