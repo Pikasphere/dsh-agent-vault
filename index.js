@@ -350,7 +350,8 @@ function registerTools(ctx, store, rooms, journals, recall) {
             since: { type: 'string', description: 'ISO date; only entries dated on or after it.' },
             expand: {
               type: 'number',
-              description: '1 asks for graph expansion, which ships in 2.0.0-alpha.3; today every result is lexical.',
+              description:
+                '1 (default) follows one graph hop from the lexical hits and folds in aliases from index/aliases.json; 0 gives the pure lexical ranking, for comparing against the baseline.',
             },
           },
         },

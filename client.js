@@ -217,7 +217,7 @@ window.__ModuleLoader__.load({
         recallUnit: '条命中',
         recallAll: '全部来源',
         recallSince: '起始日期',
-        recallExpandSoon: '图扩展在 2.0.0-alpha.3 提供',
+        recallExpandSoon: '带「关联·」徽标的结果是沿引用、共享实体或同一会话扩出来的一跳邻居；展开项里写着它关联自什么。',
         recallIndex: '索引状态',
         recallIndexTotal: '条目',
         recallBuilt: '构建于',
@@ -229,6 +229,11 @@ window.__ModuleLoader__.load({
         recallOpen: '展开全文',
         recallClose: '收起',
         recallScore: '得分',
+        recallViaAlias: '关联·别名',
+        recallViaRef: '关联·引用',
+        recallViaEntity: '关联·实体',
+        recallViaSession: '关联·会话',
+        recallWhy: '关联自',
       },
       en: {
         nav: 'Agents',
@@ -423,7 +428,7 @@ window.__ModuleLoader__.load({
         recallUnit: 'hits',
         recallAll: 'All sources',
         recallSince: 'Since',
-        recallExpandSoon: 'Graph expansion lands in 2.0.0-alpha.3',
+        recallExpandSoon: 'A "related·" badge marks a one-hop neighbour reached through a citation, a shared entity, or the same session; the expanded row says what it is related via.',
         recallIndex: 'Index status',
         recallIndexTotal: 'entries',
         recallBuilt: 'built',
@@ -435,6 +440,11 @@ window.__ModuleLoader__.load({
         recallOpen: 'Open',
         recallClose: 'Close',
         recallScore: 'score',
+        recallViaAlias: 'related·alias',
+        recallViaRef: 'related·citation',
+        recallViaEntity: 'related·entity',
+        recallViaSession: 'related·session',
+        recallWhy: 'related via',
       },
     }
 
@@ -1208,7 +1218,8 @@ window.__ModuleLoader__.load({
           return
         }
         const opened = await call('memory.open', { id: vault.id, src: hit.src, entry: hit.id })
-        setRecallDetail(opened?.entry ?? null)
+        const entry = opened?.entry ?? null
+        setRecallDetail(entry === null ? null : { ...entry, via: hit.via, why: hit.why ?? null })
       }
 
       const rebuildIndex = async () => {
@@ -2023,6 +2034,13 @@ window.__ModuleLoader__.load({
                           { className: 'am-item-title' },
                           hit.title || hit.id,
                           h('span', { className: 'am-tag' }, sourceLabel(hit.src)),
+                          hit.via === 'lexical'
+                            ? null
+                            : h(
+                                'span',
+                                { className: 'am-tag' },
+                                t(`recallVia${hit.via.charAt(0).toUpperCase()}${hit.via.slice(1)}`),
+                              ),
                         ),
                         h('span', { className: 'am-item-snippet' }, hit.preview || '—'),
                         h(
@@ -2032,7 +2050,14 @@ window.__ModuleLoader__.load({
                         ),
                       ),
                       recallDetail !== null && recallDetail.id === hit.id && recallDetail.src === hit.src
-                        ? h('div', { className: 'am-recall-detail' }, recallDetail.text || '—')
+                        ? h(
+                            'div',
+                            { className: 'am-recall-detail' },
+                            recallDetail.why === null || recallDetail.why === undefined
+                              ? null
+                              : h('div', { className: 'am-note-dim' }, `${t('recallWhy')} ${recallDetail.why.hub} · ${recallDetail.why.edge} ${recallDetail.why.weight}`),
+                            recallDetail.text || '—',
+                          )
                         : null,
                     ),
                   ),

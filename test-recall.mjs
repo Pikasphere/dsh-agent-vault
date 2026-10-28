@@ -11,6 +11,7 @@ const { tokenize, scoreEntry, decay, rank } = await load('rank.js')
 const { createStore } = await load('store.js')
 const { createJournals } = await load('journal.js')
 const { createRecall } = await load('recall.js')
+const { extractEntities } = await load('graph.js')
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-memory-recall-'))
 const knowledgeDir = path.join(scratch, 'kb')
@@ -142,5 +143,64 @@ assert.equal(built.sources[`journal:${agent.id}`], 1)
 const state = recall.state()
 assert.equal(state.builtAt, built.builtAt)
 assert.ok(state.cached.length > 0)
+assert.equal(state.expand, 1, 'graph expansion is on by default')
+assert.equal(fs.existsSync(path.join(store.root, 'index', 'aliases.json')), true, 'reindex creates the alias map')
+
+// ── graph expansion (§6.5) ──────────────────────────────────────────────────
+// Entity extraction is by shape, and generic shapes are dropped so the graph
+// does not fuse into one blob.
+assert.equal(extractEntities('json node windows true').size, 0, 'generic words are not entities')
+const shapes = extractEntities('see E:\\Projects\\dsh-agent-vault\\index.js and j-ab12, agent-6sbx')
+assert.equal(shapes.has('e:/projects/dsh-agent-vault/index.js'), true, 'windows path is an entity')
+assert.equal(shapes.has('j-ab12'), true, 'journal id is an entity')
+assert.equal(shapes.has('agent-6sbx'), true, 'agent id is an entity')
+
+// Entity bridge: the query only speaks A's language; B shares the repo name.
+const bridgeA = journals.write({ id: agent.id, title: 'widget memory', text: 'the widget writes dsh-agent-vault notes' })
+const bridgeB = journals.write({ id: agent.id, title: 'clone day', text: 'cloned dsh-agent-vault again' })
+const lexicalOnly = recall.search({ id: agent.id, query: 'widget', expand: 0 })
+assert.equal(lexicalOnly.expand, 0)
+assert.ok(lexicalOnly.results.every(item => item.via === 'lexical'))
+assert.equal(lexicalOnly.results.some(item => item.id === bridgeB.id), false, 'expand:0 stays lexical')
+const bridged = recall.search({ id: agent.id, query: 'widget' })
+assert.equal(bridged.expand, 1)
+const bridgeRow = bridged.results.find(item => item.id === bridgeB.id)
+assert.ok(bridgeRow, 'the shared repo name pulls the other note in')
+assert.equal(bridgeRow.via, 'entity')
+assert.equal(bridgeRow.why.hub, 'dsh-agent-vault')
+assert.ok(bridgeRow.score < bridged.results.find(item => item.id === bridgeA.id).score, 'a neighbour ranks under its seed')
+
+// Reference bridge: a knowledge entry cites a journal id.
+const cited = journals.write({ id: agent.id, title: 'cited target', text: 'the plugin manager path is the junction' })
+store.saveKnowledge({ id: agent.id, title: 'Install citation', content: `follow ${cited.id} before changing the path` })
+const refHit = recall.search({ id: agent.id, query: 'citation' })
+const refRow = refHit.results.find(item => item.id === cited.id)
+assert.ok(refRow, 'a cited note is pulled in')
+assert.equal(refRow.via, 'ref')
+assert.equal(refRow.why.hub, cited.id)
+
+// Alias: hand-written equivalence, the whole query is Chinese and matches nothing lexically.
+fs.writeFileSync(
+  path.join(store.root, 'index', 'aliases.json'),
+  JSON.stringify({ 小鲸鱼: ['dsh-whale-widget'] }),
+  'utf8',
+)
+const whale = journals.write({ id: agent.id, title: 'whale widget pet', text: 'dsh-whale-widget release 0.6.8 ships the pet' })
+journals.write({ id: agent.id, kind: 'checkpoint', title: 'checkpoint', text: 'dsh-whale-widget is authoritative state' })
+const aliasHit = recall.search({ id: agent.id, query: '小鲸鱼' })
+assert.equal(aliasHit.results[0]?.id, whale.id, 'the alias turns the target into a hit')
+assert.equal(aliasHit.results[0].via, 'alias')
+assert.equal(aliasHit.results[0].why.hub, '小鲸鱼')
+assert.equal(
+  aliasHit.results.some(item => item.title === 'checkpoint'),
+  false,
+  'a checkpoint never joins the graph',
+)
+
+// Expansion is capped and every extra carries a reason.
+for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit: 25 }).results) {
+  if (row.via === 'lexical') continue
+  assert.ok(Number.isFinite(row.why?.weight) && row.why.weight >= 0.35, 'edge weight is reported and above the floor')
+}
 
 console.log('ALL RECALL TESTS PASSED')

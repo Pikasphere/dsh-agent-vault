@@ -24,11 +24,27 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { rank, round, preview as makePreview } from './rank.js'
+import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEntities } from './graph.js'
 
 export const SOURCES = ['journal', 'log', 'knowledge']
 export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, room: 0.7, checkpoint: 0 }
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
+
+/** One tool/panel row; `why` only exists for expanded hits. */
+function resultOf(entry, score, via, why) {
+  const row = {
+    id: entry.id,
+    src: entry.src,
+    at: entry.at,
+    title: entry.title,
+    preview: makePreview(entry.text),
+    score: round(score),
+    via,
+  }
+  if (why !== undefined) row.why = why
+  return row
+}
 
 function statOf(file) {
   try {
@@ -46,6 +62,14 @@ export function createRecall(options = {}) {
   const indexDir = path.join(root, 'index')
   const statePath = path.join(indexDir, 'state.json')
   const cache = new Map()
+  const aliases = createAliases({ rootDir: root })
+
+  /** Entities are derived once per rebuild, never stored: graph edges cannot rot. */
+  function decorate(entry) {
+    const tags = Array.isArray(entry.tags) ? entry.tags : []
+    const text = `${entry.title ?? ''}\n${tags.join(' ')}\n${entry.text ?? ''}`
+    return { ...entry, entities: extractEntities(text) }
+  }
 
   const logFileOf = agentId => path.join(root, 'memory', `${agentId}.log.md`)
 
@@ -60,14 +84,17 @@ export function createRecall(options = {}) {
       return []
     }
     if (known !== undefined && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.entries
-    const entries = journals.notes(agentId).map(entry => ({
-      id: entry.id,
-      src: 'journal',
-      at: String(entry.at ?? ''),
-      title: String(entry.title ?? ''),
-      text: String(entry.text ?? ''),
-      tags: [],
-    }))
+    const entries = journals.notes(agentId).map(entry =>
+      decorate({
+        id: entry.id,
+        src: 'journal',
+        at: String(entry.at ?? ''),
+        title: String(entry.title ?? ''),
+        text: String(entry.text ?? ''),
+        tags: [],
+        sessionId: String(entry.meta?.sessionId ?? ''),
+      }),
+    )
     cache.set(key, { ...stat, entries })
     return entries
   }
@@ -111,7 +138,7 @@ export function createRecall(options = {}) {
     } catch {
       entries = []
     }
-    cache.set(key, { ...stat, entries })
+    cache.set(key, { ...stat, entries: entries.map(item => decorate({ sessionId: '', ...item })) })
     return entries
   }
 
@@ -124,14 +151,17 @@ export function createRecall(options = {}) {
       return []
     }
     if (known !== undefined && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.entries
-    const entries = store.allKnowledge().map(entry => ({
-      id: entry.id,
-      src: 'knowledge',
-      at: String(entry.updated ?? entry.created ?? ''),
-      title: String(entry.title ?? ''),
-      text: String(entry.body ?? ''),
-      tags: Array.isArray(entry.tags) ? entry.tags : [],
-    }))
+    const entries = store.allKnowledge().map(entry =>
+      decorate({
+        id: entry.id,
+        src: 'knowledge',
+        at: String(entry.updated ?? entry.created ?? ''),
+        title: String(entry.title ?? ''),
+        text: String(entry.body ?? ''),
+        tags: Array.isArray(entry.tags) ? entry.tags : [],
+        sessionId: '',
+      }),
+    )
     cache.set('knowledge', { ...stat, entries })
     return entries
   }
@@ -147,9 +177,10 @@ export function createRecall(options = {}) {
   /**
    * Search the calling agent's recallable material.
    *
-   * `expand` is accepted already and always behaves as `0` — the graph layer
-   * lands in 2.0.0-alpha.3 (docs/memory-recall-v2.md §6.5). Requesting it now
-   * is not an error, it simply returns the lexical result set with `via` set.
+   * `expand` defaults to 1: aliases from `index/aliases.json` are folded into
+   * the query and the lexical seeds get one graph hop (docs §6.5). Pass
+   * `expand: 0` for the pure lexical ranking — the baseline numbers in the
+   * design doc were measured that way.
    */
   function search(input = {}) {
     const agentId = String(input.id ?? '')
@@ -157,25 +188,58 @@ export function createRecall(options = {}) {
     const limit = clamp(Number(input.limit) || 8, 1, 25)
     const source = SOURCES.includes(input.source) ? input.source : ''
     const since = Number.isFinite(Date.parse(String(input.since ?? ''))) ? Date.parse(String(input.since)) : 0
+    const graph = !(input.expand === 0 || input.expand === '0' || input.expand === false)
     const entries = collect(agentId, source).filter(entry => {
       if (since === 0) return true
       const time = Date.parse(entry.at)
       return Number.isFinite(time) && time >= since
     })
-    const rows = rank(entries, query, { boost: src => DEFAULT_BOOST[src] ?? 1 })
+    const boost = src => DEFAULT_BOOST[src] ?? 1
+    const rows = rank(entries, query, { boost })
+    if (!graph) {
+      return {
+        query,
+        total: rows.length,
+        expand: 0,
+        results: rows.slice(0, limit).map(row => resultOf(row.entry, row.score, 'lexical')),
+      }
+    }
+
+    const byKey = new Map(entries.map(entry => [entryKey(entry), entry]))
+    const scores = new Map()
+    const reason = new Map()
+    for (const row of rows) {
+      const key = entryKey(row.entry)
+      scores.set(key, row.score)
+      reason.set(key, { via: 'lexical' })
+    }
+    // An alias is a hand-written equivalence: "vault 插件" means `dsh-agent-vault`.
+    // Entries it turns up enter as weaker seeds, and lexical hits it confirms
+    // get a nudge, mirroring §6.5's "seed weight ×1.2".
+    for (const alias of aliases.expandQuery(query)) {
+      for (const row of rank(entries, alias.target, { boost })) {
+        const key = entryKey(row.entry)
+        const known = scores.get(key)
+        if (known === undefined) {
+          scores.set(key, row.score * 0.5)
+          reason.set(key, { via: 'alias', why: { hub: alias.key, edge: 'alias', weight: 1.2 } })
+        } else if (reason.get(key).via === 'lexical') {
+          scores.set(key, known * 1.2)
+        }
+      }
+    }
+    const ranked = [...scores.entries()]
+      .map(([key, score]) => ({ entry: byKey.get(key), score, ...(reason.get(key) ?? { via: 'lexical' }) }))
+      .filter(row => row.entry !== undefined)
+      .sort((a, b) => b.score - a.score)
+    const seeds = ranked.slice(0, SEED_COUNT)
+    const extras = expandGraph(seeds, entries).filter(row => !scores.has(entryKey(row.entry)))
+    const final = [...ranked, ...extras].sort((a, b) => b.score - a.score)
     return {
       query,
-      total: rows.length,
-      expand: 0,
-      results: rows.slice(0, limit).map(row => ({
-        id: row.entry.id,
-        src: row.entry.src,
-        at: row.entry.at,
-        title: row.entry.title,
-        preview: makePreview(row.entry.text),
-        score: round(row.score),
-        via: 'lexical',
-      })),
+      total: final.length,
+      expand: 1,
+      results: final.slice(0, limit).map(row => resultOf(row.entry, row.score, row.via, row.why)),
     }
   }
 
@@ -224,7 +288,15 @@ export function createRecall(options = {}) {
     const knowledge = knowledgeEntries().length
     sources.knowledge = knowledge
     total += knowledge
-    const state = { version: 1, builtAt: new Date().toISOString(), total, sources }
+    aliases.ensure()
+    const state = {
+      version: 1,
+      builtAt: new Date().toISOString(),
+      total,
+      sources,
+      aliases: aliases.read().length,
+      expand: 1,
+    }
     writeState(state)
     return state
   }
@@ -234,6 +306,9 @@ export function createRecall(options = {}) {
     const cached = [...cache.entries()].map(([key, value]) => ({ key, entries: value.entries.length, size: value.size }))
     return {
       indexFile: statePath,
+      aliasFile: aliases.file,
+      expand: 1,
+      aliases: aliases.read().length,
       builtAt: persisted?.builtAt ?? '',
       total: persisted?.total ?? null,
       sources: persisted?.sources ?? {},

@@ -99,6 +99,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 <memoryDir>/journal/<agentId>.jsonl      私有日志·笔记（每行一条，只有该智能体可读）
 <memoryDir>/checkpoints/<agentId>.jsonl   私有日志·检查点（2.0 起从这里读；旧文件首次访问时自动拆分）
 <memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数）
+<memoryDir>/index/aliases.json           别名表（手写，{"别名": ["实体", …]}）
 <memoryDir>/handoff.json                 接力配置（阈值、导出目录）
 <memoryDir>/handoff-state.json           每会话的接力阶段
 ```
@@ -214,6 +215,28 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - 索引状态卡片显示条目总数、构建时间与各来源条数。「重建索引」走 `memory.reindex`，重建后卡片立即刷新。
 - 面板检索**只在索引里查**：不进 system prompt，不改缓存前缀，也不消耗额外 token。检查点不在索引里——它是权威状态，整段注入，永不被检索。
 - 同样的能力模型侧用 `agent_recall` 工具发起，两者命中同一套索引。
+
+### 关联扩展（2.0.0-alpha.3）
+
+词汇命中之后，再做**一跳**扩展：沿三类边把字面不像、但其实相关的条目补在结果尾部。
+
+- `ref`（权 0.9）：正文里写了另一条的 id（`j-xxxx`、知识库条目 id）；
+- `entity`（≤ 0.6）：共享至少一个实体，实体按形状自动抽取（路径、`agent-xxxx`、`j-xxxx`、文件名、带点的 op 名、带连字符的包/仓库名），并被文档频率衰减——被半数条目重复的「agent-memory」这类词连不出东西；
+- `session`（0.5）：同一 `sessionId` 的两条日志。
+
+扩展项在面板里带「关联·实体 / 关联·引用」徽标，展开可看「关联自 X」；模型侧用 `agent_recall` 时，扩展项带 `via` 与 `why: {hub, edge, weight}`。想关掉对照基线就传 `expand: 0`。
+
+别名表在手改的 `index/aliases.json`（`memory.reindex` 会建一个空的）：
+
+```json
+{ "vault 插件": ["dsh-agent-vault"], "小鲸鱼": ["dsh-whale-widget"] }
+```
+
+命中的条目以「关联·别名」出现——中文检索里加一行别名，比调边权划算得多。
+
+#### 实测口径
+
+真库 14 条人工标注查询：`expand:0` 与 `expand:1` 的 top-1 都是 92.9%、top-3 100%、MRR 0.952，单查询扩展不超过 2 条。同质语料上图扩展是「补尾不抢位」，收益要等字面完全不同、实体相同的样本出现才看得出来。
 
 ## 已知限制
 

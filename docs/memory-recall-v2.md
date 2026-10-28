@@ -166,7 +166,7 @@ node eval/recall-baseline.mjs [--dir <memoryDir>] [--agent demo-agent]
 
 唯一失手的是「为什么包名要改」——`j-mvhpevfwfj`（包名被占用）被两条同样提到"改名"的较新笔记（`j-mvqmhvvh9x` 等）挤到第 3。这是词汇检索的典型弱点：字面像但语义不对，正是 §6.5 图扩展要补的那类。
 
-**这就是 `expand:1` 上线前要超越的基线**；M2.5 验收时用同一组查询重跑，命中率不升就是没做成。
+**这就是 `expand:1` 上线前的基线**，M2.5 验收时用同一组查询重跑：`expand:1` 的 top-1 / top-3 / MRR 与 `expand:0` 完全一致（92.9% / 100% / 0.952），rank changes: none，14 条查询共扩出 18 条邻居、单查询最多 2 条。结论要诚实记下来：**在当前这个 28 条笔记的同质语料上，图扩展只是补尾，没有把失手的那条救回来**（那条的正确答案本来就排第 3，扩展是在词汇命中之后追加）。要看到图的收益，需要一类"字面完全不同、实体相同"的查询，而真库里暂时没有这种标注样本。
 
 ### 6.5 关联扩展（图，M2.5）
 
@@ -184,8 +184,10 @@ node eval/recall-baseline.mjs [--dir <memoryDir>] [--agent demo-agent]
 | 边型 | 判定 | 权重 |
 |---|---|---|
 | `ref` | 正文出现另一条目的 id（`j-[a-z0-9]{4,16}`、知识库 id） | 0.9 |
-| `entity` | 两条条目共享 ≥1 个实体 | 0.6 × min(1, 共享实体数 / 2) |
+| `entity` | 两条条目共享 ≥1 个实体 | `0.6 × min(1, 0.5 + 共享实体数/4) × 稀有度` |
 | `session` | 同一 `sessionId`（journal `meta.sessionId` / 记忆审计行） | 0.5 |
+
+`稀有度` = 该实体在库里的文档频率 `df ≤ 3` 时为 1，之后线性衰减、`df ≥ 7` 归零。**实测教训**：真库 28 条笔记全是同一个插件的记录，"agent-memory"这类词 df 有 6–13，按原始公式每条都能连上别人，扩展项把词汇命中挤掉了；加频率衰减后 14 条评测查询的扩展项从 33 条降到 18 条、单查询最多 2 条，top-1 不变。
 
 不建"同工作区"边：`E:\Projects` 这种粒度会把所有项目连成一个团。
 
@@ -193,15 +195,15 @@ node eval/recall-baseline.mjs [--dir <memoryDir>] [--agent demo-agent]
 
 ```
 [A-Za-z]:\\[^\s"'，。]+                                   Windows 路径
-/[A-Za-z0-9_.-]{4,}/                                      Unix 路径
+/(?:[A-Za-z0-9_.-]+/){2,}                                 Unix 路径（≥2 段）
 agent-[a-z0-9]{4}                                         智能体 id
 j-[a-z0-9]{4,16}                                          日志条目 id
 [\w-]+\.(js|mjs|md|json|yml|yaml|ts|py|exe|zst|svg)        文件名
 [a-z_]+(\.[a-z_]+)+                                        op / 工具名
-[a-z0-9][a-z0-9-]{5,}（必须含 `-`）                          包 / 仓库名
+[a-z0-9]+(-[a-z0-9]+)+                                    包 / 仓库名（连字符是硬条件）
 ```
 
-过滤：纯数字、单字母、长度 > 64、通用词表（`windows`、`node`、`json`、`true` 等）不入实体——否则整张图会被"json"这类词连成一片。
+过滤：纯数字、单字母、长度 > 64、通用词表（`windows`、`node`、`json`、`true`、`undefined` 等）不入实体——否则整张图会被"json"这类词连成一片。连字符是硬条件的原因同样来自实测：写成"长度 ≥ 6"时 `created`、`settled`、`handoff` 这些普通英文词全被当成实体，它们出现在十条笔记里，正是噪声的主要来源。
 
 #### 扩展算法
 
@@ -299,7 +301,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 |---|---|---|
 | **M1** `2.0.0-alpha.1` ✅ | `rank.js`、`agent_recall`（`expand:0` 可用）、`memory.reindex`、checkpoints 迁移、`index/state.json`、`test-recall.mjs`、README 数据布局 | 全量测试通过；**top-1 基线 92.9%**（§6.4）；checkpoint 不可召回；缓存无回归 |
 | **M2** `2.0.0-alpha.2` ✅ | 面板「回忆」页签、索引状态卡片、handoff 提示节流、`memory.open` 展开全文 | 面板可用；`acp_cache` 命中率不降 |
-| **M2.5** `2.0.0-alpha.3` | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | §6.5 四条评测全过；扩展不引入缓存失效 |
+| **M2.5** `2.0.0-alpha.3` ✅ | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | `test-recall.mjs` 五类断言全过；真库 14 条查询 expand:0 与 expand:1 的 top-1 都是 92.9%、单查询扩展 ≤ 2 条；扩展不引入缓存失效 |
 | **M3** `2.0.0-alpha.4`（可选） | 对话原文入索引（脱敏、按会话勾选、体积上限） | 密钥/令牌不入索引；单会话增量 < 1s |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
