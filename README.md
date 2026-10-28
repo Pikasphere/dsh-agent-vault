@@ -238,6 +238,19 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 真库 14 条人工标注查询：`expand:0` 与 `expand:1` 的 top-1 都是 92.9%、top-3 100%、MRR 0.952，单查询扩展不超过 2 条。同质语料上图扩展是「补尾不抢位」，收益要等字面完全不同、实体相同的样本出现才看得出来。
 
+### 对话入索引（2.0.0-alpha.4）
+
+前面三节检索的都是「智能体自己写下来的东西」。真正稀缺的信息常常只有原始对话里有，所以 `2.0.0-alpha.4` 把会话原文也接进来，来源标记为 `session`：
+
+- **只读本智能体相关的会话**：它接力（handoff）过的会话，或通过绑定声明归属它的会话。别人的会话一条都不碰，这是按契约而不是按目录猜的。
+- **只取 `user` 与 `assistant` 的文本**：工具返回值、推理过程、附件一律不入库，所以密码即使出现在工具输出里也进不来。
+- **打码**：`sk-` 开头的密钥、`Bearer <token>`、`api_key=…`、GitHub `ghp_`/`github_pat_` token 在入库前替换成占位符。
+- **体积上限**：每个会话最多 12000 字符（从头累加，超出的尾段丢弃），避免一次长会话挤爆索引；文件大小变化（会话仍是追加写）会让该会话重建。
+- **格式**：`~/.dsh/sessions/<workspace>/session-<uuid>/session*.jsonl.zstd` 是 zstd 帧格式，插件自带一个只用 `node:zlib` 的最小帧解析器（`zstd-frames.mjs`，约 70 行），不引入原生依赖。
+- **开关**：面板「设置」里的「对话入索引」；关掉后检索不再返回 `session` 来源的条目（索引缓存里已有的也不会被查询）。改动记录在 `settings.json`，彻底生效建议重启宿主。
+
+代价是每次重建索引要读一遍相关会话文件（真库首轮约 1–2 秒，之后只对文件大小变化的会话重建）。如果只想看笔记和知识库，把开关关掉即可。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。
@@ -253,9 +266,14 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - `index.js` — Host：工具、提示词段落、`/api/agent-memory` 路由
 - `client.js` — 浏览器：面板与新建对话选择器（手写 ModuleLoader bundle）
 - `store.js` — 存储层，不依赖 Cordis，可单独测试
+- `rank.js` — 词法打分与衰减（纯函数）
+- `graph.js` — 实体抽取与一跳关联扩展
 - `rooms.js` — 讨论室存储
 - `journal.js` — 私有日志存储
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
+- `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源
+- `transcripts.js` — 会话原文读取：归属判定、文本裁剪、密钥打码
+- `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
 设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，草案）。

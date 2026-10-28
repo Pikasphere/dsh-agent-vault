@@ -44,7 +44,14 @@ export function apply(ctx, config = {}) {
 
   const rooms = createRooms({ rootDir: store.root })
   const journals = createJournals({ rootDir: store.root })
-  const recall = createRecall({ rootDir: store.root, store, journals })
+  const recallSettings = store.settings()
+  const recall = createRecall({
+    rootDir: store.root,
+    store,
+    journals,
+    transcripts: recallSettings.transcripts,
+    sessionsRoot: recallSettings.sessionsRoot,
+  })
   const handoff = createHandoff({ rootDir: store.root })
   const archives = createArchives({ rootDir: store.root })
   const hints = new Map()
@@ -344,8 +351,9 @@ function registerTools(ctx, store, rooms, journals, recall) {
             limit: { type: 'number', description: 'Maximum results (1-25, default 8).' },
             source: {
               type: 'string',
-              enum: ['journal', 'log', 'knowledge'],
-              description: 'Restrict to one source: own journal, own memory log, shared knowledge.',
+              enum: ['journal', 'log', 'knowledge', 'session'],
+              description:
+                'Restrict to one source: own journal, own memory log, shared knowledge, conversation transcripts.',
             },
             since: { type: 'string', description: 'ISO date; only entries dated on or after it.' },
             expand: {

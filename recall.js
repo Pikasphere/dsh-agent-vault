@@ -4,7 +4,10 @@
  * Three sources feed one index:
  *   - `journal`   — the calling agent's own notes (`journal/<id>.jsonl`);
  *   - `log`       — that agent's memory audit trail (`memory/<id>.log.md`);
- *   - `knowledge` — the shared knowledge library.
+ *   - `knowledge` — the shared knowledge library;
+ *   - `session`   — conversation transcripts of the sessions this vault already
+ *                   knows (handoff checkpoints and current bindings), redacted
+ *                   and capped; tool results and reasoning never enter the index.
  *
  * Checkpoints are deliberately absent: they are authoritative state that is
  * injected whole into the prompt, and an old checkpoint surfaced next to the
@@ -25,9 +28,10 @@ import path from 'node:path'
 
 import { rank, round, preview as makePreview } from './rank.js'
 import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEntities } from './graph.js'
+import { createTranscripts } from './transcripts.js'
 
-export const SOURCES = ['journal', 'log', 'knowledge']
-export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, room: 0.7, checkpoint: 0 }
+export const SOURCES = ['journal', 'log', 'knowledge', 'session']
+export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9, room: 0.7, checkpoint: 0 }
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
 
@@ -42,6 +46,7 @@ function resultOf(entry, score, via, why) {
     score: round(score),
     via,
   }
+  if (typeof entry.sessionId === 'string' && entry.sessionId !== '') row.sessionId = entry.sessionId
   if (why !== undefined) row.why = why
   return row
 }
@@ -63,6 +68,12 @@ export function createRecall(options = {}) {
   const statePath = path.join(indexDir, 'state.json')
   const cache = new Map()
   const aliases = createAliases({ rootDir: root })
+  const transcripts =
+    options.transcripts === false
+      ? null
+      : typeof options.transcripts === 'object' && options.transcripts !== null
+        ? options.transcripts
+        : createTranscripts({ rootDir: root, store, sessionsRoot: options.sessionsRoot })
 
   /** Entities are derived once per rebuild, never stored: graph edges cannot rot. */
   function decorate(entry) {
@@ -166,11 +177,28 @@ export function createRecall(options = {}) {
     return entries
   }
 
+  /** Transcripts of the sessions this agent owns; `transcripts.js` has its own cache. */
+  function sessionEntries(agentId) {
+    if (transcripts === null) return []
+    return transcripts.entries(agentId).map(entry =>
+      decorate({
+        id: entry.id,
+        src: 'session',
+        at: entry.at,
+        title: entry.title,
+        text: entry.text,
+        tags: [],
+        sessionId: entry.sessionId,
+      }),
+    )
+  }
+
   function collect(agentId, source) {
     const entries = []
     if (source === '' || source === 'journal') entries.push(...journalEntries(agentId))
     if (source === '' || source === 'log') entries.push(...logEntries(agentId))
     if (source === '' || source === 'knowledge') entries.push(...knowledgeEntries())
+    if (source === '' || source === 'session') entries.push(...sessionEntries(agentId))
     return entries
   }
 
@@ -255,7 +283,9 @@ export function createRecall(options = {}) {
     if (src === '' || entry === '') return null
     const found = collect(agentId, src).find(item => item.id === entry)
     if (found === undefined) return null
-    return { id: found.id, src: found.src, at: found.at, title: found.title, text: found.text, tags: found.tags }
+    const entryOut = { id: found.id, src: found.src, at: found.at, title: found.title, text: found.text, tags: found.tags }
+    if (typeof found.sessionId === 'string' && found.sessionId !== '') entryOut.sessionId = found.sessionId
+    return entryOut
   }
 
   function writeState(state) {
@@ -288,6 +318,9 @@ export function createRecall(options = {}) {
     const knowledge = knowledgeEntries().length
     sources.knowledge = knowledge
     total += knowledge
+    const sessions = sessionEntries('')
+    sources.session = sessions.length
+    total += sessions.length
     aliases.ensure()
     const state = {
       version: 1,
@@ -296,6 +329,7 @@ export function createRecall(options = {}) {
       sources,
       aliases: aliases.read().length,
       expand: 1,
+      transcripts: transcripts !== null,
     }
     writeState(state)
     return state
@@ -309,6 +343,8 @@ export function createRecall(options = {}) {
       aliasFile: aliases.file,
       expand: 1,
       aliases: aliases.read().length,
+      transcripts: transcripts !== null,
+      sessionsRoot: transcripts?.root ?? '',
       builtAt: persisted?.builtAt ?? '',
       total: persisted?.total ?? null,
       sources: persisted?.sources ?? {},

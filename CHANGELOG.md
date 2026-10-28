@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.0.0-alpha.4 — 2026-10-28
+
+对话原文入索引（M3）。设计见 `docs/memory-recall-v2.md` §5.4。
+
+### 新增
+
+- **`transcripts.js`**：读取 `~/.dsh/sessions` 下**本智能体所属**的会话（它接力过的、或绑定声明归属它的），只抽 `user` / `assistant` 的文本，工具调用、工具结果与 `thinking` 一律丢弃；每会话累加到 12000 字符截断并附 `[truncated]`；入库前打码 `sk-` 密钥、`Bearer` token、`api_key=` / `token=` 赋值、`ghp_` / `github_pat_`。
+- **`zstd-frames.mjs`**：约 70 行、只用 `node:zlib` 的 zstd 帧解析（可跳过帧 + 标准帧 + 块头），把 `.jsonl.zstd` 解成文本，不引入原生依赖。
+- 召回新增来源 `session`：`agent_recall` 与面板都能按「对话」过滤，结果带「关联·会话」徽标；`memory.open` 对会话来源返回 `sessionId`，面板展开项出现「回到对话」按钮。
+- **设置开关「对话入索引」**（`settings.json` 的 `transcripts`）：默认开；关掉后检索不再返回对话来源。`sessionsRoot` 可覆盖扫描根目录（默认 `~/.dsh/sessions`）。
+- `test-transcripts.mjs`：打码、`thinking` 丢弃、归属隔离、字符上限、缓存复用、关开关后为空。
+
+### 说明
+
+- 归属判定只看 `journals` 的 `meta.sessionId`、`handoff` 配置与 `bindings`，不按目录结构猜，所以别的智能体的会话不会因为目录相邻而泄漏。
+- 对话内容只在**索引缓存**里存在，不落盘、不进任何日志文件；`memory.reindex` 会重建。
+- 首轮建索引要读一遍相关会话（真库约 1–2 秒），之后按 `(size, mtimeMs)` 只重建有变化的会话。
+- 打码是正则替换，不保证穷尽任何格式；处理敏感会话前请先关掉开关。
+
 ## 2.0.0-alpha.3 — 2026-10-28
 
 召回层的一跳关联（M2.5）。设计见 `docs/memory-recall-v2.md` §6.5。

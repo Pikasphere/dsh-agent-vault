@@ -30,7 +30,7 @@
 非目标（2.0 不做）：
 
 - 不替换 4K 短记忆，不改 `agent_memory_save` 语义；
-- 不索引对话原文（`~/.dsh/sessions`，2.1 再议）；
+- ~~不索引对话原文~~（M3 已做，见 §5.4；仍然只取 user/assistant 文本，工具输出与推理不入库）；
 - 不引入嵌入模型 / 向量库（见 §11 "为什么先不做 embedding"）；
 - 不改动现有 op 的返回契约（只新增字段）；
 - 不做图可视化画布（力导向图是独立工程，模型不读它；面板只加"关联"徽标）。
@@ -45,7 +45,7 @@
 | 记忆审计 | `<memoryDir>/memory/<agentId>.log.md` | 单文件最大 66KB（`demo-agent`） |
 | 私有日志 | `<memoryDir>/journal/<agentId>.jsonl` | 2 个 agent、37 条、80KB，其中 6 条 checkpoint |
 | 知识库 | `<knowledgeDir>/<entryId>.md` | 21 条 |
-| 对话原文 | `~/.dsh/sessions/.../session.v4.jsonl.zstd` | 110 个会话、52MB（本版不索引） |
+| 对话原文 | `~/.dsh/sessions/.../session.v4.jsonl.zstd` | 110 个会话、52MB；M3 起按归属索引 user/assistant 文本 |
 
 结论：**当前规模不需要任何数据库**。进程内全量索引（37 条）毫秒级完成。规模上到万级再换 FTS5。
 
@@ -109,6 +109,18 @@
 1. **惰性拆分**（仓库没有独立的 `migrate.js`，旧知识库迁移也是 `store.js` 里惰性做的）：`journal.js` 的 `splitCheckpoints(agentId)` 在该智能体的日志第一次被读写时执行——若 `journal/<id>.jsonl` 里还有 `kind:"checkpoint"` 的行，就把它们原样追加到 `checkpoints/<id>.jsonl`，再重写笔记文件去掉这些行。幂等：拆分后笔记文件不再含检查点，探测成本是一次字符串 `includes`。条目 id / at 保持不变。
 2. 写 `index/state.json` 骨架；首次启动惰性建索引。
 3. 降级安全：旧版（1.3.x）读不到 `checkpoints/` 只会丢失"checkpoint 可见性"，不会写坏数据；README 注明"从 2.0 降到 1.3 前请先把 checkpoints 目录并回 journal"。
+
+### 5.4 对话原文（M3）
+
+会话文件是 `~/.dsh/sessions/<workspaceDir>/session-<uuid>/session*.jsonl.zstd`——zstd 帧格式，帧边界可从帧头推出（`0x184D2A50` 可跳过帧 + 标准 magic + 块头），因此不需要原生模块：`zstd-frames.mjs` 用 `zlib.zstdDecompressSync` 逐帧解压再拼接，约 70 行。
+
+读取规则（`transcripts.js`）：
+
+- **归属**：只读 `journals`（本智能体日志的 `meta.sessionId`）、`handoff` 配置、`bindings` 里属于此智能体的会话；不认识的一律跳过。会话 → vault 的映射由「该 vault 是否有权读」决定，而不是由目录结构猜。
+- **取哪些行**：只取 `type` 为 user/assistant 且带文本的消息；`thinking`、工具调用与工具结果丢弃。
+- **裁剪**：从最早一条往后累加，到 `TRANSCRIPT_LIMIT = 12000` 字符截断，末尾附 `[truncated]`；单会话输出成一条 `{id:'session-<uuid>', src:'session', at, title, text}`。
+- **打码**：`sk-` 密钥、`Bearer <token>`、`api_key=`/`token=` 赋值、`ghp_`/`github_pat_` → `<redacted>`。只做正则替换，不保证穷尽，故仍把「对话入索引」做成显式开关。
+- **缓存**：以 `(size, mtimeMs)` 判脏；会话仍是追加写，所以几乎只有活跃会话会重建。
 
 ## 6. 检索层（`rank.js`）
 
@@ -302,7 +314,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M1** `2.0.0-alpha.1` ✅ | `rank.js`、`agent_recall`（`expand:0` 可用）、`memory.reindex`、checkpoints 迁移、`index/state.json`、`test-recall.mjs`、README 数据布局 | 全量测试通过；**top-1 基线 92.9%**（§6.4）；checkpoint 不可召回；缓存无回归 |
 | **M2** `2.0.0-alpha.2` ✅ | 面板「回忆」页签、索引状态卡片、handoff 提示节流、`memory.open` 展开全文 | 面板可用；`acp_cache` 命中率不降 |
 | **M2.5** `2.0.0-alpha.3` ✅ | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | `test-recall.mjs` 五类断言全过；真库 14 条查询 expand:0 与 expand:1 的 top-1 都是 92.9%、单查询扩展 ≤ 2 条；扩展不引入缓存失效 |
-| **M3** `2.0.0-alpha.4`（可选） | 对话原文入索引（脱敏、按会话勾选、体积上限） | 密钥/令牌不入索引；单会话增量 < 1s |
+| **M3** `2.0.0-alpha.4` ✅ | 对话原文入索引：`transcripts.js` + 自带 zstd 帧解析、只读本智能体归属的会话、仅 user/assistant、密钥打码、每会话 12000 字上限、设置开关 | `test-transcripts.mjs` 全过（打码、`thinking` 丢弃、归属隔离、上限、截断提示）；真库 6 个工作区可读；会话未变时缓存命中 |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 

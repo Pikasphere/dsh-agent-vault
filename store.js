@@ -188,6 +188,8 @@ export function createStore(options = {}) {
       knowledgeDir: typeof raw.knowledgeDir === 'string' ? raw.knowledgeDir : '',
       activeVault: typeof raw.activeVault === 'string' ? raw.activeVault : '',
       hideBoundSessions: raw.hideBoundSessions !== false,
+      transcripts: raw.transcripts !== false,
+      sessionsRoot: typeof raw.sessionsRoot === 'string' ? raw.sessionsRoot : '',
     }
   }
 
@@ -401,6 +403,8 @@ export function createStore(options = {}) {
       knowledgeCount: entries().length,
       activeVault: active === undefined ? '' : active.id,
       hideBoundSessions: current.hideBoundSessions,
+      transcripts: current.transcripts,
+      sessionsRoot: current.sessionsRoot,
       bindings: listBindings(),
       vaults: vaults,
     }
@@ -483,6 +487,8 @@ export function createStore(options = {}) {
     if (typeof patch.knowledgeDir === 'string') next.knowledgeDir = patch.knowledgeDir.trim()
     if (typeof patch.activeVault === 'string') next.activeVault = patch.activeVault
     if (typeof patch.hideBoundSessions === 'boolean') next.hideBoundSessions = patch.hideBoundSessions
+    if (typeof patch.transcripts === 'boolean') next.transcripts = patch.transcripts
+    if (typeof patch.sessionsRoot === 'string') next.sessionsRoot = patch.sessionsRoot.trim()
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {
       next.activeVault = ''
     }

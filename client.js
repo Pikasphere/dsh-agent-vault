@@ -226,6 +226,10 @@ window.__ModuleLoader__.load({
         recallSrcJournal: '日志',
         recallSrcLog: '记忆',
         recallSrcKnowledge: '知识库',
+        transcripts: '对话入索引',
+        transcriptsHint: '把本智能体交接过的会话（以及绑定到它的会话）里的用户与助手文本编进索引，供「回忆」检索；工具输出与推理过程不入库，密钥会被打码，每个会话最多 12000 字。改动需重启宿主才彻底生效。',
+        recallSrcSession: '对话',
+        recallGoSession: '回到对话',
         recallOpen: '展开全文',
         recallClose: '收起',
         recallScore: '得分',
@@ -437,6 +441,10 @@ window.__ModuleLoader__.load({
         recallSrcJournal: 'journal',
         recallSrcLog: 'memory',
         recallSrcKnowledge: 'knowledge',
+        transcripts: 'Index conversations',
+        transcriptsHint: 'Index the user and assistant text of sessions this agent handed off or is bound to, so recall can search them. Tool results and reasoning stay out, secrets are masked, and each session is capped at 12000 characters. Changes need a host restart to fully apply.',
+        recallSrcSession: 'conversation',
+        recallGoSession: 'Go to conversation',
         recallOpen: 'Open',
         recallClose: 'Close',
         recallScore: 'score',
@@ -1115,6 +1123,11 @@ window.__ModuleLoader__.load({
         await call('settings.save', { hideBoundSessions: checked })
       }
 
+      const saveTranscripts = async checked => {
+        await call('settings.save', { transcripts: checked })
+        setIndexVersion(current => current + 1)
+      }
+
       const unbindBoundSession = async sessionId => {
         await unbindSession(sessionId)
         setSessionsVersion(value => value + 1)
@@ -1219,7 +1232,15 @@ window.__ModuleLoader__.load({
         }
         const opened = await call('memory.open', { id: vault.id, src: hit.src, entry: hit.id })
         const entry = opened?.entry ?? null
-        setRecallDetail(entry === null ? null : { ...entry, via: hit.via, why: hit.why ?? null })
+        setRecallDetail(
+          entry === null ? null : { ...entry, sessionId: entry.sessionId ?? hit.sessionId ?? '', via: hit.via, why: hit.why ?? null },
+        )
+      }
+
+      const goToSession = async sessionId => {
+        const ui = sessionsUi()
+        if (ui === undefined || typeof ui.openSession !== 'function' || sessionId === '') return
+        await ui.openSession(sessionId)
       }
 
       const rebuildIndex = async () => {
@@ -1976,6 +1997,7 @@ window.__ModuleLoader__.load({
               h('option', { value: 'journal' }, t('recallSrcJournal')),
               h('option', { value: 'log' }, t('recallSrcLog')),
               h('option', { value: 'knowledge' }, t('recallSrcKnowledge')),
+              h('option', { value: 'session' }, t('recallSrcSession')),
             ),
             h('input', {
               className: 'am-input',
@@ -2056,6 +2078,16 @@ window.__ModuleLoader__.load({
                             recallDetail.why === null || recallDetail.why === undefined
                               ? null
                               : h('div', { className: 'am-note-dim' }, `${t('recallWhy')} ${recallDetail.why.hub} · ${recallDetail.why.edge} ${recallDetail.why.weight}`),
+                            recallDetail.sessionId
+                              ? h(
+                                  'button',
+                                  {
+                                    className: 'am-btn am-btn-sm am-btn-ghost',
+                                    onClick: () => void goToSession(recallDetail.sessionId),
+                                  },
+                                  t('recallGoSession'),
+                                )
+                              : null,
                             recallDetail.text || '—',
                           )
                         : null,
@@ -2229,6 +2261,14 @@ window.__ModuleLoader__.load({
               hint: t('hideBoundHint'),
               disabled: busy !== '',
               onChange: checked => void saveHideBound(checked),
+            }),
+            h('div', { style: { height: 12 } }),
+            h(Switch, {
+              checked: data.transcripts !== false,
+              label: t('transcripts'),
+              hint: t('transcriptsHint'),
+              disabled: busy !== '',
+              onChange: checked => void saveTranscripts(checked),
             }),
           ),
           h(
