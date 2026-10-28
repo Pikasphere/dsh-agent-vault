@@ -218,6 +218,8 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，草案）。
+
 测试（无需安装依赖）：
 
 ```bash
