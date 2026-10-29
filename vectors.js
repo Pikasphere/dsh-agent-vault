@@ -28,6 +28,14 @@ export function hashText(text) {
   return crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 16)
 }
 
+/**
+ * The whole note gets embedded, not just its head. Truncating looked better on
+ * semantic-only ranking (`eval/embed-variants.mjs`: title + 240 chars → MRR
+ * 0.438 vs 0.358 for the full text) but it also lifts similarity between
+ * *unrelated* notes: the off-topic probe's worst cosine rose above the 0.40
+ * floor, forcing the floor up to 0.45 and losing more than truncation gained
+ * (end-to-end paraphrase MRR 0.256 vs 0.286). Longer notes are more specific.
+ */
 function sourceText(entry) {
   return `${entry.title ?? ''}\n${entry.text ?? ''}`
 }

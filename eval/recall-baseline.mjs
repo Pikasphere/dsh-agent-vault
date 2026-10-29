@@ -34,23 +34,8 @@ const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: store.root })
 const recall = createRecall({ rootDir: store.root, store, journals })
 
-/** query → the entry that a human would call the right answer. */
-const CASES = [
-  ['弱归档打不开会话', 'j-mvhmznvxht'],
-  ['为什么包名要改', 'j-mvhpevfwfj'],
-  ['改名之后启动崩溃', 'j-mvi09989v2'],
-  ['自动切换的三个 bug', 'j-mvp2s6bs8i'],
-  ['preset 还是 standard', 'j-mvp1rnqbnc'],
-  ['续会话 自动绑定', 'j-mvgtec7g9w'],
-  ['模型继承实测', 'j-mvgu47yxa6'],
-  ['Qwen 文本编码器 Xet', 'j-mvqa3oslon'],
-  ['hf-mirror 续传 9B', 'j-mvqmackkpk'],
-  ['num_ctx 65536 凭据', 'j-mvqmnzkuyw'],
-  ['6144 窗口 8192', 'j-mvqmvhhf9x'],
-  ['mmproj 视觉', 'j-mvqqd0f3pt'],
-  ['侧栏 DOM 注入', 'j-mvgv0njbvu'],
-  ['工作区选中即切换', 'j-mvhmoxlset'],
-]
+/** Labels live in `eval/cases.mjs`: three scripts read the same list. */
+const { LEXICAL_CASES: CASES } = await load('eval/cases.mjs')
 
 async function measure(expand, limit = 5) {
   let top1 = 0

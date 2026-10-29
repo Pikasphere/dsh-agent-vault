@@ -83,6 +83,16 @@ function clampWeight(value, fallback) {
   return Math.min(Math.max(number, 0), 1)
 }
 
+/**
+ * RRF's k is a rank-offset, not a weight: it decides how quickly the reward
+ * decays with rank. Integer in [1, 200]; anything else falls back.
+ */
+function clampRrfK(value, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(Math.max(Math.round(number), 1), 200)
+}
+
 function snippet(body, length = 180) {
   const text = collapse(String(body ?? '').replace(/^---[\s\S]*?---/, ''))
   return text.length > length ? `${text.slice(0, length - 1)}…` : text
@@ -195,7 +205,8 @@ export function createStore(options = {}) {
       mode: recallRaw.mode === 'lexical' ? 'lexical' : 'hybrid',
       lexicalWeight: clampWeight(recallRaw.lexicalWeight, 0.6),
       semanticWeight: clampWeight(recallRaw.semanticWeight, 0.4),
-      minCosine: clampWeight(recallRaw.minCosine, 0.45),
+      minCosine: clampWeight(recallRaw.minCosine, 0.4),
+      rrfK: clampRrfK(recallRaw.rrfK, 20),
     }
     return {
       version: 1,
@@ -518,6 +529,7 @@ export function createStore(options = {}) {
       if (patch.recall.lexicalWeight !== undefined) merged.lexicalWeight = clampWeight(patch.recall.lexicalWeight, merged.lexicalWeight)
       if (patch.recall.semanticWeight !== undefined) merged.semanticWeight = clampWeight(patch.recall.semanticWeight, merged.semanticWeight)
       if (patch.recall.minCosine !== undefined) merged.minCosine = clampWeight(patch.recall.minCosine, merged.minCosine)
+      if (patch.recall.rrfK !== undefined) merged.rrfK = clampRrfK(patch.recall.rrfK, merged.rrfK)
       next.recall = merged
     }
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {

@@ -32,21 +32,12 @@ const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: store.root })
 const recall = createRecall({ rootDir: store.root, store, journals })
 
-/** query → the note a human would call the right answer; nothing is quoted verbatim. */
-const CASES = [
-  ['会话怎么被收起来', 'j-mvgva9bdbd'],
-  ['两个会话之间怎么接上', 'j-mvgqxcdas7'],
-  ['装大模型踩了什么坑', 'j-mvqmackkpk'],
-  ['改完名字就打不开', 'j-mvi09989v2'],
-  ['包名被别人占了', 'j-mvhpevfwfj'],
-  ['换了对话模型还认得吗', 'j-mvgu47yxa6'],
-  ['侧栏那块是自己画的吗', 'j-mvgv0njbvu'],
-  ['下载卡住不动', 'j-mvqa3oslon'],
-  ['上下文怎么这么短', 'j-mvqmvhhf9x'],
-  ['这个对话算谁的', 'j-mvgumrcv76'],
-  ['点开归档的对话是空白', 'j-mvhmznvxht'],
-  ['工作区一选就换过去了', 'j-mvhmoxlset'],
-]
+/**
+ * Labels live in `eval/cases.mjs`. Cases the keyword path already answers are
+ * excluded there (`DROPPED_CASES`), so this set is only the ones where
+ * semantics has a chance to matter.
+ */
+const { PARAPHRASE_CASES: CASES } = await load('eval/cases.mjs')
 
 async function measure(mode, limit = 5) {
   let top1 = 0

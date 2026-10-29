@@ -35,7 +35,14 @@ import { createVectors } from './vectors.js'
 export const SOURCES = ['journal', 'log', 'knowledge', 'session']
 export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9, room: 0.7, checkpoint: 0 }
 export const DEFAULT_MODEL = 'bge-small-zh-v1.5'
-export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45 }
+/**
+ * Defaults chosen by `eval/recall-grid.mjs` (2.0.0-alpha.11): weights 0.6/0.4
+ * is the argmax over 150 combinations; RRF's k makes no measurable difference
+ * (spread 0.010 MRR) so it stays 20; the cosine floor moved 0.45 → 0.40 because
+ * the off-topic probe peaks at 0.359, so 0.40 keeps a margin of 0.04 while
+ * admitting targets the 0.45 floor was throwing away.
+ */
+export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.4, rrfK: 20 }
 export const MODES = ['hybrid', 'lexical']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
@@ -114,7 +121,9 @@ export function createRecall(options = {}) {
     const merged = { ...RECALL_DEFAULTS, ...(typeof raw === 'object' && raw !== null ? raw : {}) }
     if (!MODES.includes(merged.mode)) merged.mode = RECALL_DEFAULTS.mode
     const minCosine = Number(merged.minCosine)
-    merged.minCosine = Number.isFinite(minCosine) ? minCosine : RECALL_DEFAULTS.minCosine
+    merged.minCosine = Number.isFinite(minCosine) ? Math.min(Math.max(minCosine, 0), 1) : RECALL_DEFAULTS.minCosine
+    const rrfK = Number(merged.rrfK)
+    merged.rrfK = Number.isFinite(rrfK) ? Math.min(Math.max(Math.round(rrfK), 1), 200) : RECALL_DEFAULTS.rrfK
     return merged
   }
 
@@ -371,6 +380,10 @@ export function createRecall(options = {}) {
       if (Number.isFinite(lexical) && lexical >= 0) settings.lexicalWeight = lexical
       if (Number.isFinite(semantic) && semantic >= 0) settings.semanticWeight = semantic
     }
+    if (input.rrfK !== undefined) {
+      const value = Number(input.rrfK)
+      if (Number.isFinite(value) && value >= 1) settings.rrfK = Math.min(Math.round(value), 200)
+    }
     const mode = MODES.includes(input.mode) ? input.mode : settings.mode
     const hybrid = mode === 'hybrid' && vectors !== null
     const tokens = tokenize(query)
@@ -430,7 +443,7 @@ export function createRecall(options = {}) {
      * `minCosine` still gates semantic-only rows: below it a document may be a
      * lexical hit but never enters on similarity alone.
      */
-    const RRF_K = 20
+    const RRF_K = settings.rrfK
     let fusedCache = null
     function fuse() {
       if (fusedCache !== null) return fusedCache

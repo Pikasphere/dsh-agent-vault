@@ -290,10 +290,10 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **模型本地、离线**：BGE-small-zh-v1.5 的 int8 ONNX（24 MB，512 维），走 `onnxruntime-node`（N-API，Electron ABI 稳定）。模型不进 npm 包，用 `node scripts/fetch-model.mjs` 下载（逐文件校验 size 与 sha256，按 hf-mirror → huggingface 顺序，可重跑续传）。分词是自写的 BERT WordPiece（`vocab.txt` 驱动），不引 `transformers.js`。
 - **只嵌日志层**：检查点与 4K 短记忆是权威状态、整段注入提示词，嵌了反而可能把陈旧版本当检索结果；对话原文太大且未脱敏，仍走词法。向量存 `index/vectors.bin`（float32、L2 归一化）+ `index/vectors.json`（`{key, src, at, hash}`），**按内容 hash 判脏**——日志是追加写，按 mtime 会每次保存都全量重嵌。
 - **融合用 RRF，不用加权和**：先按 `0.6×归一化词法 + 0.4×余弦` 实现，改写查询集只有 33.3%（vs 纯词法 25%）；原因是量纲——词法最大项恒被归一化成 1.0（占 0.6），余弦常年在 0.5–0.65（只占 0.2–0.26），任何有词法命中的条目都压住只靠语义的正确条目。改成倒数排名融合（`0.6/(20+lexRank) + 0.4/(20+semRank)`）后同一集合 top-1 41.7%。
-- **余弦下限 0.45**：低于它的条目没有语义名次（不按相似度硬塞进来）；语义命中带 `via:"semantic"`，面板显示「语义」徽标，且**不作为图扩展的种子**（共现边与语义空间是两套结构，混用噪声相乘）。
+- **余弦下限 0.40**：低于它的条目没有语义名次（不按相似度硬塞进来）；语义命中带 `via:"semantic"`，面板显示「语义」徽标，且**不作为图扩展的种子**（共现边与语义空间是两套结构，混用噪声相乘）。这个值是量出来的，不是拍的：见下面的「参数」一节。
 - **`mode` 参数**：`agent_recall` 与 `memory.recall` 都收 `mode: "hybrid" | "lexical"`，默认 `hybrid`；`lexical` 是回归开关，词法基线（14 条词面可对的查询）必须保持 top-1 92.9% / MRR 0.952。
 - **失败就退回词法**：模型缺失、ORT 加载失败、单次嵌入超时都只让这一次检索走词法，`memory.model {action:"status"}` 会报出原因；插件启动 4 秒后后台预热（`timer.unref()`），不阻塞启动。
-- **实测**：12 条与目标笔记没有字面重叠的改写查询，词法 top-1 25.0% / MRR 0.403（2 ms）→ hybrid 41.7% / 0.528（20 ms，预热后）。脚本是 `eval/recall-paraphrase.mjs`，逐条打印排名变化与语义独有命中，可复现。完整设计与取舍见 [docs/embedding-local.md](docs/embedding-local.md)。
+- **实测**：15 条与目标笔记没有字面重叠的改写查询，词法 top-1 0.0% / MRR 0.180（1 ms）→ hybrid 13.3% / 0.286（22 ms，预热后）；词法基线（14 条词面可对的查询）在 hybrid 下反而 100%（语义把唯一失手的那条翻到了第一）。脚本是 `eval/recall-paraphrase.mjs`，逐条打印排名变化与语义独有命中，可复现。完整设计与取舍见 [docs/embedding-local.md](docs/embedding-local.md)。
 
 
 
@@ -304,7 +304,20 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **状态**：模型是否就绪（模型名 + 维度）、已建向量的条数、构建时间；模型缺失或 ORT 加载失败时直接显示原因（`model-missing` 等），并给出下载命令。
 - **准备 / 同步向量**：一键走 `memory.model {action:"prepare"}`——加载模型（预热 150 ms）并按内容 hash 增量同步 `index/vectors.bin`。有新笔记后点「同步向量」即可，不用重建整个索引；模型不可用时按钮禁用。
 - **排序开关**：`混合` / `仅关键词` 两个互斥按钮，写进 `settings.json` 的 `recall.mode`（经 `recall.save`），重启后仍保留。`仅关键词` 是回归开关：命中结果与 alpha.7 一致，且完全不加载模型。
-- 排序模式对面板检索与模型侧 `agent_recall` 同时生效；单次调用仍可用 `mode` 参数覆盖。`settings.json` 里的 `recall.lexicalWeight` / `semanticWeight` / `minCosine` 也可手工调，面板只暴露最常用的那个开关。
+- 排序模式对面板检索与模型侧 `agent_recall` 同时生效；单次调用仍可用 `mode` 参数覆盖。`settings.json` 里的 `recall.lexicalWeight` / `semanticWeight` / `minCosine` / `rrfK` 也可手工调，面板只暴露最常用的那个开关。
+
+### 参数是量出来的（2.0.0-alpha.11）
+
+融合参数（0.6/0.4、RRF `k`、余弦下限）原本是手定的：只有一份查询集，没有可以扫的工具。alpha.11 把评测参数化：
+
+- **用例只有一个来源**：`eval/cases.mjs` 同时给三个脚本用。两个族分开——`lexical`（14 条，与目标笔记共享词汇）和 `paraphrase`（15 条，几乎无字面重叠）。只有一个脚本里存的用例才会漂移。
+- **改写用例先过体检**：`eval/check-cases.mjs` 打印每条查询在纯词法下的真实名次。词法已经排第一的用例量不出语义收益，移入 `DROPPED_CASES` 留档（这次剔掉 6 条，21 → 15）。
+- **网格 + 策略**：`eval/recall-grid.mjs` 扫 150 组（5 组权重 × 5 个 `k` × 6 个下限），并按写死的三条策略选值：权重取改写集 MRR 最大；`k` 的轴间差异小于 0.02 就不动（实测 0.011，保留 20）；余弦下限必须在**噪声探针**之上——6 条无关查询（「给我讲个笑话」）把下限设为 0 时最高余弦是 0.361，所以 0.40 起步，再在安全集合里取改写集最优。
+- **为什么不能只看 MRR 选下限**：网格里 0.35 的平均 MRR 更高（0.292 vs 0.261），但 0.35 < 0.361，等于在每条无关查询上都放垃圾进来。改写集里全是有答案的问题，看不见这个代价——所以要有噪声探针。
+- **顺带测了一个直觉并否掉了**：只嵌「标题 + 前 240 字」，纯语义排名更好（MRR 0.358 → 0.438），但对无关查询的余弦也一起抬高，下限被迫升到 0.45，端到端反而掉到 0.256。结论：整篇嵌，长笔记更具体（`vectors.js` 里留了注释）。
+- **同步的回归检查**：同一次网格里把词法族在 `mode:"lexical"` 下重跑一遍，断言 150 组里每种参数组合的排名完全一致——参数不许渗进词法路径。
+
+结论只有一句重要的：**参数已经调不动了**。权重改动最多 ±0.01 MRR，`k` 基本无感，下限从 0.45 到 0.40 换来 +0.008。真正卡住 top-1 的是检索质量本身——纯语义排名里 15 条改写只有 4 条能排第一（中位名次 6/25）。要继续往上走，得换更强的模型或做分块，不是继续拧参数。
 
 ## 已知限制
 
@@ -333,7 +346,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.10）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.10）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.11）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.11）。
 
 测试（无需安装依赖）：
 
@@ -356,9 +369,16 @@ node test-embed.mjs      # 语义层：WordPiece、降级、RRF 量纲、向量�
 评测（需要真实记忆目录；模型缺失时 hybrid 会降级为词法）：
 
 ```bash
-node eval/recall-baseline.mjs   # 14 条词面可对查询：expand 0/1 对照
-node eval/recall-paraphrase.mjs # 12 条改写查询：lexical vs hybrid
+node eval/dump-notes.mjs      # 列笔记 id + 标题，方便重新标注用例
+node eval/check-cases.mjs      # 用例体检：每条改写查询在纯词法下的真实名次
+node eval/recall-baseline.mjs  # 14 条词面可对查询：expand 0/1 对照
+node eval/recall-paraphrase.mjs # 15 条改写查询：lexical vs hybrid
+node eval/recall-grid.mjs      # 150 组参数网格 + 策略选值 + 噪声探针（约 90 s）
+node eval/semantic-rank.mjs   # 纯语义排名：融合前的检索质量（区分「参数不行」与「检索不行」）
+node eval/embed-variants.mjs   # 嵌入输入（整篇 / 前 240 字 / 仅标题）的对照实验
 ```
+
+用例本身在 `eval/cases.mjs`；`--dir` / `--agent` 可换记忆目录与智能体。
 
 ## 致谢
 
