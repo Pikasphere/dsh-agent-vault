@@ -99,7 +99,7 @@ memory.model {action:"prepare"}   → 预加载模型 + 增量建库
 - CLI 逐文件下载，镜像 hf-mirror.com → huggingface.co；**逐文件校验 size，全部文件校验 sha256**（6 个文件的 size/sha256 写死在脚本里，本次下载即按此校验）。
 - 续传：文件已存在且 size+sha256 正确就跳过，所以中断后重跑即可；`--force` 覆盖。
 - 模型不打进 npm 包（`files` 白名单不含 `models/`）。
-- 面板「下载模型 / 重建」按钮留到 alpha.9，复用同一份文件清单。
+- 面板的「准备 / 同步向量」按钮复用同一份文件清单与同一个 `memory.model` op（`2.0.0-alpha.10` 落地；模型不存在时按钮直接给出下载命令，不在界面里下载）。
 
 ### 6.2 建库 / 增量
 
@@ -137,10 +137,10 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 
 ### 6.5 面板
 
-「回忆」页签新增「语义索引」卡片（alpha.9）：
+「回忆」页签新增「语义索引」卡片（`2.0.0-alpha.10` 落地）：
 
-- 模型名 / 维度 / 已嵌条数 / 最近建库时间 / 是否降级及原因（数据已由 `memory.model {action:"status"}` 提供，alpha.8 只是还没有这张卡片）；
-- 「重建语义索引」按钮（进度条）；模型缺失时该按钮变「下载模型（24 MB）」。
+- 模型名 / 维度 / 已嵌条数 / 最近建库时间 / 是否降级及原因（数据由 `memory.model {action:"status"}` 提供）；
+- 「准备向量」/「同步向量」按钮走同一个 `memory.model {action:"prepare"}`；模型缺失时按钮禁用并显示 `node scripts/fetch-model.mjs`（下载放在 CLI，不在界面里做进度条——24 MB 的下载中断与校验逻辑已经写在脚本里，重造一遍没有收益）。
 
 搜索框旁出现 `mode` 切换（hybrid / lexical），用来看「这句话语义找到了什么」，也方便把一次可疑的召回退回纯词法复现。
 
@@ -173,7 +173,7 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 | 版本 | 内容 | 验收 |
 |---|---|---|
 | **alpha.8** ✅ | 模型加载（onnxruntime-node）+ WordPiece 分词 + 向量索引 + RRF 混合 + `mode` 参数 + 评测脚本 | 改写集 +16.7 pt top-1 / +0.125 MRR、55 ms；词法基线不动（2026-10-29 达成） |
-| **alpha.9** | 面板「语义索引」卡片 + 下载/重建按钮 + 增量与压缩 + 降级原因展示 | 模型目录临时改名后，检索仍返回词法结果且面板显示原因 |
+| **alpha.9** ✅ | 面板「语义索引」卡片 + 准备/同步按钮 + 增量与压缩 + 降级原因展示 | 模型目录临时改名后，检索仍返回词法结果且面板显示原因（2026-10-29 以 `2.0.0-alpha.10` 交付：alpha.9 的名额用在了检查点页签） |
 | **beta 前** | 决定知识库是否也嵌 | 用同一评测集测「日志 + 知识」是否再涨 |
 
 ## 9. 风险
@@ -195,4 +195,4 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 - [x] 语义命中带 `via:"semantic"`，面板显示「语义」徽标
 - [x] 查询延迟 55 ms（12 条改写查询均值，含嵌入）
 - [x] 全量测试（含新增 `test-embed.mjs`）通过，`npm pack` 不含 `models/`（`files` 白名单里本来就没有）
-- [ ] 文档：README 数据布局加 `models/`、`index/vectors.*`；CHANGELOG 写 alpha.8
+- [x] 文档：README 数据布局加 `models/`、`index/vectors.*`；CHANGELOG 写 alpha.8、alpha.10（卡片与排序开关）

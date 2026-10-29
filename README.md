@@ -275,6 +275,14 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **面板**：结果行下方多一行「命中消息 #12 · 助手 · …」；展开后显示该条消息全文，并给一个「复制该条」按钮（走 `memory.message`），方便拿去别处搜。
 - **不能自动滚动**：宿主的 `uiWorkspace.openSession` 只接受会话 id，没有消息锚点，所以「跳到第 N 条」做不到。能做到的是精确到消息 + 复制原文，「回到对话」仍然只回到会话。
 
+### 日志命中也能回到对话（2.0.0-alpha.7）
+
+记忆日志（`memory/<agentId>.log.md`）原来是纯文本审计，条目没有会话键，所以日志命中只能看不能跳。`2.0.0-alpha.7` 起：
+
+- **写入时带上会话**：`agent_memory_save` 在标题行末尾追加 `[session: session-…]`。面板手写的记忆写 `panel`，没有会话可记就不加——旧日志原样保留，不用迁移。
+- **解析时拆出来**：日志条目多一个 `sessionId`，`memory.open` 也会返回它，于是面板的「回到对话」对日志命中同样可用。
+- 标题不会因此变丑：后缀在解析时被剥掉，`title` 还是人写的那句话。
+
 ### 语义检索（2.0.0-alpha.8）
 
 词法检索的盲区是「换个说法就找不到」：笔记里写「自动弱归档」，查询说「会话怎么被收起来」，没有一个字重合。`2.0.0-alpha.8` 在**日志层**（journal + 记忆日志）上叠加本地语义向量：
@@ -297,15 +305,6 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **准备 / 同步向量**：一键走 `memory.model {action:"prepare"}`——加载模型（预热 150 ms）并按内容 hash 增量同步 `index/vectors.bin`。有新笔记后点「同步向量」即可，不用重建整个索引；模型不可用时按钮禁用。
 - **排序开关**：`混合` / `仅关键词` 两个互斥按钮，写进 `settings.json` 的 `recall.mode`（经 `recall.save`），重启后仍保留。`仅关键词` 是回归开关：命中结果与 alpha.7 一致，且完全不加载模型。
 - 排序模式对面板检索与模型侧 `agent_recall` 同时生效；单次调用仍可用 `mode` 参数覆盖。`settings.json` 里的 `recall.lexicalWeight` / `semanticWeight` / `minCosine` 也可手工调，面板只暴露最常用的那个开关。
-
-### 日志命中也能回到对话（2.0.0-alpha.7）
-
-记忆日志（`memory/<agentId>.log.md`）原来是纯文本审计，条目没有会话键，所以日志命中只能看不能跳。`2.0.0-alpha.7` 起：
-
-- **写入时带上会话**：`agent_memory_save` 在标题行末尾追加 `[session: session-…]`。面板手写的记忆写 `panel`，没有会话可记就不加——旧日志原样保留，不用迁移。
-- **解析时拆出来**：日志条目多一个 `sessionId`，`memory.open` 也会返回它，于是面板的「回到对话」对日志命中同样可用。
-- 标题不会因此变丑：后缀在解析时被剥掉，`title` 还是人写的那句话。
-
 
 ## 已知限制
 
