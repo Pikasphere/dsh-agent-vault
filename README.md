@@ -303,7 +303,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，草案）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，草案）、`docs/embedding-local.md`（本地语义索引，计划）。
 
 测试（无需安装依赖）：
 
