@@ -326,24 +326,38 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `rooms.js` — 讨论室存储
 - `journal.js` — 私有日志存储
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
-- `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源
+- `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源、语义融合
+- `embed.js` — 本地 BGE 推理：WordPiece 分词、ONNX 会话、查询指令前缀
+- `vectors.js` — 向量库：float32 落盘、按内容 hash 判脏、增量同步
 - `transcripts.js` — 会话原文读取：归属判定、切分消息、文本裁剪、密钥打码
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，草案）、`docs/embedding-local.md`（本地语义索引，计划）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.10）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.10）。
 
 测试（无需安装依赖）：
 
 ```bash
+npm test                 # 串跑下面全部，任一失败即中断
+
 node test-package.mjs    # 打包保护：import 链上的文件必须都在 package.json files 里
-node test-store.mjs      # 记忆与知识库文件层
+node test-store.mjs      # 记忆与知识库文件层（含 settings 归一化与夹取）
 node test-host.mjs       # 用 mock ctx 跑注册、工具与 HTTP 分发
 node test-migrate.mjs    # 旧「按智能体分目录」布局合并到共享库
 node test-binding.mjs    # 对话绑定与解析优先级
 node test-rooms.mjs      # 讨论室：成员、中途加入、发言顺序
-node test-journal.mjs    # 私有日志与跨智能体隔离
+node test-journal.mjs    # 私有日志、检查点分文件与跨智能体隔离
 node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本、启动指令与导出
+node test-recall.mjs     # 召回：打分、图扩展、别名、透传 includeCheckpoints、mode 持久化
+node test-transcripts.mjs # 会话原文：归属、消息切分、预算裁剪、排除后退出索引
+node test-embed.mjs      # 语义层：WordPiece、降级、RRF 量纲、向量库 hash 判脏
+```
+
+评测（需要真实记忆目录；模型缺失时 hybrid 会降级为词法）：
+
+```bash
+node eval/recall-baseline.mjs   # 14 条词面可对查询：expand 0/1 对照
+node eval/recall-paraphrase.mjs # 12 条改写查询：lexical vs hybrid
 ```
 
 ## 致谢
