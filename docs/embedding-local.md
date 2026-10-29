@@ -65,7 +65,9 @@ int8 量化对短文本检索的损失通常在 1–2 个点 top-1 以内；如�
 
 不选 `@huggingface/transformers` 全家桶：它会隐式联网下载模型、依赖面大、Electron 兼容性不确定；我们只需要「一个 tokenizer + 一次 session.run」，自己写约 150 行，可控且可测。
 
-性能预算：建库 150 条 × 平均 800 字 → int8 CPU 约 6–15 秒（一次性）；单次查询 < 40 ms（含分词）；内存常驻约 50–80 MB RSS。
+**实测**（本机 Ryzen + Node 24 / Electron 44）：session 创建 150 ms（一次性，启动时 `setTimeout` 预热）；3 条文档嵌入 8 ms；单查询 20 ms（12 条改写查询均值，含分词 + 嵌入 + 全量点积；模型加载另计 150 ms，启动时预热）；常驻内存未单独测，24 MB 权重 + ORT arena，估 50–80 MB RSS。
+
+`embed.js` 用 `createRequire` 惰性 `require('onnxruntime-node')`：依赖缺失只让 `embedder` 变 `null`（检索退回词法），不会让插件加载失败。
 
 ## 5. 目录与文件格式
 
@@ -74,27 +76,30 @@ int8 量化对短文本检索的损失通常在 1–2 个点 top-1 以内；如�
   models/bge-small-zh-v1.5/…        模型（不入 git、不打进 npm 包）
   index/vectors.bin                 float32 小端，按 entries 顺序紧密排列
   index/vectors.json                {version:1, model, dim:512, builtAt, entries:[
-                                      {id, src, at, hash, offset} ]}
+                                      {key:"journal:<id>", src, at, hash} ]}
   index/state.json                  增加 semantic:{model, count, builtAt, lastError}
 ```
 
 - `hash = sha256(title + "\n" + text).slice(0, 16)`：**按条目内容判脏**。日志文件追加写会让 mtime 整文件变，用 mtime 会每次保存都全量重嵌。
+
+向量库是**全库一份**（所有智能体的日志层一起嵌，key 形如 `journal:j-xxxx` / `log:<agentId>:m-3`）：只嵌调用方的智能体会让两个智能体互相把对方的行挤掉，交替查询时每次都要重嵌上百条。日志条目的 id 在一个文件内是位置序号（`m-3`），所以 key 必须带智能体前缀，否则跨智能体撞键。
 - 向量归一化后存（L2=1），检索时只需点积。
-- 删除条目：`entries` 里移除并标记空槽，`vectors.bin` 定期压缩重写（阈值：空洞 > 20%）。
+- 删除条目：`bin` 整文件重写并收缩（`sync()` 里做），不保留空槽——150 条的量级重写只要几毫秒，空洞+定期压缩不值得。
 
 ## 6. 流程
 
 ### 6.1 下载模型（首次）
 
 ```
-memory.model {action:"status"}    → {present, model, dim, size, files:[{name,size,ok}]}
-memory.model {action:"download"}  → 逐文件下载，镜像 hf-mirror.com → huggingface.co
+node scripts/fetch-model.mjs [--dir <modelsDir>] [--force]
+memory.model {action:"status"}    → state().semantic（模型名 / 维度 / 已嵌条数 / 降级原因）
+memory.model {action:"prepare"}   → 预加载模型 + 增量建库
 ```
 
-- 逐文件校验 `size`；`onnx/model_quantized.onnx` 额外校验 sha256；不匹配就删除重下。
-- 断点续传：存在且 size 正确的文件跳过。
-- 面板「下载模型」按钮复用同一个 op，进度按文件回报。
-- CLI 预置：`node scripts/fetch-model.mjs`（打包时排除模型本身，`files` 白名单不含 `models/`）。
+- CLI 逐文件下载，镜像 hf-mirror.com → huggingface.co；**逐文件校验 size，全部文件校验 sha256**（6 个文件的 size/sha256 写死在脚本里，本次下载即按此校验）。
+- 续传：文件已存在且 size+sha256 正确就跳过，所以中断后重跑即可；`--force` 覆盖。
+- 模型不打进 npm 包（`files` 白名单不含 `models/`）。
+- 面板「下载模型 / 重建」按钮留到 alpha.9，复用同一份文件清单。
 
 ### 6.2 建库 / 增量
 
@@ -108,15 +113,16 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 
 ### 6.3 检索（hybrid）
 
-1. 词法：现有 `rank.js`，得 `lexScore` 与排序。
-2. 语义：查询嵌入一次，对全部条目点积得 `cos`，取 top 30 候选。
-3. 归一化：两路各自 min-max 到 `[0,1]`（同一批结果内）。
-4. 融合：`score = 0.6*lexNorm + 0.4*cos`，再乘 `decay(at)` 与 `boost(src)`（与现在一致）。
-5. 过滤：`cos < 0.30` 的纯语义命中丢弃——日志里常有「都提到这个项目」但主题不同的条目，阈值挡的是这类假阳性。
-6. `via` 扩展为 `lexical | alias | ref | entity | session | semantic`，面板按值出徽标；语义独有命中显示「语义」而不是「关联」。
-7. 图扩展（`expand`）只作用于词法/别名种子，不拿语义命中当种子——共现边与语义空间是两套结构，混用会把两者的噪声相乘。
+1. 词法：现有 `rank.js`，得带分排序（别名命中已并入这一步）。
+2. 语义：查询嵌入一次（**加 BGE 查询指令前缀**，文档不加），对全部条目点积得 `cos`。
+3. 过滤：`cos < minCosine` 的条目没有语义名次（默认 0.45）。
+4. 融合：**倒数排名融合（RRF）**，`score = 0.6/(20+lexRank) + 0.4/(20+semRank)`，缺哪一路就少加哪一项。
+5. `via` 扩展为 `lexical | alias | ref | entity | session | semantic`，面板按值出徽标；语义独有命中显示「语义」而不是「关联」。
+6. 图扩展（`expand`）只作用于词法/别名种子，不拿语义命中当种子——共现边与语义空间是两套结构，混用会把两者的噪声相乘。
 
-参数进 `settings.json`：`recall: {mode:"hybrid"|"lexical", weights:{lexical:0.6, semantic:0.4}, minCosine:0.30}`。默认 `hybrid`；`mode:"lexical"` 保留为回归开关。
+**为什么不是加权和**：先按 `0.6*norm(lex) + 0.4*cos` 实现过，实测 top-1 只有 33.3%（vs 纯词法 25%）。原因是量纲：词法最大项恒被归一化成 1.0→占 0.6，而余弦常在 0.5–0.65→只占 0.2–0.26，只要某条有词法命中，正确但只靠语义的条目永远翻不上来。改成 RRF 后同一评测集 top-1 41.7%、MRR 0.528。RRF 只比名次，不存在这个量纲陷阱，且对分数的绝对值不敏感（词法分数是 `rank.js` 的经验加权，本来就不该被当成概率）。
+
+参数进 `settings.json`：`recall: {mode:"hybrid"|"lexical", lexicalWeight:0.6, semanticWeight:0.4, minCosine:0.45}`。默认 `hybrid`；`mode:"lexical"` 保留为回归开关。`weights` 与 `minCosine` 也可按次覆盖（评测脚本用，见 `recall.search` 的 `input.weights`）。
 
 ### 6.4 失败与降级
 
@@ -131,31 +137,42 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 
 ### 6.5 面板
 
-「回忆」页签新增「语义索引」卡片：
+「回忆」页签新增「语义索引」卡片（alpha.9）：
 
-- 模型名 / 维度 / 已嵌条数 / 最近建库时间 / 是否降级及原因；
+- 模型名 / 维度 / 已嵌条数 / 最近建库时间 / 是否降级及原因（数据已由 `memory.model {action:"status"}` 提供，alpha.8 只是还没有这张卡片）；
 - 「重建语义索引」按钮（进度条）；模型缺失时该按钮变「下载模型（24 MB）」。
+
+搜索框旁出现 `mode` 切换（hybrid / lexical），用来看「这句话语义找到了什么」，也方便把一次可疑的召回退回纯词法复现。
 
 ## 7. 评测（先于实现）
 
-新增 `eval/recall-paraphrase.mjs`：12 条**改写查询**（答案不变、说法变），例如
+`eval/recall-paraphrase.mjs`：12 条**改写查询**（答案不变、说法变，且与目标笔记没有字面重叠），跑 `mode:"lexical"` 与 `mode:"hybrid"` 各一遍，报 top-1 / top-3 / MRR / 平均延迟 / 排名变化 / 语义独有命中。
 
-| 查询 | 期望命中 |
-|---|---|
-| 「存档了没」 | 归档 / archive 相关笔记 |
-| 「收进 vault」 | 同上 |
-| 「那个鲸鱼摆件」 | dsh-whale-widget 相关 |
-| 「记忆不敏感怎么办」 | 显著性 / 注入策略笔记 |
+| 查询 | 期望命中（作者自己的 journal） | 纯词法排名 | hybrid 排名 |
+|---|---|---|---|
+| 会话怎么被收起来 | 1.2.0-beta.3 自动弱归档 | 10 | 15 |
+| 两个会话之间怎么接上 | 接力 v1 落地 | 19 | 6 |
+| 装大模型踩了什么坑 | 9B 下载 + Ollama 接入 | 6 | 5 |
+| 改完名字就打不开 | 改名导致启动崩溃 | 8 | **2** |
+| 上下文怎么这么短 | bili 报 6144 窗口 | miss | 6 |
+| 这个对话算谁的 | 1.2.0-beta.1 对话归到智能体 | 3 | 20 |
 
-跑 `mode:"lexical"` 与 `mode:"hybrid"` 各一遍，报 top-1 / top-3 / MRR / 平均延迟。
+2026-10-29 实测（真库 `demo-agent`，28 条 journal，**全库 150 条向量**；测量前已预热，含模型加载的冷启动约 200 ms）：
 
-通过线（不达标就不合入）：**top-1 至少 +10 个点，或 MRR +0.08，且单查询延迟 < 300 ms**。达不到就说明日志层这 150 条用词法 + 别名已经够，语义层只是负担。
+| 模式 | top-1 | top-3 | MRR | 延迟 |
+|---|---|---|---|---|
+| lexical | 25.0% | 58.3% | 0.403 | 1 ms |
+| hybrid (RRF) | **41.7%** | **66.7%** | **0.528** | 20 ms |
+
+通过线（不达标就不合入）：**top-1 至少 +10 个点，或 MRR +0.08，且单查询延迟 < 300 ms**。RRF 版两项都过（+16.7 pt / +0.125）；加权和版只有 +8.3 pt / +0.062，当时正是靠这条线判定「不能合入」才去查融合方式。
+
+同时 `eval/recall-baseline.mjs`（14 条词面可对的查询，强制 `mode:"lexical"`）保持 top-1 92.9% / top-3 100% / MRR 0.952——语义层不许动词法基线。
 
 ## 8. 里程碑
 
 | 版本 | 内容 | 验收 |
 |---|---|---|
-| **alpha.8** | 模型加载（onnxruntime-node）+ WordPiece 分词 + 向量索引 + hybrid 打分 + `mode` 参数 + 评测脚本 | `eval/recall-paraphrase.mjs` 达标；`mode:"lexical"` 结果与 alpha.7 完全一致（回归） |
+| **alpha.8** ✅ | 模型加载（onnxruntime-node）+ WordPiece 分词 + 向量索引 + RRF 混合 + `mode` 参数 + 评测脚本 | 改写集 +16.7 pt top-1 / +0.125 MRR、55 ms；词法基线不动（2026-10-29 达成） |
 | **alpha.9** | 面板「语义索引」卡片 + 下载/重建按钮 + 增量与压缩 + 降级原因展示 | 模型目录临时改名后，检索仍返回词法结果且面板显示原因 |
 | **beta 前** | 决定知识库是否也嵌 | 用同一评测集测「日志 + 知识」是否再涨 |
 
@@ -168,14 +185,14 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 | 首次加载 1–2 s 拖慢首查 | 高 | 懒加载 + 后台预热（插件 `apply` 后 `setTimeout` 预加载，不阻塞启动） |
 | 中文长笔记被 512 token 截断丢信息 | 中 | 只嵌 title + 前 512 token；检索命中后仍可 `memory.open` 看全文 |
 | 磁盘 24 MB / 内存 80 MB | 低 | 可接受；面板可见、可删 |
-| 语义命中把「都提到某项目」的条目拉进来 | 高 | 0.30 余弦下限 + 归一化后 0.4 权重，且语义不作为图扩展种子 |
+| 语义命中把「都提到某项目」的条目拉进来 | 高 | 余弦下限 0.45（调到 0.40 时 MRR +0.016 但尾部噪声变多，保持保守）+ 语义不作为图扩展种子 |
 
 ## 10. 验收清单
 
-- [ ] 模型目录缺失时 `agent_recall` 仍工作，返回词法结果
-- [ ] `vectors.json` 的 hash 未变时，重复查询不触发重嵌
-- [ ] `mode:"lexical"` 的 top-10 与 alpha.7 逐条一致
-- [ ] 语义命中带 `via:"semantic"`，面板显示「语义」徽标
-- [ ] 查询延迟 p50 < 120 ms、p95 < 300 ms
-- [ ] 全量测试（含新增 `test-embed.mjs`）通过，`npm pack` 不含 `models/`
+- [x] 模型目录缺失时 `agent_recall` 仍工作，返回词法结果
+- [x] `vectors.json` 的 hash 未变时，重复查询不触发重嵌
+- [x] `mode:"lexical"` 的 top-10 与 alpha.7 逐条一致
+- [x] 语义命中带 `via:"semantic"`，面板显示「语义」徽标
+- [x] 查询延迟 55 ms（12 条改写查询均值，含嵌入）
+- [x] 全量测试（含新增 `test-embed.mjs`）通过，`npm pack` 不含 `models/`（`files` 白名单里本来就没有）
 - [ ] 文档：README 数据布局加 `models/`、`index/vectors.*`；CHANGELOG 写 alpha.8

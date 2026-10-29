@@ -1,7 +1,9 @@
 /**
  * Baseline for recall: hand-labelled queries against a real, private corpus,
  * measured twice — `expand:0` (pure lexical, the M1 numbers) and `expand:1`
- * (one graph hop + aliases, the M2.5 numbers). The point of the pair is that
+ * (one graph hop + aliases, the M2.5 numbers). Both run `mode:lexical`: this is
+ * the keyword baseline, so the semantic layer must not be able to move it.
+ * The point of the pair is that
  * expansion must not cost top-1 accuracy; if it does, the graph is noise.
  *
  *   node eval/recall-baseline.mjs [--dir <memoryDir>] [--agent <agentId>]
@@ -50,13 +52,13 @@ const CASES = [
   ['工作区选中即切换', 'j-mvhmoxlset'],
 ]
 
-function measure(expand, limit = 5) {
+async function measure(expand, limit = 5) {
   let top1 = 0
   let top3 = 0
   let mrr = 0
   const rows = []
   for (const [query, expected] of CASES) {
-    const hits = recall.search({ id: agentId, query, source: 'journal', limit, expand })
+    const hits = await recall.search({ id: agentId, query, source: 'journal', limit, expand, mode: 'lexical' })
     const rank = hits.results.findIndex(item => item.id === expected) + 1
     const extras = hits.results.filter(item => item.via !== 'lexical')
     top1 += rank === 1 ? 1 : 0
@@ -72,8 +74,8 @@ function measure(expand, limit = 5) {
   }
 }
 
-const lexical = measure(0)
-const graph = measure(1)
+const lexical = await measure(0)
+const graph = await measure(1)
 
 const line = result =>
   `top-1 ${result.top1.toFixed(1)}%  top-3 ${result.top3.toFixed(1)}%  MRR ${result.mrr.toFixed(3)}`

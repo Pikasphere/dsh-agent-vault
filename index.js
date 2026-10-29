@@ -64,6 +64,14 @@ export function apply(ctx, config = {}) {
   } catch (error) {
     recordError(store, 'apply', error)
   }
+
+  // The local model costs ~150 ms to load; do it after the host settles so the
+  // first recall already has vectors, without delaying startup for everyone who
+  // never searches.
+  const timer = setTimeout(() => {
+    recall.prepare().catch(error => recordError(store, 'embed-prepare', error))
+  }, 4000)
+  if (typeof timer.unref === 'function') timer.unref()
 }
 
 /** Never let diagnostics replace the failure they describe. */
@@ -364,6 +372,12 @@ function registerTools(ctx, store, rooms, journals, recall) {
               description:
                 '1 (default) follows one graph hop from the lexical hits and folds in aliases from index/aliases.json; 0 gives the pure lexical ranking, for comparing against the baseline.',
             },
+            mode: {
+              type: 'string',
+              enum: ['hybrid', 'lexical'],
+              description:
+                'Ranking mode. `hybrid` (default) blends lexical scores with local-embedding cosine over the journal layer; `lexical` is the pure keyword ranking and never loads the model.',
+            },
           },
         },
         output: textOutput({ type: 'object', properties: { results: { type: 'array', items: { type: 'object' } } } }, () => 'recall'),
@@ -374,14 +388,15 @@ function registerTools(ctx, store, rooms, journals, recall) {
           }
           return {
             ok: true,
-            ...recall.search({
+            ...(await recall.search({
               id: bound,
               query: args?.query,
               limit: args?.limit,
               source: args?.source,
               since: args?.since,
               expand: args?.expand,
-            }),
+              mode: args?.mode,
+            })),
           }
         }),
       },
@@ -1179,6 +1194,7 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
         source: args.source,
         since: args.since,
         expand: args.expand,
+        mode: args.mode,
       })
     }
     case 'memory.open': {
@@ -1216,6 +1232,11 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       return recall.reindex()
     case 'memory.index':
       return recall.state()
+    case 'memory.model': {
+      const action = typeof args.action === 'string' ? args.action : 'status'
+      if (action === 'prepare') return recall.prepare()
+      return recall.state().semantic
+    }
     case 'knowledge.list':
       return store.listKnowledge({ id: args.id })
     case 'knowledge.search':

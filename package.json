@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-vault",
-  "version": "2.0.0-alpha.7",
+  "version": "2.0.0-alpha.8",
   "description": "Per-agent memory, one shared knowledge base, and per-conversation agent roles for DeepSeek Harness",
   "type": "module",
   "exports": {
@@ -17,6 +17,8 @@
     "graph.js",
     "recall.js",
     "transcripts.js",
+    "embed.js",
+    "vectors.js",
     "zstd-frames.mjs",
     "journal.js",
     "handoff.js",
@@ -27,6 +29,7 @@
     "icon.svg",
     "docs/*.md",
     "eval/*.mjs",
+    "scripts/*.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -59,5 +62,8 @@
   "scripts": {
     "prepack": "node test-package.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "onnxruntime-node": "^1.31.1"
+  }
 }

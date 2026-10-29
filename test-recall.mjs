@@ -93,37 +93,37 @@ assert.equal(again.length, 1, 'second touch does not duplicate the checkpoint')
 store.writeMemory({ id: agent.id, content: 'archived the sidebar row menu today', note: 'progress' })
 store.saveKnowledge({ id: agent.id, title: 'Sidebar context menu', content: 'right-click selection archives rows', tags: ['ui'] })
 
-const hits = recall.search({ id: agent.id, query: 'archive' })
+const hits = await recall.search({ id: agent.id, query: 'archive' })
 assert.ok(hits.total >= 3, `query hits every source (got ${hits.total})`)
 assert.deepEqual(hits.results.map(item => item.src).sort(), ['journal', 'knowledge', 'log'])
 assert.equal(hits.results[0].via, 'lexical')
 assert.ok(hits.results.every(item => item.score > 0))
 
-const journalOnly = recall.search({ id: agent.id, query: 'right-click', source: 'journal' })
+const journalOnly = await recall.search({ id: agent.id, query: 'right-click', source: 'journal' })
 assert.deepEqual(journalOnly.results.map(item => item.src), ['journal'])
 assert.equal(journalOnly.results[0].preview.includes('right-click'), true)
 
-const checkpointHit = recall.search({ id: agent.id, query: 'authoritative state' })
+const checkpointHit = await recall.search({ id: agent.id, query: 'authoritative state' })
 assert.equal(checkpointHit.results.some(item => item.title === 'checkpoint'), false, 'a checkpoint is never recalled')
 
-const knowledgeOnly = recall.search({ id: agent.id, query: 'right-click', source: 'knowledge' })
+const knowledgeOnly = await recall.search({ id: agent.id, query: 'right-click', source: 'knowledge' })
 assert.deepEqual(knowledgeOnly.results.map(item => item.src), ['knowledge'])
 assert.equal(knowledgeOnly.results[0].id.startsWith('side'), true)
 
-const limited = recall.search({ id: agent.id, query: 'archive', limit: 1 })
+const limited = await recall.search({ id: agent.id, query: 'archive', limit: 1 })
 assert.equal(limited.results.length, 1)
 assert.ok(limited.total > 1, 'total reports every match, not the page')
 
-const since = recall.search({ id: agent.id, query: 'archive', since: '2000-01-01T00:00:00.000Z' })
+const since = await recall.search({ id: agent.id, query: 'archive', since: '2000-01-01T00:00:00.000Z' })
 assert.ok(since.total > 0)
-const future = recall.search({ id: agent.id, query: 'archive', since: '2999-01-01T00:00:00.000Z' })
+const future = await recall.search({ id: agent.id, query: 'archive', since: '2999-01-01T00:00:00.000Z' })
 assert.equal(future.total, 0)
 
 // Deleting a note invalidates the cache on the next search.
 const doomed = journals.write({ id: agent.id, title: 'temporary', text: 'obsolete archive wording' })
-assert.ok(recall.search({ id: agent.id, query: 'obsolete' }).total > 0)
+assert.ok((await recall.search({ id: agent.id, query: 'obsolete' })).total > 0)
 journals.remove({ id: agent.id, entry: doomed.id })
-assert.equal(recall.search({ id: agent.id, query: 'obsolete' }).total, 0, 'removal is visible immediately')
+assert.equal((await recall.search({ id: agent.id, query: 'obsolete' })).total, 0, 'removal is visible immediately')
 
 // ── open: the full record behind a hit (panel expand view) ──────────────────
 const openedKnowledge = recall.open({ id: agent.id, src: 'knowledge', entry: knowledgeOnly.results[0].id })
@@ -136,7 +136,7 @@ assert.equal(recall.open({ id: agent.id, src: 'log', entry: 'm-999' }), null, 'u
 assert.equal(recall.open({ id: agent.id, src: 'nope', entry: 'x' }), null, 'unknown source returns null')
 
 // ── index state ─────────────────────────────────────────────────────────────
-const built = recall.reindex()
+const built = await recall.reindex()
 assert.ok(built.total >= 3)
 assert.ok(fs.existsSync(path.join(store.root, 'index', 'state.json')))
 assert.equal(built.sources[`journal:${agent.id}`], 1)
@@ -158,11 +158,11 @@ assert.equal(shapes.has('agent-6sbx'), true, 'agent id is an entity')
 // Entity bridge: the query only speaks A's language; B shares the repo name.
 const bridgeA = journals.write({ id: agent.id, title: 'widget memory', text: 'the widget writes dsh-agent-vault notes' })
 const bridgeB = journals.write({ id: agent.id, title: 'clone day', text: 'cloned dsh-agent-vault again' })
-const lexicalOnly = recall.search({ id: agent.id, query: 'widget', expand: 0 })
+const lexicalOnly = await recall.search({ id: agent.id, query: 'widget', expand: 0 })
 assert.equal(lexicalOnly.expand, 0)
 assert.ok(lexicalOnly.results.every(item => item.via === 'lexical'))
 assert.equal(lexicalOnly.results.some(item => item.id === bridgeB.id), false, 'expand:0 stays lexical')
-const bridged = recall.search({ id: agent.id, query: 'widget' })
+const bridged = await recall.search({ id: agent.id, query: 'widget' })
 assert.equal(bridged.expand, 1)
 const bridgeRow = bridged.results.find(item => item.id === bridgeB.id)
 assert.ok(bridgeRow, 'the shared repo name pulls the other note in')
@@ -173,7 +173,7 @@ assert.ok(bridgeRow.score < bridged.results.find(item => item.id === bridgeA.id)
 // Reference bridge: a knowledge entry cites a journal id.
 const cited = journals.write({ id: agent.id, title: 'cited target', text: 'the plugin manager path is the junction' })
 store.saveKnowledge({ id: agent.id, title: 'Install citation', content: `follow ${cited.id} before changing the path` })
-const refHit = recall.search({ id: agent.id, query: 'citation' })
+const refHit = await recall.search({ id: agent.id, query: 'citation' })
 const refRow = refHit.results.find(item => item.id === cited.id)
 assert.ok(refRow, 'a cited note is pulled in')
 assert.equal(refRow.via, 'ref')
@@ -187,7 +187,7 @@ fs.writeFileSync(
 )
 const whale = journals.write({ id: agent.id, title: 'whale widget pet', text: 'dsh-whale-widget release 0.6.8 ships the pet' })
 journals.write({ id: agent.id, kind: 'checkpoint', title: 'checkpoint', text: 'dsh-whale-widget is authoritative state' })
-const aliasHit = recall.search({ id: agent.id, query: '小鲸鱼' })
+const aliasHit = await recall.search({ id: agent.id, query: '小鲸鱼' })
 assert.equal(aliasHit.results[0]?.id, whale.id, 'the alias turns the target into a hit')
 assert.equal(aliasHit.results[0].via, 'alias')
 assert.equal(aliasHit.results[0].why.hub, '小鲸鱼')
@@ -203,7 +203,7 @@ assert.equal(tableBefore.table['小鲸鱼'][0], 'dsh-whale-widget')
 const aliasSet = recall.aliasSet({ key: '小鲸鱼', targets: ['dsh-whale-widget', 'pet'] })
 assert.deepEqual(aliasSet.targets, ['dsh-whale-widget', 'pet'])
 assert.deepEqual(recall.aliases().table['小鲸鱼'], ['dsh-whale-widget', 'pet'])
-const aliasAgain = recall.search({ id: agent.id, query: '小鲸鱼' })
+const aliasAgain = await recall.search({ id: agent.id, query: '小鲸鱼' })
 assert.equal(aliasAgain.results[0]?.id, whale.id, 'the written alias is live without a reindex')
 assert.equal(recall.aliasRemove({ key: '小鲸鱼' }).removed, true)
 assert.equal(recall.aliases().table['小鲸鱼'], undefined)
@@ -212,13 +212,13 @@ assert.equal(recall.aliasSet({ key: '小鲸鱼', targets: [] }).targets.length, 
 
 // A memory save records the conversation it came from, so a log hit can jump back.
 store.writeMemory({ id: agent.id, content: 'the log entry remembers its session', sessionId: 'session-abcdef01' })
-const logged = recall.search({ id: agent.id, query: 'remembers its session', source: 'log' })
+const logged = await recall.search({ id: agent.id, query: 'remembers its session', source: 'log' })
 assert.equal(logged.results[0]?.src, 'log')
 assert.equal(logged.results[0]?.sessionId, 'session-abcdef01', 'log rows carry the session id')
 assert.equal(recall.open({ id: agent.id, src: 'log', entry: logged.results[0].id })?.sessionId, 'session-abcdef01')
 
 // Expansion is capped and every extra carries a reason.
-for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit: 25 }).results) {
+for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault', limit: 25 })).results) {
   if (row.via === 'lexical') continue
   assert.ok(Number.isFinite(row.why?.weight) && row.why.weight >= 0.35, 'edge weight is reported and above the floor')
 }
@@ -250,12 +250,12 @@ for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit:
     root: '',
   }
   const scoped = createRecall({ rootDir: store.root, store, journals, transcripts: stub })
-  const found = scoped.search({ id: 'demo-agent', query: 'zstd 解析器', source: 'session' })
+  const found = await scoped.search({ id: 'demo-agent', query: 'zstd 解析器', source: 'session' })
   assert.equal(found.results.length, 1)
   assert.equal(found.results[0].hit?.seq, 2, 'hit points at the matching message')
   assert.equal(found.results[0].hit?.role, 'assistant')
   assert.ok(found.results[0].hit.text.includes('zstd'))
-  const missed = scoped.search({ id: 'demo-agent', query: '完全不存在的词', source: 'session' })
+  const missed = await scoped.search({ id: 'demo-agent', query: '完全不存在的词', source: 'session' })
   assert.equal(missed.results.length, 0)
   assert.deepEqual(scoped.messages('session-x').map(item => item.seq), [1, 2, 3])
 }

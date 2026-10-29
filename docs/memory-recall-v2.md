@@ -325,6 +325,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M4** `2.0.0-alpha.5` ✅ | 结果片段围绕命中词（`snippet`）、逐会话勾选（`memory.sessions` / `memory.transcript`）、`/op` 的 404 映射 | `test-recall.mjs` 片段窗口、`test-transcripts.mjs` 排除后列表/检索、`test-host.mjs` 两个新 op 与 404 |
 | **M5** `2.0.0-alpha.6` ✅ | 消息级命中（`hit`）、`memory.message`、面板「复制该条」、超预算裁剪与消息列表同源 | `test-recall.mjs` 命中指向正确消息、`test-transcripts.mjs` 消息列表与预算、`test-host.mjs` 两个 404/400 |
 | **M6** `2.0.0-alpha.7` ✅ | 别名可写（`memory.aliases` / `memory.alias` / `agent_alias` / 面板卡片）、日志条目带 `sessionId` 可回到对话 | `test-recall.mjs` 别名写入即时生效、删除幂等、日志行带会话；`test-store.mjs` 日志含 `[session: …]`；`test-host.mjs` 别名 op 与工具 |
+| **M7** `2.0.0-alpha.8` ✅ | 本地 BGE 语义层（`embed.js` / `vectors.js`）、RRF 混合排名、`mode` 参数、`memory.model`、`scripts/fetch-model.mjs`、改写评测 | `eval/recall-paraphrase.mjs`：hybrid top-1 41.7% / MRR 0.528 vs lexical 25.0% / 0.403（+16.7 pt / +0.125，55 ms）；词法基线 92.9% 不动；`test-embed.mjs` 全过（含 RRF 量纲回归） |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 

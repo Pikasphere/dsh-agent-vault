@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0-alpha.8 — 2026-10-29
+
+语义检索：本地 BGE 模型 + 日志层向量 + RRF 混合排名。
+
+### 新增
+
+- **`embed.js`**：自写 BERT WordPiece 分词（`vocab.txt` 驱动、512 token 截断、CLS pooling、L2 归一化）+ `createEmbedder()`；`onnxruntime-node` 惰性 `require`，依赖缺失只让语义层降级，不影响插件加载。查询侧加 BGE 指令前缀（`为这个句子生成表示以用于检索相关文章：`），文档侧不加。
+- **`vectors.js`**：`index/vectors.bin` + `index/vectors.json`，只嵌 `journal` / `log`；**按内容 sha256 前 16 位判脏**（日志是追加写，mtime 规则会让每次保存都全量重嵌）；增量嵌入、删除即重写收缩；写入走 tmp+rename；**全库一份、跨智能体共享**，日志条目 key 带智能体前缀（`log:<agentId>:m-3`，位置序号跨文件会撞键）。
+- **`recall.js` 混合检索**：`mode: hybrid | lexical`（默认 hybrid），`settings.json` 的 `recall: {lexicalWeight, semanticWeight, minCosine}` 可调；融合用**倒数排名融合**（RRF，`0.6/(20+lexRank) + 0.4/(20+semRank)`），语义独有命中 `via:"semantic"` + `why.cosine`；余弦下限 0.45；图扩展只吃词法种子。`search()` 由同步改为 async（`await recall.search(...)`），`reindex()` 同时重建语义库。
+- **`memory.model {action:"status" | "prepare"}` op** 与启动后 4 秒的后台预热（`timer.unref()`）。
+- **`agent_recall` 的 `mode` 参数**。
+- **`scripts/fetch-model.mjs`**：下载 BGE-small-zh-v1.5（6 个文件，逐个校验 size 与 sha256，hf-mirror → huggingface，可重跑续传）。
+- **`eval/recall-paraphrase.mjs`**：12 条与目标笔记无字面重叠的改写查询，对照 lexical / hybrid 的 top-1、top-3、MRR、延迟与语义独有命中。
+- **`test-embed.mjs`**：分词与 wordpiece、512 截断、向量库增量/删除、语义独有命中、余弦下限、`mode` 正交性、降级路径、以及**RRF 不许被词法量纲压住**的回归用例（假 embedder 给精确余弦，不依赖真模型）。
+
+### 修复
+
+- **跨智能体撞键导致反复重嵌**：日志条目在一个文件内是位置序号（`m-0`、`m-1`…），向量键 `log:<id>` 因此跨智能体冲突；同时 `logEntries()` 首次读取返回的是未贴 `agent` 的原始行、缓存里却是贴过的，两条路径给出不同键，实测每次查询重嵌 54 条（真库 1.8 s/次）。改为键带智能体前缀（`log:<agentId>:m-3`）、缓存与返回走同一份映射、按 key 排序后再比较，稳态回到 20 ms。
+- 加权和融合的量纲缺陷：词法分数归一化后恒为 1.0（占 0.6），余弦 0.5–0.65（占 0.2–0.26），导致「有词法命中的错条目」永远压住「只靠语义的正确条目」。改写集实测 33.3% → RRF 后 41.7%。
+
+### 说明
+
+- 实测（真库 `demo-agent`，28 条 journal / 92 条向量）：lexical top-1 25.0% / MRR 0.403（1 ms）→ hybrid 41.7% / 0.528（20 ms，预热后；冷启动首次约 200 ms）；词法基线（14 条词面可对）保持 92.9% / 100% / 0.952。
+- 模型 24 MB 不进 npm 包；`onnxruntime-node` 是唯一新增依赖（`^1.31.1`）。Electron 主进程加载已真机验证（Electron 44.7 / Node 24.21 / N-API 10，加载 150 ms，嵌入 3 条 8 ms，与系统 node 结果一致）。
+- 面板的「语义索引」卡片与 `mode` 切换按钮留到 alpha.9。
+
 ## 2.0.0-alpha.7 — 2026-10-29
 
 别名可写，日志命中可回到对话。

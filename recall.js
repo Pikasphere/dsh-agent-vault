@@ -29,9 +29,14 @@ import path from 'node:path'
 import { rank, round, scoreEntry, snippet, tokenize } from './rank.js'
 import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEntities } from './graph.js'
 import { createTranscripts } from './transcripts.js'
+import { createEmbedder } from './embed.js'
+import { createVectors } from './vectors.js'
 
 export const SOURCES = ['journal', 'log', 'knowledge', 'session']
 export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9, room: 0.7, checkpoint: 0 }
+export const DEFAULT_MODEL = 'bge-small-zh-v1.5'
+export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45 }
+export const MODES = ['hybrid', 'lexical']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
 
@@ -79,6 +84,51 @@ export function createRecall(options = {}) {
             sessionsRoot: options.sessionsRoot,
             exclude: options.exclude ?? (() => store.settings().transcriptExclude ?? []),
           })
+
+  /**
+   * The local embedder is optional by construction: a missing model directory or
+   * a native-loading failure leaves `embedder` null and the whole recall layer
+   * falls back to lexical ranking. `embedderError` explains why in the panel.
+   */
+  let embedderError = ''
+  const embedder =
+    options.embedder === null
+      ? null
+      : options.embedder !== undefined
+        ? options.embedder
+        : (() => {
+            try {
+              return createEmbedder({ modelDir: path.join(root, 'models', options.model ?? DEFAULT_MODEL) })
+            } catch (error) {
+              embedderError = String(error?.message ?? error)
+              return null
+            }
+          })()
+  const vectors =
+    options.vectors === false || embedder === null
+      ? null
+      : createVectors({ rootDir: root, embedder, model: options.model ?? DEFAULT_MODEL })
+
+  function recallSettings() {
+    const raw = store.settings().recall
+    const merged = { ...RECALL_DEFAULTS, ...(typeof raw === 'object' && raw !== null ? raw : {}) }
+    if (!MODES.includes(merged.mode)) merged.mode = RECALL_DEFAULTS.mode
+    const minCosine = Number(merged.minCosine)
+    merged.minCosine = Number.isFinite(minCosine) ? minCosine : RECALL_DEFAULTS.minCosine
+    return merged
+  }
+
+  /** Load the model ahead of the first query so a search does not pay the 150 ms. */
+  async function warm() {
+    if (embedder === null) return { ok: false, error: embedderError || 'model-missing' }
+    try {
+      await embedder.load()
+      return { ok: true, dim: embedder.dim }
+    } catch (error) {
+      embedderError = String(error?.message ?? error)
+      return { ok: false, error: embedderError }
+    }
+  }
 
   /** Entities are derived once per rebuild, never stored: graph edges cannot rot. */
   function decorate(entry) {
@@ -152,13 +202,19 @@ export function createRecall(options = {}) {
       return []
     }
     if (known !== undefined && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.entries
-    let entries = []
+    let parsed = []
     try {
-      entries = parseLog(fs.readFileSync(file, 'utf8'))
+      parsed = parseLog(fs.readFileSync(file, 'utf8'))
     } catch {
-      entries = []
+      parsed = []
     }
-    cache.set(key, { ...stat, entries: entries.map(item => decorate({ sessionId: '', ...item })) })
+    // The agent has to be stamped before anything keyed on the entry: log ids
+    // (`m-3`) are positional per file, so without it every agent collides in the
+    // vector store. Return the stamped rows too — returning `parsed` here made
+    // the first read after an edit use unqualified keys while the cache held
+    // qualified ones, re-embedding dozens of rows on every other query.
+    const entries = parsed.map(item => decorate({ sessionId: '', ...item, agent: agentId }))
+    cache.set(key, { ...stat, entries })
     return entries
   }
 
@@ -208,6 +264,20 @@ export function createRecall(options = {}) {
     if (source === '' || source === 'log') entries.push(...logEntries(agentId))
     if (source === '' || source === 'knowledge') entries.push(...knowledgeEntries())
     if (source === '' || source === 'session') entries.push(...sessionEntries(agentId))
+    return entries
+  }
+
+  /**
+   * The vector store is one global file: the log layer of every agent, embedded
+   * with the same model. Syncing only the querying agent would rewrite the file
+   * per agent (and re-embed ~100 rows whenever two agents alternate), so callers
+   * sync this union first and then score a single agent's rows from it.
+   */
+  function vectorEntries() {
+    const entries = []
+    for (const vault of store.state().vaults) {
+      entries.push(...journalEntries(vault.id), ...logEntries(vault.id))
+    }
     return entries
   }
 
@@ -280,13 +350,29 @@ export function createRecall(options = {}) {
    * `expand: 0` for the pure lexical ranking — the baseline numbers in the
    * design doc were measured that way.
    */
-  function search(input = {}) {
+  async function search(input = {}) {
     const agentId = String(input.id ?? '')
     const query = String(input.query ?? '').trim()
     const limit = clamp(Number(input.limit) || 8, 1, 25)
     const source = SOURCES.includes(input.source) ? input.source : ''
     const since = Number.isFinite(Date.parse(String(input.since ?? ''))) ? Date.parse(String(input.since)) : 0
     const graph = !(input.expand === 0 || input.expand === '0' || input.expand === false)
+    const settings = recallSettings()
+    // Per-call overrides exist for the tuning harness (`eval/recall-paraphrase.mjs`):
+    // the weights are a calibration knob, and hard-coding them into the store
+    // would make every experiment rewrite the user's settings file.
+    if (input.minCosine !== undefined) {
+      const value = Number(input.minCosine)
+      if (Number.isFinite(value) && value >= 0 && value <= 1) settings.minCosine = value
+    }
+    if (typeof input.weights === 'object' && input.weights !== null) {
+      const lexical = Number(input.weights.lexicalWeight)
+      const semantic = Number(input.weights.semanticWeight)
+      if (Number.isFinite(lexical) && lexical >= 0) settings.lexicalWeight = lexical
+      if (Number.isFinite(semantic) && semantic >= 0) settings.semanticWeight = semantic
+    }
+    const mode = MODES.includes(input.mode) ? input.mode : settings.mode
+    const hybrid = mode === 'hybrid' && vectors !== null
     const tokens = tokenize(query)
     const entries = collect(agentId, source).filter(entry => {
       if (since === 0) return true
@@ -295,15 +381,16 @@ export function createRecall(options = {}) {
     })
     const boost = src => DEFAULT_BOOST[src] ?? 1
     const rows = rank(entries, query, { boost })
-    if (!graph) {
-      return {
-        query,
-        total: rows.length,
-        expand: 0,
-        results: rows
-          .slice(0, limit)
-          .map(row => withHit(resultOf(row.entry, row.score, 'lexical', undefined, tokens), row.entry, tokens)),
-      }
+
+    /**
+     * Semantic similarity is computed over the agent's whole journal layer (not
+     * the current filter), then looked up per candidate: filtering must not
+     * change a vector, only which rows show up.
+     */
+    let sims = new Map()
+    if (hybrid && query !== '') {
+      await vectors.sync(vectorEntries())
+      sims = await vectors.score(collect(agentId, ''), query)
     }
 
     const byKey = new Map(entries.map(entry => [entryKey(entry), entry]))
@@ -329,15 +416,91 @@ export function createRecall(options = {}) {
         }
       }
     }
-    const ranked = [...scores.entries()]
-      .map(([key, score]) => ({ entry: byKey.get(key), score, ...(reason.get(key) ?? { via: 'lexical' }) }))
+
+    /**
+     * Hybrid fusion is rank-based (reciprocal rank fusion), not score-based.
+     *
+     * Score fusion was tried first and measurably lost: lexical scores are
+     * unbounded and get normalised to their own best hit (1.0 × 0.6), while a
+     * cosine sits around 0.5–0.65 (≈0.24 after the 0.4 prior), so *any* lexical
+     * hit outranked a better semantic one — the paraphrase eval sat at top-1
+     * 33.3 % with weights 0.6/0.4 and at 50 % when semantics ranked alone. RRF
+     * compares ranks per channel and cannot have that scale mismatch.
+     *
+     * `minCosine` still gates semantic-only rows: below it a document may be a
+     * lexical hit but never enters on similarity alone.
+     */
+    const RRF_K = 20
+    let fusedCache = null
+    function fuse() {
+      if (fusedCache !== null) return fusedCache
+      const lexicalRank = new Map()
+      ;[...scores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([key], index) => lexicalRank.set(key, index + 1))
+      const semanticRank = new Map()
+      if (hybrid) {
+        ;[...entries]
+          .map(entry => ({ key: entryKey(entry), cosine: cosineOf(entryKey(entry)) }))
+          .filter(item => item.cosine >= settings.minCosine)
+          .sort((a, b) => b.cosine - a.cosine)
+          .forEach((item, index) => semanticRank.set(item.key, index + 1))
+      }
+      const fused = new Map()
+      const fusedReason = new Map()
+      for (const key of new Set([...lexicalRank.keys(), ...semanticRank.keys()])) {
+        const lexical = lexicalRank.get(key)
+        const semantic = semanticRank.get(key)
+        const value =
+          (lexical === undefined ? 0 : settings.lexicalWeight / (RRF_K + lexical)) +
+          (semantic === undefined ? 0 : settings.semanticWeight / (RRF_K + semantic))
+        if (value === 0) continue
+        fused.set(key, value)
+        const base = reason.get(key) ?? null
+        if (lexical !== undefined && base !== null) {
+          const cosine = cosineOf(key)
+          fusedReason.set(key, cosine >= settings.minCosine ? { ...base, why: { ...(base.why ?? {}), cosine: round(cosine) } } : base)
+        } else if (semantic !== undefined) {
+          fusedReason.set(key, { via: 'semantic', why: { cosine: round(cosineOf(key)) } })
+        } else {
+          fusedReason.set(key, { via: 'lexical' })
+        }
+      }
+      fusedCache = { scores: fused, reason: fusedReason }
+      return fusedCache
+    }
+    function cosineOf(key) {
+      const value = sims.get(key)
+      return typeof value === 'number' ? value : 0
+    }
+
+    const effective = hybrid ? fuse() : { scores, reason }
+    const ranked = [...effective.scores.entries()]
+      .map(([key, score]) => ({ entry: byKey.get(key), score, ...(effective.reason.get(key) ?? { via: 'lexical' }) }))
       .filter(row => row.entry !== undefined)
       .sort((a, b) => b.score - a.score)
-    const seeds = ranked.slice(0, SEED_COUNT)
-    const extras = expandGraph(seeds, entries).filter(row => !scores.has(entryKey(row.entry)))
+
+    if (!graph) {
+      return {
+        query,
+        mode,
+        total: ranked.length,
+        expand: 0,
+        results: ranked
+          .slice(0, limit)
+          .map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
+      }
+    }
+
+    // Graph expansion reads only lexical seeds: a neighbour of a semantic-only
+    // hit has no textual link to the query, so the two extensions would stack
+    // two independent sources of drift (§6.5 keeps them separate on purpose).
+    const seeds = ranked.filter(row => row.via !== 'semantic').slice(0, SEED_COUNT)
+    const extras = expandGraph(seeds, entries).filter(row => !effective.scores.has(entryKey(row.entry)))
     const final = [...ranked, ...extras].sort((a, b) => b.score - a.score)
     return {
       query,
+      mode,
       total: final.length,
       expand: 1,
       results: final
@@ -379,16 +542,18 @@ export function createRecall(options = {}) {
   }
 
   /** Drop every cache and rebuild from disk, recording what was built. */
-  function reindex() {
+  async function reindex() {
     cache.clear()
     const sources = {}
     let total = 0
+    const all = []
     for (const vault of store.state().vaults) {
-      const journal = journalEntries(vault.id).length
-      const log = logEntries(vault.id).length
-      sources[`journal:${vault.id}`] = journal
-      sources[`log:${vault.id}`] = log
-      total += journal + log
+      const journal = journalEntries(vault.id)
+      const log = logEntries(vault.id)
+      sources[`journal:${vault.id}`] = journal.length
+      sources[`log:${vault.id}`] = log.length
+      total += journal.length + log.length
+      all.push(...journal, ...log)
     }
     const knowledge = knowledgeEntries().length
     sources.knowledge = knowledge
@@ -397,6 +562,15 @@ export function createRecall(options = {}) {
     sources.session = sessions.length
     total += sessions.length
     aliases.ensure()
+    let semantic = null
+    if (vectors !== null) {
+      try {
+        const built = await vectors.rebuild(all)
+        semantic = { model: vectors.status().model, dim: built.dim, count: built.count, builtAt: built.builtAt }
+      } catch (error) {
+        semantic = { model: vectors.status().model, error: String(error?.message ?? error) }
+      }
+    }
     const state = {
       version: 1,
       builtAt: new Date().toISOString(),
@@ -405,6 +579,7 @@ export function createRecall(options = {}) {
       aliases: aliases.read().length,
       expand: 1,
       transcripts: transcripts !== null,
+      semantic,
     }
     writeState(state)
     return state
@@ -413,6 +588,7 @@ export function createRecall(options = {}) {
   function state() {
     const persisted = readState()
     const cached = [...cache.entries()].map(([key, value]) => ({ key, entries: value.entries.length, size: value.size }))
+    const settings = recallSettings()
     return {
       indexFile: statePath,
       aliasFile: aliases.file,
@@ -424,6 +600,22 @@ export function createRecall(options = {}) {
       total: persisted?.total ?? null,
       sources: persisted?.sources ?? {},
       cached,
+      mode: settings.mode,
+      semantic: vectors === null
+        ? { available: false, model: '', error: embedderError || 'model-missing' }
+        : { available: true, embedderError, ...vectors.status() },
+    }
+  }
+
+  /** Load the local model ahead of the first search (called from plugin startup). */
+  async function prepare() {
+    const result = await warm()
+    if (!result.ok) return result
+    try {
+      await vectors.sync(vectorEntries())
+      return { ok: true, dim: result.dim, ...vectors.status() }
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) }
     }
   }
 
@@ -437,6 +629,7 @@ export function createRecall(options = {}) {
     aliasRemove,
     reindex,
     state,
+    prepare,
     SOURCES,
   }
 }

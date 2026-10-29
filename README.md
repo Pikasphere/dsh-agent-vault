@@ -98,8 +98,11 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 <memoryDir>/rooms/<roomId>/messages.jsonl 讨论室发言（每行一条，带发言人）
 <memoryDir>/journal/<agentId>.jsonl      私有日志·笔记（每行一条，只有该智能体可读）
 <memoryDir>/checkpoints/<agentId>.jsonl   私有日志·检查点（2.0 起从这里读；旧文件首次访问时自动拆分）
-<memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数）
+<memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数 / semantic 状态）
 <memoryDir>/index/aliases.json           别名表（手写，{"别名": ["实体", …]}）
+<memoryDir>/index/vectors.bin            语义向量（float32、L2 归一化，按 entries 顺序）
+<memoryDir>/index/vectors.json           向量的元数据（{key, src, at, hash}）
+<memoryDir>/models/<model>/              本地 embedding 模型（不进 npm 包，用 scripts/fetch-model.mjs 下载）
 <memoryDir>/handoff.json                 接力配置（阈值、导出目录）
 <memoryDir>/handoff-state.json           每会话的接力阶段
 ```
@@ -116,10 +119,12 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 | `agent_knowledge_write` | 新增或按 `entry` 修订已有条目 |
 | `agent_room` | `action`: `list` / `read` / `say` / `join` / `leave`，参与讨论室 |
 | `agent_journal` | `action`: `list` / `search` / `read` / `write`，读写**自己的**私有日志 |
-| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库、自己相关的会话原文 |
+| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库、自己相关的会话原文；`mode` 选 `hybrid`（默认，词法 + 语义）或 `lexical` |
 | `agent_alias` | 维护别名表：`list` / `set` / `delete`，让「说得出口但写不出来」叫法也能被检索到 |
 
 工具通过调用会话的绑定解析智能体；显式传 `id` 时优先。`agent_journal` 与 `agent_recall` 永远只作用于调用方的智能体，**不接受其他智能体 id**，这就是隔离的实现方式。
+
+`agent_recall` 也接受 `expand`（默认 1：一跳关联扩展，0：纯词法）与 `source` / `since` / `limit`；语义层见下节。
 
 `agent_recall` 永远不返回检查点：检查点是权威状态（整段注入、旧的可能误导），只属于「读取」，不属于「检索」。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
 
@@ -268,6 +273,20 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **结果带 `hit`**：`session` 来源的一行会多一个 `hit: {seq, role, at, text}`，指向词法得分最高的那条消息（`memory.open` 返回的条目也仍是整段，两者互补）。
 - **面板**：结果行下方多一行「命中消息 #12 · 助手 · …」；展开后显示该条消息全文，并给一个「复制该条」按钮（走 `memory.message`），方便拿去别处搜。
 - **不能自动滚动**：宿主的 `uiWorkspace.openSession` 只接受会话 id，没有消息锚点，所以「跳到第 N 条」做不到。能做到的是精确到消息 + 复制原文，「回到对话」仍然只回到会话。
+
+### 语义检索（2.0.0-alpha.8）
+
+词法检索的盲区是「换个说法就找不到」：笔记里写「自动弱归档」，查询说「会话怎么被收起来」，没有一个字重合。`2.0.0-alpha.8` 在**日志层**（journal + 记忆日志）上叠加本地语义向量：
+
+- **模型本地、离线**：BGE-small-zh-v1.5 的 int8 ONNX（24 MB，512 维），走 `onnxruntime-node`（N-API，Electron ABI 稳定）。模型不进 npm 包，用 `node scripts/fetch-model.mjs` 下载（逐文件校验 size 与 sha256，按 hf-mirror → huggingface 顺序，可重跑续传）。分词是自写的 BERT WordPiece（`vocab.txt` 驱动），不引 `transformers.js`。
+- **只嵌日志层**：检查点与 4K 短记忆是权威状态、整段注入提示词，嵌了反而可能把陈旧版本当检索结果；对话原文太大且未脱敏，仍走词法。向量存 `index/vectors.bin`（float32、L2 归一化）+ `index/vectors.json`（`{key, src, at, hash}`），**按内容 hash 判脏**——日志是追加写，按 mtime 会每次保存都全量重嵌。
+- **融合用 RRF，不用加权和**：先按 `0.6×归一化词法 + 0.4×余弦` 实现，改写查询集只有 33.3%（vs 纯词法 25%）；原因是量纲——词法最大项恒被归一化成 1.0（占 0.6），余弦常年在 0.5–0.65（只占 0.2–0.26），任何有词法命中的条目都压住只靠语义的正确条目。改成倒数排名融合（`0.6/(20+lexRank) + 0.4/(20+semRank)`）后同一集合 top-1 41.7%。
+- **余弦下限 0.45**：低于它的条目没有语义名次（不按相似度硬塞进来）；语义命中带 `via:"semantic"`，面板显示「语义」徽标，且**不作为图扩展的种子**（共现边与语义空间是两套结构，混用噪声相乘）。
+- **`mode` 参数**：`agent_recall` 与 `memory.recall` 都收 `mode: "hybrid" | "lexical"`，默认 `hybrid`；`lexical` 是回归开关，词法基线（14 条词面可对的查询）必须保持 top-1 92.9% / MRR 0.952。
+- **失败就退回词法**：模型缺失、ORT 加载失败、单次嵌入超时都只让这一次检索走词法，`memory.model {action:"status"}` 会报出原因；插件启动 4 秒后后台预热（`timer.unref()`），不阻塞启动。
+- **实测**：12 条与目标笔记没有字面重叠的改写查询，词法 top-1 25.0% / MRR 0.403（2 ms）→ hybrid 41.7% / 0.528（20 ms，预热后）。脚本是 `eval/recall-paraphrase.mjs`，逐条打印排名变化与语义独有命中，可复现。完整设计与取舍见 [docs/embedding-local.md](docs/embedding-local.md)。
+
+
 
 ### 日志命中也能回到对话（2.0.0-alpha.7）
 

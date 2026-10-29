@@ -85,7 +85,16 @@ export function extractEntities(text) {
   return found
 }
 
+/**
+ * Globally unique key for an entry. Journal and knowledge ids are already unique
+ * (`j-…`, slug), but log ids are positional within one agent's file (`m-3`), so a
+ * log entry must carry its agent or two agents' entries collide in the vector
+ * store — which silently re-embeds both on every query.
+ */
 export function entryKey(entry) {
+  if (entry.src === 'log' && typeof entry.agent === 'string' && entry.agent !== '') {
+    return `log:${entry.agent}:${entry.id}`
+  }
   return `${entry.src}:${entry.id}`
 }
 
