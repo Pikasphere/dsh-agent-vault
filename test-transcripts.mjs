@@ -96,6 +96,11 @@ bindings.push({ sessionId, agentId: 'demo-agent' })
 const again = createTranscripts({ rootDir: root, sessionsRoot: sessions, store: { listBindings: () => bindings } })
 assert.equal(again.entries('demo-agent').length, 1, 'bindings make a session known')
 assert.equal(again.get(sessionId)?.title, '包名与发布')
+const indexed = again.messagesOf(sessionId)
+assert.ok(indexed.length >= 2, 'text-bearing messages are indexed')
+assert.deepEqual([...new Set(indexed.map(message => message.role))].sort(), ['assistant', 'user'])
+assert.ok(indexed.every(message => message.seq > 0 && message.text.trim() !== ''))
+assert.deepEqual(again.messagesOf('session-unknown'), [])
 
 const before = fs.statSync(file).mtimeMs
 fs.appendFileSync(file, zstdCompressSync(Buffer.from(`${JSON.stringify({ type: 'user/message', seq: 11, time: 1790000008000, data: { content: [{ type: 'text', text: '追加的一条' }] } })}\n`)))

@@ -64,7 +64,7 @@ function extract(records, sessionId) {
   let title = ''
   let at = ''
   let toolCalls = 0
-  const lines = []
+  const messages = []
   for (const record of records) {
     const time = typeof record.time === 'number' ? record.time : 0
     if (record.type === 'session') {
@@ -79,34 +79,66 @@ function extract(records, sessionId) {
       toolCalls += 1
       continue
     }
+    let role = ''
+    let text = ''
     if (record.type === 'user/message') {
-      const text = messageText(record.data?.content)
-      if (text === '') continue
-      lines.push(`用户：${text}`)
-      if (time) at = time
+      role = 'user'
+      text = messageText(record.data?.content)
+    } else if (record.type === 'assistant/message') {
+      role = 'assistant'
+      text = messageText(record.data?.message?.content)
+    } else {
       continue
     }
-    if (record.type === 'assistant/message') {
-      const text = messageText(record.data?.message?.content)
-      if (text === '') continue
-      lines.push(`助手：${text}`)
-      if (time) at = time
-    }
+    if (text === '') continue
+    if (time) at = time
+    messages.push({ seq: typeof record.seq === 'number' ? record.seq : 0, role, at: time ? new Date(time).toISOString() : '', text: redact(text) })
   }
+  const kept = trimMessages(messages)
+  const lines = kept.messages.map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.text}`)
   let body = lines.join('\n')
-  if (body.length > MAX_CHARS) {
-    const gap = '\n……\n'
-    body = `${body.slice(0, HEAD_CHARS)}${gap}${body.slice(-(MAX_CHARS - HEAD_CHARS - gap.length))}`
-  }
+  if (kept.truncated) body = `${lines.slice(0, kept.headCount).join('\n')}\n……\n${lines.slice(kept.headCount).join('\n')}`
   const firstUser = lines.find(line => line.startsWith('用户：')) ?? ''
   return {
     sessionId,
     cwd,
     title: title || firstUser.slice(0, 60).replace(/^用户：/, '') || sessionId,
     at: at ? new Date(at).toISOString() : '',
-    text: redact(body),
+    text: body,
     toolCalls,
+    messages: kept.messages,
+    truncated: kept.truncated,
   }
+}
+
+/**
+ * Keep the head (the task) and the tail (where the work ended) inside the
+ * character budget; the middle is dropped. The kept message list is what a hit
+ * points at, so it must be the same subset the body is built from.
+ */
+function trimMessages(messages) {
+  let total = 0
+  for (const message of messages) total += message.text.length + 6
+  if (total <= MAX_CHARS) return { messages, truncated: false, headCount: messages.length }
+  const head = []
+  let used = 0
+  for (const message of messages) {
+    const cost = message.text.length + 6
+    if (used + cost > HEAD_CHARS) break
+    head.push(message)
+    used += cost
+  }
+  const tail = []
+  const limit = MAX_CHARS - HEAD_CHARS - 8
+  used = 0
+  for (let index = messages.length - 1; index >= head.length; index -= 1) {
+    const message = messages[index]
+    const cost = message.text.length + 6
+    if (used + cost > limit) break
+    tail.unshift(message)
+    used += cost
+  }
+  return { messages: [...head, ...tail], truncated: true, headCount: head.length }
 }
 
 /**
@@ -253,10 +285,16 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
     return out
   }
 
+  /** The indexed messages of one session, for pointing a hit at a single message. */
+  function messagesOf(sessionId) {
+    const entry = entryOf(sessionId)
+    return entry === null ? [] : entry.messages
+  }
+
   function get(sessionId) {
     for (const entry of entries()) if (entry.sessionId === sessionId) return entry
     return null
   }
 
-  return { root: dir, known, owners, entries, list, get, read: entryOf }
+  return { root: dir, known, owners, entries, list, messagesOf, get, read: entryOf }
 }

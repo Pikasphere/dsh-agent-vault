@@ -218,6 +218,12 @@ window.__ModuleLoader__.load({
         recallAll: '全部来源',
         recallSince: '起始日期',
         recallExpandSoon: '带「关联·」徽标的结果是沿引用、共享实体或同一会话扩出来的一跳邻居；展开项里写着它关联自什么。',
+        recallHit: '命中消息',
+        recallRoleUser: '用户',
+        recallRoleAssistant: '助手',
+        recallCopy: '复制该条',
+        recallCopied: '已复制到剪贴板',
+        recallCopyFail: '复制失败：浏览器拒绝了剪贴板写入',
         recallIndex: '索引状态',
         recallIndexTotal: '条目',
         recallBuilt: '构建于',
@@ -435,6 +441,12 @@ window.__ModuleLoader__.load({
         recallAll: 'All sources',
         recallSince: 'Since',
         recallExpandSoon: 'A "related·" badge marks a one-hop neighbour reached through a citation, a shared entity, or the same session; the expanded row says what it is related via.',
+        recallHit: 'hit message',
+        recallRoleUser: 'user',
+        recallRoleAssistant: 'assistant',
+        recallCopy: 'Copy this message',
+        recallCopied: 'Copied to the clipboard',
+        recallCopyFail: 'Copy failed: the browser refused clipboard access',
         recallIndex: 'Index status',
         recallIndexTotal: 'entries',
         recallBuilt: 'built',
@@ -515,6 +527,7 @@ window.__ModuleLoader__.load({
 .am-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
 .am-list{display:flex;flex-direction:column;gap:6px}
 .am-recall-hit{display:flex;flex-direction:column;gap:6px}
+.am-item-hit{font-size:11.5px;line-height:1.5;color:var(--dsw-alias-text-secondary);opacity:.85;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .am-recall-detail{white-space:pre-wrap;padding:10px 12px;border-radius:10px;border:1px dashed var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent);font-size:12.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);max-height:320px;overflow:auto}
 .am-item{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 45%,transparent);color:inherit;font:inherit;cursor:pointer}
 .am-item:hover{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 40%,var(--dsw-alias-border-l1))}
@@ -689,6 +702,16 @@ window.__ModuleLoader__.load({
     }
 
     // ── page ────────────────────────────────────────────────────────────────
+    const copyText = async text => {
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch {}
+      return false
+    }
+
     function Panel(props) {
       const t = useLocale(props)
       const locale = typeof props.getLocale === 'function' ? props.getLocale() : ''
@@ -1256,8 +1279,22 @@ window.__ModuleLoader__.load({
         }
         const opened = await call('memory.open', { id: vault.id, src: hit.src, entry: hit.id })
         const entry = opened?.entry ?? null
+        let message = null
+        if (hit.hit !== undefined && hit.sessionId !== undefined) {
+          const found = await call('memory.message', { id: vault.id, sessionId: hit.sessionId, seq: hit.hit.seq })
+          message = found?.message ?? null
+        }
         setRecallDetail(
-          entry === null ? null : { ...entry, sessionId: entry.sessionId ?? hit.sessionId ?? '', via: hit.via, why: hit.why ?? null },
+          entry === null
+            ? null
+            : {
+                ...entry,
+                sessionId: entry.sessionId ?? hit.sessionId ?? '',
+                via: hit.via,
+                why: hit.why ?? null,
+                hit: hit.hit ?? null,
+                message,
+              },
         )
       }
 
@@ -2132,6 +2169,13 @@ window.__ModuleLoader__.load({
                               ),
                         ),
                         h('span', { className: 'am-item-snippet' }, hit.preview || '—'),
+                        hit.hit === undefined
+                          ? null
+                          : h(
+                              'span',
+                              { className: 'am-item-hit' },
+                              `${t('recallHit')} #${hit.hit.seq} · ${hit.hit.role === 'user' ? t('recallRoleUser') : t('recallRoleAssistant')} · ${hit.hit.text}`,
+                            ),
                         h(
                           'span',
                           { className: 'am-item-meta' },
@@ -2155,7 +2199,29 @@ window.__ModuleLoader__.load({
                                   t('recallGoSession'),
                                 )
                               : null,
-                            recallDetail.text || '—',
+                            recallDetail.hit === null || recallDetail.hit === undefined
+                              ? null
+                              : h(
+                                  'div',
+                                  { className: 'am-note-dim' },
+                                  `${t('recallHit')} #${recallDetail.hit.seq} · ${recallDetail.hit.role === 'user' ? t('recallRoleUser') : t('recallRoleAssistant')}${recallDetail.hit.at ? ` · ${ago(recallDetail.hit.at, locale)}` : ''}`,
+                                ),
+                            recallDetail.message === null || recallDetail.message === undefined
+                              ? null
+                              : h(
+                                  'button',
+                                  {
+                                    className: 'am-btn am-btn-sm am-btn-ghost',
+                                    onClick: async () => {
+                                      const done = await copyText(recallDetail.message.text)
+                                      setNotice(done ? t('recallCopied') : t('recallCopyFail'))
+                                    },
+                                  },
+                                  t('recallCopy'),
+                                ),
+                            (recallDetail.message !== null && recallDetail.message !== undefined
+                              ? recallDetail.message.text
+                              : recallDetail.text) || '—',
                           )
                         : null,
                     ),

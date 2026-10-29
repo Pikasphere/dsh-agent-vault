@@ -26,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { rank, round, snippet, tokenize } from './rank.js'
+import { rank, round, scoreEntry, snippet, tokenize } from './rank.js'
 import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEntities } from './graph.js'
 import { createTranscripts } from './transcripts.js'
 
@@ -207,7 +207,44 @@ export function createRecall(options = {}) {
     return entries
   }
 
+  /**
+   * The single message a session hit actually came from. `uiWorkspace` cannot
+   * scroll to a message, so a hit carries the message's role/seq/preview and the
+   * caller decides what to do with it — never the message's whole session.
+   */
+  function bestMessage(sessionId, tokens) {
+    const messages = transcripts === null ? [] : transcripts.messagesOf(sessionId)
+    let best = null
+    for (const message of messages) {
+      const score = scoreEntry({ title: '', text: message.text, tags: [] }, tokens)
+      if (score > 0 && (best === null || score > best.score)) best = { message, score }
+    }
+    return best
+  }
+
+  /** Attach `hit` to a session row so a big session can be traced to one message. */
+  function withHit(row, entry, tokens) {
+    if (entry.src !== 'session' || transcripts === null || tokens.length === 0) return row
+    if (typeof entry.sessionId !== 'string' || entry.sessionId === '') return row
+    const best = bestMessage(entry.sessionId, tokens)
+    if (best === null) return row
+    return {
+      ...row,
+      hit: {
+        seq: best.message.seq,
+        role: best.message.role,
+        at: best.message.at,
+        text: snippet(best.message.text, tokens, 240),
+      },
+    }
+  }
+
   /** Every session this agent may read, with its indexed state (panel list). */
+  /** Indexed messages of one session, for a message-level open. */
+  function messagesOf(sessionId) {
+    return transcripts === null ? [] : transcripts.messagesOf(sessionId)
+  }
+
   function sessions(agentId = '') {
     if (transcripts === null) return []
     return transcripts.list(agentId)
@@ -241,7 +278,9 @@ export function createRecall(options = {}) {
         query,
         total: rows.length,
         expand: 0,
-        results: rows.slice(0, limit).map(row => resultOf(row.entry, row.score, 'lexical', undefined, tokens)),
+        results: rows
+          .slice(0, limit)
+          .map(row => withHit(resultOf(row.entry, row.score, 'lexical', undefined, tokens), row.entry, tokens)),
       }
     }
 
@@ -279,7 +318,9 @@ export function createRecall(options = {}) {
       query,
       total: final.length,
       expand: 1,
-      results: final.slice(0, limit).map(row => resultOf(row.entry, row.score, row.via, row.why, tokens)),
+      results: final
+        .slice(0, limit)
+        .map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
     }
   }
 
@@ -364,5 +405,5 @@ export function createRecall(options = {}) {
     }
   }
 
-  return { search, open, sessions, reindex, state, SOURCES }
+  return { search, open, sessions, messages: messagesOf, reindex, state, SOURCES }
 }

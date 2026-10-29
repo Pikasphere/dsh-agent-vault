@@ -202,6 +202,10 @@ const noSessions = await call('POST', '/op', { op: 'memory.sessions', args: { id
 assert.deepEqual(noSessions.payload.value.sessions, [])
 const rejected = await call('POST', '/op', { op: 'memory.transcript', args: { id, sessionId: 'session-unknown', include: false } })
 assert.equal(rejected.status, 404)
+const badSeq = await call('POST', '/op', { op: 'memory.message', args: { id, sessionId: 'session-unknown', seq: 1 } })
+assert.equal(badSeq.status, 404)
+const missingSeq = await call('POST', '/op', { op: 'memory.message', args: { id, sessionId: 'session-unknown' } })
+assert.equal(missingSeq.status, 400)
 console.log('recall + reindex ok')
 
 // the library is shared: a second agent sees the first agent's entry

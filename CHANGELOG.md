@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.0-alpha.6 — 2026-10-29
+
+命中定位到具体消息（M5）。
+
+### 新增
+
+- **`transcripts.js` 保留消息边界**：解析时产出 `{seq, role, at, text}` 列表，`messagesOf(sessionId)` 可读；超出字符预算时按「留头 + 留尾、丢中间」裁剪（`trimMessages`），消息列表与正文共用同一子集。
+- **`session` 命中带 `hit`**：`agent_recall` 与面板的结果多一个 `hit: {seq, role, at, text}`，指向得分最高的那条消息。
+- **`memory.message` op**：按 `sessionId + seq` 取单条消息全文；会话不可读或消息未入索引分别返回 404。
+- **面板**：结果行显示「命中消息 #N · 角色 · 原文摘要」，展开项显示该条全文与「复制该条」。
+
+### 说明
+
+- 宿主 `uiWorkspace.openSession` 不能定位到消息，所以没有「自动滚动到第 N 条」；「回到对话」仍只到会话。
+- 消息列表只在内存缓存里，`memory.reindex` 重建。
+
 ## 2.0.0-alpha.5 — 2026-10-29
 
 召回结果的可用性修补：片段定位与会话取舍。设计见 `docs/memory-recall-v2.md` §9。

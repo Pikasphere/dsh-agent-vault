@@ -343,7 +343,8 @@ function registerTools(ctx, store, rooms, journals, recall) {
         description:
           'Search this conversation\'s agent material by keyword: its own journal notes, its memory audit log, and the shared knowledge base. ' +
           'Use it when the short memory or a knowledge search did not turn up something you remember writing down. ' +
-          'Checkpoints are never returned: they are authoritative state injected whole, not recallable material.',
+          'Checkpoints are never returned: they are authoritative state injected whole, not recallable material. ' +
+          'A `session` result carries `hit` (seq, role, at, text): the single message the match came from.',
         parameters: {
           type: 'object',
           properties: {
@@ -1132,6 +1133,17 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
     case 'memory.open': {
       const vault = store.resolveVault({ id: args.id })
       return { entry: recall.open({ id: vault.id, src: args.src, entry: args.entry }) }
+    }
+    case 'memory.message': {
+      const vault = store.resolveVault({ id: args.id })
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+      const seq = Number(args.seq)
+      if (sessionId === '' || !Number.isInteger(seq)) throw new MemoryError('bad-request', 'missing sessionId or seq')
+      const known = recall.sessions(vault.id).some(item => item.sessionId === sessionId)
+      if (!known) throw new MemoryError('not-found', `session ${sessionId} is not readable by this agent`)
+      const message = recall.messages(sessionId).find(item => item.seq === seq)
+      if (message === undefined) throw new MemoryError('not-found', `message ${seq} is not indexed`)
+      return { sessionId, message }
     }
     case 'memory.sessions': {
       const vault = store.resolveVault({ id: args.id })

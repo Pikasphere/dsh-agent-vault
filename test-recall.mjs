@@ -216,4 +216,28 @@ for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit:
   assert.ok(snippet(body, []).length <= 162, 'no tokens falls back to the head')
 }
 
+// ── message-level hits ──────────────────────────────────────────────────────
+{
+  const messages = [
+    { seq: 1, role: 'user', at: '2026-10-20T10:00:00.000Z', text: '先跑一下测试' },
+    { seq: 2, role: 'assistant', at: '2026-10-20T10:01:00.000Z', text: 'zstd 帧的尾巴被截断了，我补一个解析器' },
+    { seq: 3, role: 'user', at: '2026-10-20T10:02:00.000Z', text: '好' },
+  ]
+  const stub = {
+    entries: () => [{ id: 'session-x', sessionId: 'session-x', at: '2026-10-20T10:01:00.000Z', title: '会话 X', text: messages.map(item => item.text).join(' ') }],
+    messagesOf: sessionId => (sessionId === 'session-x' ? messages : []),
+    list: () => [],
+    root: '',
+  }
+  const scoped = createRecall({ rootDir: store.root, store, journals, transcripts: stub })
+  const found = scoped.search({ id: 'demo-agent', query: 'zstd 解析器', source: 'session' })
+  assert.equal(found.results.length, 1)
+  assert.equal(found.results[0].hit?.seq, 2, 'hit points at the matching message')
+  assert.equal(found.results[0].hit?.role, 'assistant')
+  assert.ok(found.results[0].hit.text.includes('zstd'))
+  const missed = scoped.search({ id: 'demo-agent', query: '完全不存在的词', source: 'session' })
+  assert.equal(missed.results.length, 0)
+  assert.deepEqual(scoped.messages('session-x').map(item => item.seq), [1, 2, 3])
+}
+
 console.log('ALL RECALL TESTS PASSED')

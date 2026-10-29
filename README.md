@@ -257,6 +257,15 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - **逐会话勾选**：「回忆」页签下新增「对话来源」卡片，列出本智能体有权读的每个会话（标题、时间、入库字符数）。取消勾选后该会话立刻退出索引（检索不到，`memory.reindex` 也不再计入），但「回到对话」照常可用。取舍记在 `settings.json` 的 `transcriptExclude` 里，与全局开关并存。
 - 会话列表与勾选走 `memory.sessions` / `memory.transcript` 两个 op，`test-host.mjs` 覆盖了「未知会话被拒」与「没有会话时返回空列表」。
 
+### 命中定位到具体消息（2.0.0-alpha.6）
+
+会话来源的一行结果背后是一整段对话，只看预览往往判断不出「这话到底谁说的、什么时候说的」。`2.0.0-alpha.6` 把「命中的是哪一条」也带出来了：
+
+- **索引时保留消息边界**：`transcripts.js` 不再只拼一整段文本，而是同时留下 `{seq, role, at, text}` 的消息列表；超出 12000 字预算时按「留头 + 留尾、丢中间」裁剪，消息列表与正文用同一份子集，不会出现「预览里有、点进去没有」。
+- **结果带 `hit`**：`session` 来源的一行会多一个 `hit: {seq, role, at, text}`，指向词法得分最高的那条消息（`memory.open` 返回的条目也仍是整段，两者互补）。
+- **面板**：结果行下方多一行「命中消息 #12 · 助手 · …」；展开后显示该条消息全文，并给一个「复制该条」按钮（走 `memory.message`），方便拿去别处搜。
+- **不能自动滚动**：宿主的 `uiWorkspace.openSession` 只接受会话 id，没有消息锚点，所以「跳到第 N 条」做不到。能做到的是精确到消息 + 复制原文，「回到对话」仍然只回到会话。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。
@@ -278,7 +287,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - `journal.js` — 私有日志存储
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
 - `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源
-- `transcripts.js` — 会话原文读取：归属判定、文本裁剪、密钥打码
+- `transcripts.js` — 会话原文读取：归属判定、切分消息、文本裁剪、密钥打码
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 

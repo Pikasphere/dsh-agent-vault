@@ -307,6 +307,8 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - 召回面板纯前端查询，不影响 prompt，也不产生额外 token。
 - M3 起：会话来源的命中可以在展开项里「回到对话」（`uiWorkspace.openSession`，M3 ✅）；预览由 `rank.js` 的 `snippet()` 给出**命中词周围的窗口**，不再是正文开头 160 字。
 - M4 起：「对话来源」卡片逐会话勾选（`memory.sessions` / `memory.transcript`，落 `settings.json` 的 `transcriptExclude`），取消勾选的会话退出索引但保留打开入口。
+- M5 起（`2.0.0-alpha.6`）：`session` 命中带 `hit: {seq, role, at, text}`，指向得分最高的那条消息；索引时保留 `{seq, role, at, text}` 消息列表，超预算按「留头 + 留尾、丢中间」裁剪，消息列表与正文共用同一子集；`memory.message` 按 `sessionId + seq` 取单条全文，面板提供「复制该条」。
+- **硬约束**：宿主 `uiWorkspace.openSession(target)` 只接受 `SessionId | SubagentAddress`，没有消息锚点；`ISessions.fork` 是唯一带 `seq` 的入口，且会分叉会话，不能用来定位。所以「自动滚动到第 N 条」做不到，M5 的交付止于「精确到消息 + 复制原文 + 回到会话」。
 - 未做：日志条目（`memory/<id>.log.md`）没有稳定的会话反查键，所以日志命中不提供跳转；检查点不进索引。
 
 ## 10. 里程碑
@@ -318,6 +320,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M2.5** `2.0.0-alpha.3` ✅ | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | `test-recall.mjs` 五类断言全过；真库 14 条查询 expand:0 与 expand:1 的 top-1 都是 92.9%、单查询扩展 ≤ 2 条；扩展不引入缓存失效 |
 | **M3** `2.0.0-alpha.4` ✅ | 对话原文入索引：`transcripts.js` + 自带 zstd 帧解析、只读本智能体归属的会话、仅 user/assistant、密钥打码、每会话 12000 字上限、设置开关 | `test-transcripts.mjs` 全过（打码、`thinking` 丢弃、归属隔离、上限、截断提示）；真库 6 个工作区可读；会话未变时缓存命中 |
 | **M4** `2.0.0-alpha.5` ✅ | 结果片段围绕命中词（`snippet`）、逐会话勾选（`memory.sessions` / `memory.transcript`）、`/op` 的 404 映射 | `test-recall.mjs` 片段窗口、`test-transcripts.mjs` 排除后列表/检索、`test-host.mjs` 两个新 op 与 404 |
+| **M5** `2.0.0-alpha.6` ✅ | 消息级命中（`hit`）、`memory.message`、面板「复制该条」、超预算裁剪与消息列表同源 | `test-recall.mjs` 命中指向正确消息、`test-transcripts.mjs` 消息列表与预算、`test-host.mjs` 两个 404/400 |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 
