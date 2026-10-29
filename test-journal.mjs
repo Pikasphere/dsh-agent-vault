@@ -68,5 +68,28 @@ assert.throws(
   error => error instanceof MemoryError && error.code === 'empty-entry',
 )
 
+// checkpoints live in their own file and are hidden unless asked for
+const cp = journals.write({
+  id: 'alpha',
+  kind: 'checkpoint',
+  title: '交棒检查点 · 12k tokens',
+  text: '交接上下文：做完测试，下一步接面板。',
+  meta: { tokens: 12000, threshold: 10000, sessionId: 'session-abc' },
+})
+assert.equal(cp.kind, 'checkpoint')
+const notesOnly = journals.list({ id: 'alpha' })
+assert.equal(notesOnly.entries.some(entry => entry.kind === 'checkpoint'), false)
+const withCheckpoints = journals.list({ id: 'alpha', includeCheckpoints: true })
+assert.equal(withCheckpoints.entries[0].id, cp.id)
+assert.equal(withCheckpoints.entries[0].kind, 'checkpoint')
+assert.equal(withCheckpoints.entries[0].meta.tokens, 12000)
+assert.equal(withCheckpoints.entries[0].meta.sessionId, 'session-abc')
+// the checkpoint went to its own file, the note file stays checkpoint-free
+assert.ok(fs.existsSync(path.join(scratch, 'mem', 'checkpoints', 'alpha.jsonl')))
+assert.ok(!fs.readFileSync(path.join(scratch, 'mem', 'journal', 'alpha.jsonl'), 'utf8').includes('"kind":"checkpoint"'))
+// deleting a note never touches the checkpoint
+journals.remove({ id: 'alpha', entry: notesOnly.entries[0].id })
+assert.equal(journals.list({ id: 'alpha', includeCheckpoints: true }).entries.some(entry => entry.id === cp.id), true)
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL JOURNAL TESTS PASSED')

@@ -559,6 +559,16 @@ assert.equal(journal.payload.value.total, 1)
 assert.equal(journal.payload.value.entries[0].title, '日志一')
 const otherJournal = await call('POST', '/op', { op: 'journal.list', args: { id: secondId } })
 assert.equal(otherJournal.payload.value.total, 0)
+// checkpoints are opt-in: hidden by default, listed with meta on request
+await call('POST', '/op', {
+  op: 'journal.write',
+  args: { id, kind: 'checkpoint', title: '交棒检查点', text: '交接上下文', meta: { tokens: 1, threshold: 1, sessionId: 'session-x' } },
+})
+const notesOnly = await call('POST', '/op', { op: 'journal.list', args: { id } })
+assert.equal(notesOnly.payload.value.entries.some(entry => entry.kind === 'checkpoint'), false)
+const cpList = await call('POST', '/op', { op: 'journal.list', args: { id, includeCheckpoints: true } })
+assert.equal(cpList.payload.value.entries[0].kind, 'checkpoint')
+assert.equal(cpList.payload.value.entries[0].meta.sessionId, 'session-x')
 console.log('rooms + journal ok')
 
 // ── teardown ────────────────────────────────────────────────────────────────

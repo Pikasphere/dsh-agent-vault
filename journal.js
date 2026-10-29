@@ -178,6 +178,7 @@ export function createJournals(options = {}) {
         kind: entry.kind ?? 'note',
         title: entry.title ?? '',
         preview: collapse(entry.text).slice(0, 160),
+        meta: entry.meta ?? null,
       })),
     }
   }

@@ -313,6 +313,8 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - M5 起（`2.0.0-alpha.6`）：`session` 命中带 `hit: {seq, role, at, text}`，指向得分最高的那条消息；索引时保留 `{seq, role, at, text}` 消息列表，超预算按「留头 + 留尾、丢中间」裁剪，消息列表与正文共用同一子集；`memory.message` 按 `sessionId + seq` 取单条全文，面板提供「复制该条」。
 - **硬约束**：宿主 `uiWorkspace.openSession(target)` 只接受 `SessionId | SubagentAddress`，没有消息锚点；`ISessions.fork` 是唯一带 `seq` 的入口，且会分叉会话，不能用来定位。所以「自动滚动到第 N 条」做不到，M5 的交付止于「精确到消息 + 复制原文 + 回到会话」。
 - 未做：日志条目（`memory/<id>.log.md`）没有稳定的会话反查键，所以日志命中不提供跳转；检查点不进索引。
+- `2.0.0-alpha.9`：面板把检查点从日志域里分出来，单独一个「检查点」页签（倒序列表 → 全文 + `meta` 的 token 数 / 阈值 / 会话；只读，无删除）。宿主 `journal.list` 接受 `includeCheckpoints`，日志页签仍只呈现笔记。索引策略不变：检查点永不入索引。
+
 
 ## 10. 里程碑
 

@@ -116,8 +116,17 @@ window.__ModuleLoader__.load({
         journalHint: '私有日志：只属于这个智能体的详细记录（类似日记）。其他智能体看不到，也不会自动注入，它自己决定何时查阅。',
         journalEmpty: '这个智能体还没有写日志。',
         journalReadOnly: '日志是追加式的，已有条目只读；要补充就新建一条。',
+        checkpoints: '检查点',
+        checkpointsHint: '每次交棒时写下的交接上下文。这是权威状态：召回索引不检索它，也不会被当成检索素材；它只在这里按时间倒序陈列。',
+        checkpointsEmpty: '还没有检查点。上下文压力到达阈值、且记忆与日志都写完时，才会写一条。',
+        checkpointTriggered: '触发时',
+        checkpointThreshold: '阈值',
+        checkpointSession: '会话',
+        checkpointCopy: '复制全文',
+        checkpointCopied: '已复制',
+        checkpointCopyFail: '复制失败',
         handoff: '接力',
-        handoffHint: '上下文压力到达阈值后，这一步会提醒模型先写记忆和日志；两件都完成后自动生成一份交棒检查点，存进该智能体的日志（可选再导出一份 markdown）。',
+        handoffHint: '上下文压力到达阈值后，这一步会提醒模型先写记忆和日志；两件都完成后自动写下一份交棒检查点（可选再导出一份 markdown）。',
         handoffEnabled: '启用接力提醒',
         handoffEnabledHint: '关闭后不再测量压力，也不生成检查点。',
         handoffThreshold: '触发的 token 阈值',
@@ -347,8 +356,17 @@ window.__ModuleLoader__.load({
         journalHint: 'Private journal: the detailed diary-like record of this one agent. Other agents cannot see it, nothing is injected automatically, and the agent decides when to consult it.',
         journalEmpty: 'This agent has not written a journal entry yet.',
         journalReadOnly: 'The journal is append-only, so an existing entry is read-only; add a new one instead.',
+        checkpoints: 'Checkpoints',
+        checkpointsHint: 'The handoff context written at each relay. This is authoritative state: recall never indexes it and never treats it as material; it is listed here, newest first.',
+        checkpointsEmpty: 'No checkpoint yet. One is written once pressure passes the threshold and both memory and journal are saved.',
+        checkpointTriggered: 'Written at',
+        checkpointThreshold: 'threshold',
+        checkpointSession: 'session',
+        checkpointCopy: 'Copy all',
+        checkpointCopied: 'Copied',
+        checkpointCopyFail: 'Copy failed',
         handoff: 'Handoff',
-        handoffHint: 'When context pressure reaches the threshold, this step asks the model to write its memory and journal first; once both land, a handoff checkpoint is written into that agent journal (optionally exported as markdown).',
+        handoffHint: 'When context pressure reaches the threshold, this step asks the model to write its memory and journal first; once both land, a handoff checkpoint is written (optionally exported as markdown).',
         handoffEnabled: 'Enable handoff reminders',
         handoffEnabledHint: 'When off, pressure is not measured and no checkpoint is produced.',
         handoffThreshold: 'Trigger threshold (tokens)',
@@ -759,6 +777,8 @@ window.__ModuleLoader__.load({
       const [journal, setJournal] = useState([])
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
+      const [checkpoints, setCheckpoints] = useState([])
+      const [checkpointEntry, setCheckpointEntry] = useState(null)
       const [handoffInfo, setHandoffInfo] = useState(null)
       const [handoffDraft, setHandoffDraft] = useState({
         triggerTokens: 300000,
@@ -950,6 +970,27 @@ window.__ModuleLoader__.load({
         })
           .then(payload => {
             if (live) setJournal(payload.value?.entries ?? [])
+          })
+          .catch(error => {
+            if (live) setFailure(String(error?.message ?? error))
+          })
+        return () => {
+          live = false
+        }
+      }, [vault?.id, tab, journalVersion])
+
+      useEffect(() => {
+        if (!vault || tab !== 'checkpoints') return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'journal.list', args: { id: vault.id, includeCheckpoints: true, limit: 100 } }),
+        })
+          .then(payload => {
+            if (!live) return
+            const rows = (payload.value?.entries ?? []).filter(entry => entry.kind === 'checkpoint')
+            setCheckpoints(rows)
           })
           .catch(error => {
             if (live) setFailure(String(error?.message ?? error))
@@ -1251,6 +1292,12 @@ window.__ModuleLoader__.load({
           setJournalEditor(null)
           setJournalVersion(value => value + 1)
         }
+      }
+
+      const checkpointOpen = async entryId => {
+        if (!vault) return
+        const entry = await call('journal.read', { id: vault.id, entry: entryId })
+        if (entry) setCheckpointEntry(entry)
       }
 
       const saveMemory = async () => {
@@ -1747,6 +1794,85 @@ window.__ModuleLoader__.load({
                       h(
                         'button',
                         { key: entry.id, className: 'am-item', onClick: () => void journalOpen(entry.id) },
+                        h('span', { className: 'am-item-title' }, entry.title || entry.id),
+                        entry.preview ? h('span', { className: 'am-item-snippet' }, entry.preview) : null,
+                        h(
+                          'span',
+                          { className: 'am-item-meta' },
+                          h('span', { className: 'am-mono' }, entry.id),
+                          h('span', null, ago(entry.at, locale)),
+                        ),
+                      ),
+                    ),
+                  ),
+            )
+      } else if (tab === 'checkpoints') {
+        body = checkpointEntry
+          ? h(
+              'div',
+              { className: 'am-split' },
+              h(
+                'div',
+                { className: 'am-row' },
+                h('button', { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => setCheckpointEntry(null) }, `← ${t('back')}`),
+                h('span', { style: { flex: 1 } }),
+                h(
+                  'button',
+                  {
+                    className: 'am-btn am-btn-sm',
+                    onClick: async () => {
+                      const done = await copyText(checkpointEntry.text)
+                      setNotice(done ? t('checkpointCopied') : t('checkpointCopyFail'))
+                    },
+                  },
+                  t('checkpointCopy'),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'am-card' },
+                h('div', { className: 'am-item-title' }, checkpointEntry.title || checkpointEntry.id),
+                h(
+                  'div',
+                  { className: 'am-item-meta' },
+                  h('span', { className: 'am-mono' }, checkpointEntry.id),
+                  h('span', null, ago(checkpointEntry.at, locale)),
+                  checkpointEntry.meta?.tokens
+                    ? h('span', null, `${t('checkpointTriggered')} ${checkpointEntry.meta.tokens} tokens`)
+                    : null,
+                  checkpointEntry.meta?.threshold
+                    ? h('span', null, `${t('checkpointThreshold')} ${checkpointEntry.meta.threshold}`)
+                    : null,
+                ),
+                checkpointEntry.meta?.sessionId
+                  ? h(
+                      'div',
+                      { className: 'am-item-meta' },
+                      h('span', null, `${t('checkpointSession')} `),
+                      h('span', { className: 'am-mono' }, checkpointEntry.meta.sessionId),
+                    )
+                  : null,
+              ),
+              h('textarea', {
+                className: 'am-textarea',
+                style: { minHeight: 360 },
+                readOnly: true,
+                value: checkpointEntry.text,
+              }),
+            )
+          : h(
+              'div',
+              { className: 'am-split' },
+              h('p', { className: 'am-note' }, t('checkpointsHint')),
+              checkpoints.length === 0
+                ? h('p', { className: 'am-note-dim' }, t('checkpointsEmpty'))
+                : h(
+                    'div',
+                    { className: 'am-list' },
+                    checkpoints.map(entry =>
+                      h(
+                        'button',
+                        { key: entry.id, className: 'am-item', onClick: () => void checkpointOpen(entry.id) },
                         h('span', { className: 'am-item-title' }, entry.title || entry.id),
                         entry.preview ? h('span', { className: 'am-item-snippet' }, entry.preview) : null,
                         h(
@@ -2565,7 +2691,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'nav',
                 { className: 'am-tabs' },
-                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'handoff', 'settings']
+                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'checkpoints', 'handoff', 'settings']
                   .filter(key => key !== 'sessions' || data?.capabilities?.sessions === true)
                   .map(key =>
                   h(
@@ -2579,6 +2705,7 @@ window.__ModuleLoader__.load({
                           setEditor(null)
                           setResults(null)
                         }
+                        if (key !== 'checkpoints') setCheckpointEntry(null)
                       },
                     },
                     key === 'sessions' ? t('sessionsTab') : t(key),

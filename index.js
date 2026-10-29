@@ -1271,11 +1271,24 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
     case 'room.clear':
       return rooms.clear({ id: args.id })
     case 'journal.list':
-      return journals.list({ id: args.id, query: args.query, limit: args.limit })
+      return journals.list({
+        id: args.id,
+        query: args.query,
+        limit: args.limit,
+        includeCheckpoints: args.includeCheckpoints === true,
+      })
     case 'journal.read':
       return journals.read({ id: args.id, entry: args.entry })
     case 'journal.write':
-      return journals.write({ id: args.id, title: args.title, text: args.text })
+      return journals.write({
+        id: args.id,
+        title: args.title,
+        text: args.text,
+        // The panel only writes notes; the extra fields exist so tests and host
+        // side callers can place a checkpoint without reaching into journal.js.
+        kind: args.kind,
+        meta: args.meta,
+      })
     case 'journal.delete':
       return journals.remove({ id: args.id, entry: args.entry })
     case 'handoff.status':
