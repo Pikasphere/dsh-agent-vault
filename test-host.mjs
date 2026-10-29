@@ -218,6 +218,21 @@ const badSeq = await call('POST', '/op', { op: 'memory.message', args: { id, ses
 assert.equal(badSeq.status, 404)
 const missingSeq = await call('POST', '/op', { op: 'memory.message', args: { id, sessionId: 'session-unknown' } })
 assert.equal(missingSeq.status, 400)
+// the recall tab persists its ranking mode through recall.save; unknown values are ignored
+const lexicalMode = await call('POST', '/op', { op: 'recall.save', args: { recall: { mode: 'lexical' } } })
+assert.equal(lexicalMode.status, 200)
+assert.equal(lexicalMode.payload.value.mode, 'lexical')
+const keptMode = await call('POST', '/op', { op: 'recall.save', args: { recall: { mode: 'sideways' } } })
+assert.equal(keptMode.payload.value.mode, 'lexical')
+const hybridMode = await call('POST', '/op', { op: 'recall.save', args: { recall: { mode: 'hybrid', minCosine: 2 } } })
+assert.equal(hybridMode.payload.value.mode, 'hybrid')
+const settingsBack = await call('POST', '/op', { op: 'state', args: {} })
+assert.equal(settingsBack.payload.value.recall.minCosine, 1)
+const lexicalSearch = await call('POST', '/op', {
+  op: 'memory.recall',
+  args: { id, query: '存储层', mode: 'lexical' },
+})
+assert.equal(lexicalSearch.payload.value.mode, 'lexical')
 console.log('recall + reindex ok')
 
 // the library is shared: a second agent sees the first agent's entry

@@ -1237,6 +1237,12 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       if (action === 'prepare') return recall.prepare()
       return recall.state().semantic
     }
+    case 'recall.save': {
+      // The recall tab persists its mode switch here; weights stay in settings.json
+      // for anyone who wants to recalibrate from the outside.
+      if (args.recall && typeof args.recall === 'object') store.saveSettings({ recall: args.recall })
+      return recall.state()
+    }
     case 'knowledge.list':
       return store.listKnowledge({ id: args.id })
     case 'knowledge.search':

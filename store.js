@@ -76,6 +76,13 @@ function clamp(value, low, high, fallback) {
   return Math.min(Math.max(Math.round(number), low), high)
 }
 
+/** Weights and the cosine floor live in [0, 1]; anything else falls back. */
+function clampWeight(value, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(Math.max(number, 0), 1)
+}
+
 function snippet(body, length = 180) {
   const text = collapse(String(body ?? '').replace(/^---[\s\S]*?---/, ''))
   return text.length > length ? `${text.slice(0, length - 1)}…` : text
@@ -183,6 +190,13 @@ export function createStore(options = {}) {
 
   function settings() {
     const raw = readJson(files.settings, {})
+    const recallRaw = raw.recall && typeof raw.recall === 'object' ? raw.recall : {}
+    const recall = {
+      mode: recallRaw.mode === 'lexical' ? 'lexical' : 'hybrid',
+      lexicalWeight: clampWeight(recallRaw.lexicalWeight, 0.6),
+      semanticWeight: clampWeight(recallRaw.semanticWeight, 0.4),
+      minCosine: clampWeight(recallRaw.minCosine, 0.45),
+    }
     return {
       version: 1,
       knowledgeDir: typeof raw.knowledgeDir === 'string' ? raw.knowledgeDir : '',
@@ -193,6 +207,7 @@ export function createStore(options = {}) {
       transcriptExclude: Array.isArray(raw.transcriptExclude)
         ? raw.transcriptExclude.filter(item => typeof item === 'string' && item !== '')
         : [],
+      recall,
     }
   }
 
@@ -409,6 +424,7 @@ export function createStore(options = {}) {
       transcripts: current.transcripts,
       sessionsRoot: current.sessionsRoot,
       transcriptExclude: current.transcriptExclude,
+      recall: current.recall,
       bindings: listBindings(),
       vaults: vaults,
     }
@@ -496,6 +512,14 @@ export function createStore(options = {}) {
       next.transcriptExclude = [...new Set(patch.transcriptExclude.filter(item => typeof item === 'string' && item !== ''))].slice(0, 500)
     }
     if (typeof patch.sessionsRoot === 'string') next.sessionsRoot = patch.sessionsRoot.trim()
+    if (patch.recall && typeof patch.recall === 'object') {
+      const merged = { ...next.recall }
+      if (patch.recall.mode === 'hybrid' || patch.recall.mode === 'lexical') merged.mode = patch.recall.mode
+      if (patch.recall.lexicalWeight !== undefined) merged.lexicalWeight = clampWeight(patch.recall.lexicalWeight, merged.lexicalWeight)
+      if (patch.recall.semanticWeight !== undefined) merged.semanticWeight = clampWeight(patch.recall.semanticWeight, merged.semanticWeight)
+      if (patch.recall.minCosine !== undefined) merged.minCosine = clampWeight(patch.recall.minCosine, merged.minCosine)
+      next.recall = merged
+    }
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {
       next.activeVault = ''
     }

@@ -87,7 +87,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 ```
 <memoryDir>/agents.json                 智能体注册表
-<memoryDir>/settings.json               知识库目录、默认智能体
+<memoryDir>/settings.json               知识库目录、默认智能体、对话入索引、排序模式（recall.mode / 权重 / 余弦下限）
 <memoryDir>/bindings.json               对话 → 智能体 绑定
 <memoryDir>/memory/<agentId>.md         该智能体的记忆
 <memoryDir>/memory/<agentId>.log.md     记忆写入审计（追加式）
@@ -288,6 +288,15 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **实测**：12 条与目标笔记没有字面重叠的改写查询，词法 top-1 25.0% / MRR 0.403（2 ms）→ hybrid 41.7% / 0.528（20 ms，预热后）。脚本是 `eval/recall-paraphrase.mjs`，逐条打印排名变化与语义独有命中，可复现。完整设计与取舍见 [docs/embedding-local.md](docs/embedding-local.md)。
 
 
+
+### 语义索引卡片与排序开关（2.0.0-alpha.10）
+
+「回忆」页签里，索引状态卡片下方多了一张**语义索引**卡片，把 alpha.8 的本地向量层从「只能看工具返回」变成可操作：
+
+- **状态**：模型是否就绪（模型名 + 维度）、已建向量的条数、构建时间；模型缺失或 ORT 加载失败时直接显示原因（`model-missing` 等），并给出下载命令。
+- **准备 / 同步向量**：一键走 `memory.model {action:"prepare"}`——加载模型（预热 150 ms）并按内容 hash 增量同步 `index/vectors.bin`。有新笔记后点「同步向量」即可，不用重建整个索引；模型不可用时按钮禁用。
+- **排序开关**：`混合` / `仅关键词` 两个互斥按钮，写进 `settings.json` 的 `recall.mode`（经 `recall.save`），重启后仍保留。`仅关键词` 是回归开关：命中结果与 alpha.7 一致，且完全不加载模型。
+- 排序模式对面板检索与模型侧 `agent_recall` 同时生效；单次调用仍可用 `mode` 参数覆盖。`settings.json` 里的 `recall.lexicalWeight` / `semanticWeight` / `minCosine` 也可手工调，面板只暴露最常用的那个开关。
 
 ### 日志命中也能回到对话（2.0.0-alpha.7）
 

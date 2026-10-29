@@ -260,4 +260,17 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   assert.deepEqual(scoped.messages('session-x').map(item => item.seq), [1, 2, 3])
 }
 
+// ── ranking mode: settings are the default, an explicit argument wins ───────
+{
+  assert.equal(recall.state().mode, 'hybrid', 'defaults to hybrid')
+  store.saveSettings({ recall: { mode: 'lexical' } })
+  assert.equal(recall.state().mode, 'lexical', 'the panel switch is persisted in settings.json')
+  const fromSettings = await recall.search({ id: agent.id, query: 'anything' })
+  assert.equal(fromSettings.mode, 'lexical', 'search follows the persisted mode')
+  const explicit = await recall.search({ id: agent.id, query: 'anything', mode: 'hybrid' })
+  assert.equal(explicit.mode, 'hybrid', 'an explicit mode overrides the setting')
+  store.saveSettings({ recall: { mode: 'hybrid' } })
+  assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45 })
+}
+
 console.log('ALL RECALL TESTS PASSED')

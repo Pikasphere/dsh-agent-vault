@@ -314,6 +314,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - **硬约束**：宿主 `uiWorkspace.openSession(target)` 只接受 `SessionId | SubagentAddress`，没有消息锚点；`ISessions.fork` 是唯一带 `seq` 的入口，且会分叉会话，不能用来定位。所以「自动滚动到第 N 条」做不到，M5 的交付止于「精确到消息 + 复制原文 + 回到会话」。
 - 未做：日志条目（`memory/<id>.log.md`）没有稳定的会话反查键，所以日志命中不提供跳转；检查点不进索引。
 - `2.0.0-alpha.9`：面板把检查点从日志域里分出来，单独一个「检查点」页签（倒序列表 → 全文 + `meta` 的 token 数 / 阈值 / 会话；只读，无删除）。宿主 `journal.list` 接受 `includeCheckpoints`，日志页签仍只呈现笔记。索引策略不变：检查点永不入索引。
+- `2.0.0-alpha.10`：索引卡片下方新增「语义索引」卡片——模型就绪状态（名称 / 维度 / 失败原因）、向量条数、构建时间、「准备 / 同步向量」（`memory.model {action:"prepare"}`），以及 `混合` / `仅关键词` 排序开关（经 `recall.save` 落到 `settings.json` 的 `recall.mode`，重启保留）。`store.state()` 同时暴露 `recall`；`settings.json` 里 `recall.lexicalWeight` / `semanticWeight` / `minCosine` 此前被 `store.settings()` 丢弃、写了不生效，这一版一并修掉。
 
 
 ## 10. 里程碑
@@ -328,6 +329,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M5** `2.0.0-alpha.6` ✅ | 消息级命中（`hit`）、`memory.message`、面板「复制该条」、超预算裁剪与消息列表同源 | `test-recall.mjs` 命中指向正确消息、`test-transcripts.mjs` 消息列表与预算、`test-host.mjs` 两个 404/400 |
 | **M6** `2.0.0-alpha.7` ✅ | 别名可写（`memory.aliases` / `memory.alias` / `agent_alias` / 面板卡片）、日志条目带 `sessionId` 可回到对话 | `test-recall.mjs` 别名写入即时生效、删除幂等、日志行带会话；`test-store.mjs` 日志含 `[session: …]`；`test-host.mjs` 别名 op 与工具 |
 | **M7** `2.0.0-alpha.8` ✅ | 本地 BGE 语义层（`embed.js` / `vectors.js`）、RRF 混合排名、`mode` 参数、`memory.model`、`scripts/fetch-model.mjs`、改写评测 | `eval/recall-paraphrase.mjs`：hybrid top-1 41.7% / MRR 0.528 vs lexical 25.0% / 0.403（+16.7 pt / +0.125，55 ms）；词法基线 92.9% 不动；`test-embed.mjs` 全过（含 RRF 量纲回归） |
+| **M8** `2.0.0-alpha.10` ✅ | 面板「语义索引」卡片（状态 / 准备·同步向量 / 混合·仅关键词开关）、`recall.save`、`settings.json` 的 `recall` 段真正生效、`store.state().recall` | `test-store.mjs` 归一化与夹取、`test-recall.mjs` 持久化模式与显式覆盖、`test-host.mjs` `recall.save` 白名单与 `state.recall` |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 

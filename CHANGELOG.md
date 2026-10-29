@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-alpha.10 — 2026-10-29
+
+面板「回忆」页签补上语义层的操作面：模型状态、向量准备与排序开关。
+
+### 新增
+
+- **「语义索引」卡片**：显示模型是否就绪（名称 + 维度）、向量条数、构建时间；不可用时显示原因（`model-missing` / ORT 加载失败等）。「准备向量」/「同步向量」走 `memory.model {action:"prepare"}`，加载模型并按内容 hash 增量同步 `index/vectors.bin`。
+- **排序开关**：`混合` / `仅关键词` 两个按钮，经新 op `recall.save` 写进 `settings.json` 的 `recall.mode`，重启后保留；单次检索仍可用 `mode` 参数覆盖。
+- **`recall.save` 宿主 op**：局部合并 `recall` 设置（`mode` 白名单、三个数值夹到 `[0,1]`），返回最新的 `memory.index` 状态。
+- **`store.state()` 的 `recall` 字段**：面板与外部消费者不必再去读 `settings.json` 才能知道当前排序模式。
+
+### 修复
+
+- `settings.json` 的 `recall` 段此前会被 `store.settings()` 丢弃——`recall.lexicalWeight` / `semanticWeight` / `minCosine` 写了也不生效，`recall.mode` 更是无处可存。现在读取时归一化、写入时局部合并。
+
 ## 2.0.0-alpha.9 — 2026-10-29
 
 面板新增「检查点」页签：交棒检查点从日志域里分出来单独陈览。

@@ -263,6 +263,21 @@ window.__ModuleLoader__.load({
         recallViaEntity: '关联·实体',
         recallViaSession: '关联·会话',
         recallWhy: '关联自',
+        recallSemantic: '语义索引',
+        recallSemanticReady: '已就绪',
+        recallSemanticMissing: '不可用',
+        recallSemanticCount: '条向量',
+        recallSemanticNone: '未建立',
+        recallSemanticHint: '本地模型未加载',
+        recallSemanticPrepare: '准备向量',
+        recallSemanticSync: '同步向量',
+        recallSemanticBusy: '处理中…',
+        recallSemanticEmpty: '还没有向量，先点「准备向量」',
+        recallMode: '排序',
+        recallModeHybrid: '混合',
+        recallModeLexical: '仅关键词',
+        recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
+        recallModeSaved: '排序模式已保存',
       },
       en: {
         nav: 'Agents',
@@ -503,6 +518,21 @@ window.__ModuleLoader__.load({
         recallViaEntity: 'related·entity',
         recallViaSession: 'related·session',
         recallWhy: 'related via',
+        recallSemantic: 'Semantic index',
+        recallSemanticReady: 'ready',
+        recallSemanticMissing: 'unavailable',
+        recallSemanticCount: 'vectors',
+        recallSemanticNone: 'not built',
+        recallSemanticHint: 'local model not loaded',
+        recallSemanticPrepare: 'Prepare vectors',
+        recallSemanticSync: 'Sync vectors',
+        recallSemanticBusy: 'working…',
+        recallSemanticEmpty: 'No vectors yet — click "Prepare vectors"',
+        recallMode: 'Ranking',
+        recallModeHybrid: 'Hybrid',
+        recallModeLexical: 'Keywords only',
+        recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
+        recallModeSaved: 'Ranking mode saved',
       },
     }
 
@@ -797,6 +827,8 @@ window.__ModuleLoader__.load({
       const [recallSince, setRecallSince] = useState('')
       const [recallDetail, setRecallDetail] = useState(null)
       const [indexData, setIndexData] = useState(null)
+      const [semanticData, setSemanticData] = useState(null)
+      const [semanticBusy, setSemanticBusy] = useState(false)
       const [indexVersion, setIndexVersion] = useState(0)
       const [sessionList, setSessionList] = useState(null)
       const [aliasData, setAliasData] = useState(null)
@@ -1082,6 +1114,25 @@ window.__ModuleLoader__.load({
           })
           .catch(error => {
             if (live) setFailure(String(error?.message ?? error))
+          })
+        return () => {
+          live = false
+        }
+      }, [tab, indexVersion])
+
+      useEffect(() => {
+        if (tab !== 'recall') return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'memory.model', args: { action: 'status' } }),
+        })
+          .then(payload => {
+            if (live) setSemanticData(payload.value ?? null)
+          })
+          .catch(error => {
+            if (live) setSemanticData(null)
           })
         return () => {
           live = false
@@ -1420,6 +1471,32 @@ window.__ModuleLoader__.load({
       const rebuildIndex = async () => {
         const rebuilt = await call('memory.reindex', {})
         if (rebuilt !== undefined) setIndexVersion(current => current + 1)
+      }
+
+      /**
+       * Loading the model and syncing vectors are one op on purpose: the model is
+       * 24 MB of local weights, and a panel that only reports "ready" without a way
+       * to build the vector file leaves the first search paying the embedding cost.
+       */
+      const prepareSemantic = async () => {
+        setSemanticBusy(true)
+        try {
+          const prepared = await call('memory.model', { action: 'prepare' })
+          if (prepared && prepared.ok === false) setFailure(String(prepared.error ?? 'prepare-failed'))
+          setIndexVersion(current => current + 1)
+          const refreshed = await call('memory.model', { action: 'status' })
+          if (refreshed) setSemanticData(refreshed)
+        } finally {
+          setSemanticBusy(false)
+        }
+      }
+
+      const switchRecallMode = async mode => {
+        const next = await call('recall.save', { recall: { mode } })
+        if (next) {
+          setIndexData(next)
+          setNotice(t('recallModeSaved'))
+        }
       }
 
       const search = async () => {
@@ -2290,6 +2367,81 @@ window.__ModuleLoader__.load({
                     .join(' · ') || t('recallEmpty'),
                 ),
               ),
+          h(
+            'div',
+            { className: 'am-card' },
+            h(
+              'div',
+              { className: 'am-row' },
+              h('span', { className: 'am-label' }, t('recallSemantic')),
+              h(
+                'span',
+                { className: 'am-note-dim' },
+                semanticData === null
+                  ? '—'
+                  : semanticData.available
+                    ? [t('recallSemanticReady'), semanticData.model, semanticData.dim ? `${semanticData.dim}d` : '']
+                        .filter(Boolean)
+                        .join(' · ')
+                    : t('recallSemanticMissing'),
+              ),
+              h('span', { style: { flex: 1 } }),
+              h(
+                'span',
+                { className: 'am-note-dim' },
+                semanticData === null
+                  ? ''
+                  : semanticData.present
+                    ? `${semanticData.count ?? 0} ${t('recallSemanticCount')}`
+                    : t('recallSemanticNone'),
+              ),
+            ),
+            semanticData && semanticData.builtAt
+              ? h('div', { className: 'am-note-dim' }, `${t('recallBuilt')} ${ago(semanticData.builtAt, locale)}`)
+              : null,
+            semanticData && semanticData.available === false
+              ? h(
+                  'div',
+                  { className: 'am-note' },
+                  `${t('recallSemanticHint')}: ${semanticData.error || semanticData.embedderError || 'model-missing'}`,
+                )
+              : null,
+            semanticData && semanticData.available && semanticData.present === false
+              ? h('div', { className: 'am-note-dim' }, t('recallSemanticEmpty'))
+              : null,
+            h(
+              'div',
+              { className: 'am-row' },
+              h('span', { className: 'am-label' }, t('recallMode')),
+              ...['hybrid', 'lexical'].map(mode =>
+                h(
+                  'button',
+                  {
+                    key: mode,
+                    className: `am-btn am-btn-sm${(indexData?.mode ?? 'hybrid') === mode ? '' : ' am-btn-ghost'}`,
+                    disabled: busy !== '' || semanticBusy,
+                    onClick: () => void switchRecallMode(mode),
+                  },
+                  t(mode === 'hybrid' ? 'recallModeHybrid' : 'recallModeLexical'),
+                ),
+              ),
+              h('span', { style: { flex: 1 } }),
+              h(
+                'button',
+                {
+                  className: 'am-btn am-btn-sm',
+                  disabled: busy !== '' || semanticBusy || !semanticData?.available,
+                  onClick: () => void prepareSemantic(),
+                },
+                semanticBusy
+                  ? t('recallSemanticBusy')
+                  : semanticData?.present
+                    ? t('recallSemanticSync')
+                    : t('recallSemanticPrepare'),
+              ),
+            ),
+            h('div', { className: 'am-note-dim' }, t('recallModeHint')),
+          ),
           h(
             'div',
             { className: 'am-card' },
