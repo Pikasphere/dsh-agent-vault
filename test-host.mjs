@@ -72,6 +72,7 @@ apply(ctx, { memoryDir: path.join(scratch, 'mem'), knowledgeDir: path.join(scrat
 // ── registration ────────────────────────────────────────────────────────────
 const names = registered.tools.map(tool => tool.name).sort()
 assert.deepEqual(names, [
+  'agent_alias',
   'agent_journal',
   'agent_knowledge_read',
   'agent_knowledge_search',
@@ -202,6 +203,17 @@ const noSessions = await call('POST', '/op', { op: 'memory.sessions', args: { id
 assert.deepEqual(noSessions.payload.value.sessions, [])
 const rejected = await call('POST', '/op', { op: 'memory.transcript', args: { id, sessionId: 'session-unknown', include: false } })
 assert.equal(rejected.status, 404)
+// alias table: readable and writable from both the panel and the tool
+const aliasEmpty = await call('POST', '/op', { op: 'memory.aliases', args: {} })
+assert.deepEqual(aliasEmpty.payload.value.table, {})
+const aliasWritten = await call('POST', '/op', { op: 'memory.alias', args: { key: 'widget', targets: ['lane'] } })
+assert.deepEqual(aliasWritten.payload.value.table, { widget: ['lane'] })
+const aliasListed = await call('POST', '/op', { op: 'memory.aliases', args: {} })
+assert.deepEqual(aliasListed.payload.value.table.widget, ['lane'])
+const aliasBad = await call('POST', '/op', { op: 'memory.alias', args: { key: '  ' } })
+assert.equal(aliasBad.status, 400)
+const aliasGone = await call('POST', '/op', { op: 'memory.alias', args: { key: 'widget', remove: true } })
+assert.equal(aliasGone.payload.value.removed, true)
 const badSeq = await call('POST', '/op', { op: 'memory.message', args: { id, sessionId: 'session-unknown', seq: 1 } })
 assert.equal(badSeq.status, 404)
 const missingSeq = await call('POST', '/op', { op: 'memory.message', args: { id, sessionId: 'session-unknown' } })
@@ -233,6 +245,15 @@ assert.ok(memoryResult.chars > 0)
 const tooLong = await memoryTool.execute({ content: 'x'.repeat(4200) }, exec)
 assert.equal(tooLong.ok, false)
 assert.equal(tooLong.error, 'memory-too-long')
+
+const aliasTool = registered.tools.find(tool => tool.name === 'agent_alias')
+const aliasSetTool = await aliasTool.execute({ action: 'set', key: '鲸鱼', targets: ['whale'] }, exec)
+assert.equal(aliasSetTool.ok, true)
+assert.deepEqual(aliasSetTool.targets, ['whale'])
+const aliasListTool = await aliasTool.execute({}, exec)
+assert.deepEqual(aliasListTool.table['鲸鱼'], ['whale'])
+const aliasDelTool = await aliasTool.execute({ action: 'delete', key: '鲸鱼' }, exec)
+assert.equal(aliasDelTool.removed, true)
 
 const kbTool = registered.tools.find(tool => tool.name === 'agent_knowledge_write')
 const kbResult = await kbTool.execute({ title: '打包', content: 'local dir 安装是链接。', tags: ['bundle'] }, exec)

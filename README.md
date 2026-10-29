@@ -116,7 +116,8 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 | `agent_knowledge_write` | 新增或按 `entry` 修订已有条目 |
 | `agent_room` | `action`: `list` / `read` / `say` / `join` / `leave`，参与讨论室 |
 | `agent_journal` | `action`: `list` / `search` / `read` / `write`，读写**自己的**私有日志 |
-| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库 |
+| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库、自己相关的会话原文 |
+| `agent_alias` | 维护别名表：`list` / `set` / `delete`，让「说得出口但写不出来」叫法也能被检索到 |
 
 工具通过调用会话的绑定解析智能体；显式传 `id` 时优先。`agent_journal` 与 `agent_recall` 永远只作用于调用方的智能体，**不接受其他智能体 id**，这就是隔离的实现方式。
 
@@ -226,13 +227,15 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 扩展项在面板里带「关联·实体 / 关联·引用」徽标，展开可看「关联自 X」；模型侧用 `agent_recall` 时，扩展项带 `via` 与 `why: {hub, edge, weight}`。想关掉对照基线就传 `expand: 0`。
 
-别名表在手改的 `index/aliases.json`（`memory.reindex` 会建一个空的）：
+别名表在 `index/aliases.json`（`memory.reindex` 会建一个空的），三个地方都能改：直接编辑文件、面板「回忆」页签的「关联别名」卡片、或模型侧的 `agent_alias` 工具。
 
 ```json
 { "vault 插件": ["dsh-agent-vault"], "小鲸鱼": ["dsh-whale-widget"] }
 ```
 
-命中的条目以「关联·别名」出现——中文检索里加一行别名，比调边权划算得多。
+命中的条目以「关联·别名」出现——中文检索里加一行别名，比调边权划算得多。写进去立即生效（按文件 mtime 判脏，不需要 `memory.reindex`）；目标列表给空数组等于删除这个键。
+
+op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写；`remove: true` 删）。别名是全局的，不按智能体隔离——它描述的是「词与词的关系」，不是谁的经验。
 
 #### 实测口径
 
@@ -265,6 +268,15 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - **结果带 `hit`**：`session` 来源的一行会多一个 `hit: {seq, role, at, text}`，指向词法得分最高的那条消息（`memory.open` 返回的条目也仍是整段，两者互补）。
 - **面板**：结果行下方多一行「命中消息 #12 · 助手 · …」；展开后显示该条消息全文，并给一个「复制该条」按钮（走 `memory.message`），方便拿去别处搜。
 - **不能自动滚动**：宿主的 `uiWorkspace.openSession` 只接受会话 id，没有消息锚点，所以「跳到第 N 条」做不到。能做到的是精确到消息 + 复制原文，「回到对话」仍然只回到会话。
+
+### 日志命中也能回到对话（2.0.0-alpha.7）
+
+记忆日志（`memory/<agentId>.log.md`）原来是纯文本审计，条目没有会话键，所以日志命中只能看不能跳。`2.0.0-alpha.7` 起：
+
+- **写入时带上会话**：`agent_memory_save` 在标题行末尾追加 `[session: session-…]`。面板手写的记忆写 `panel`，没有会话可记就不加——旧日志原样保留，不用迁移。
+- **解析时拆出来**：日志条目多一个 `sessionId`，`memory.open` 也会返回它，于是面板的「回到对话」对日志命中同样可用。
+- 标题不会因此变丑：后缀在解析时被剥掉，`title` 还是人写的那句话。
+
 
 ## 已知限制
 

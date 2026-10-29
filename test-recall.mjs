@@ -197,6 +197,26 @@ assert.equal(
   'a checkpoint never joins the graph',
 )
 
+// The alias table is writable through recall's own ops (panel + agent_alias).
+const tableBefore = recall.aliases()
+assert.equal(tableBefore.table['小鲸鱼'][0], 'dsh-whale-widget')
+const aliasSet = recall.aliasSet({ key: '小鲸鱼', targets: ['dsh-whale-widget', 'pet'] })
+assert.deepEqual(aliasSet.targets, ['dsh-whale-widget', 'pet'])
+assert.deepEqual(recall.aliases().table['小鲸鱼'], ['dsh-whale-widget', 'pet'])
+const aliasAgain = recall.search({ id: agent.id, query: '小鲸鱼' })
+assert.equal(aliasAgain.results[0]?.id, whale.id, 'the written alias is live without a reindex')
+assert.equal(recall.aliasRemove({ key: '小鲸鱼' }).removed, true)
+assert.equal(recall.aliases().table['小鲸鱼'], undefined)
+assert.equal(recall.aliasRemove({ key: '小鲸鱼' }).removed, false)
+assert.equal(recall.aliasSet({ key: '小鲸鱼', targets: [] }).targets.length, 0, 'an empty target list deletes')
+
+// A memory save records the conversation it came from, so a log hit can jump back.
+store.writeMemory({ id: agent.id, content: 'the log entry remembers its session', sessionId: 'session-abcdef01' })
+const logged = recall.search({ id: agent.id, query: 'remembers its session', source: 'log' })
+assert.equal(logged.results[0]?.src, 'log')
+assert.equal(logged.results[0]?.sessionId, 'session-abcdef01', 'log rows carry the session id')
+assert.equal(recall.open({ id: agent.id, src: 'log', entry: logged.results[0].id })?.sessionId, 'session-abcdef01')
+
 // Expansion is capped and every extra carries a reason.
 for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit: 25 }).results) {
   if (row.via === 'lexical') continue

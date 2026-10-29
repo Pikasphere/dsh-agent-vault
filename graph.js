@@ -233,5 +233,59 @@ export function createAliases(options = {}) {
     return file
   }
 
-  return { file, read, expandQuery, ensure }
+  /** The raw table, normalised: `{ key: [target, ...] }`, empties dropped. */
+  function map() {
+    let raw
+    try {
+      raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {
+      return {}
+    }
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    const out = {}
+    for (const [key, value] of Object.entries(raw)) {
+      const name = String(key).trim()
+      if (name === '') continue
+      const targets = Array.isArray(value) ? value : [value]
+      const clean = [
+        ...new Set(targets.map(item => (typeof item === 'string' ? item.trim() : '')).filter(item => item !== '')),
+      ]
+      if (clean.length > 0) out[name] = clean
+    }
+    return out
+  }
+
+  function save(next) {
+    ensure()
+    const temp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}
+`, 'utf8')
+    fs.renameSync(temp, file)
+    cached = { mtimeMs: -1, items: [] }
+    return next
+  }
+
+  /** Add or replace one key. An empty target list removes the key. */
+  function set(key, targets) {
+    const name = String(key ?? '').trim()
+    if (name === '') throw new Error('an alias key is required')
+    const list = Array.isArray(targets) ? targets : targets === undefined ? [] : [targets]
+    const clean = [...new Set(list.map(item => (typeof item === 'string' ? item.trim() : '')).filter(item => item !== ''))]
+    const next = map()
+    if (clean.length === 0) delete next[name]
+    else next[name] = clean
+    save(next)
+    return { key: name, targets: clean }
+  }
+
+  function remove(key) {
+    const name = String(key ?? '').trim()
+    const next = map()
+    if (name === '' || next[name] === undefined) return false
+    delete next[name]
+    save(next)
+    return true
+  }
+
+  return { file, read, expandQuery, ensure, map, set, remove }
 }

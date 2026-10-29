@@ -124,7 +124,10 @@ export function createRecall(options = {}) {
       const newline = text.indexOf('\n')
       const head = (newline === -1 ? text : text.slice(0, newline)).trim()
       const body = newline === -1 ? '' : text.slice(newline + 1).trim()
-      const [stamp, ...rest] = head.split(' — ')
+      const tagged = head.match(/\[session:\s*([^\]]+)\]\s*$/)
+      const sessionId = tagged === null ? '' : tagged[1].trim()
+      const clean = tagged === null ? head : head.slice(0, tagged.index).trim()
+      const [stamp, ...rest] = clean.split(' — ')
       const time = Date.parse(stamp.trim())
       entries.push({
         id: `m-${entries.length}`,
@@ -133,6 +136,7 @@ export function createRecall(options = {}) {
         title: rest.join(' — ').trim() || 'memory save',
         text: body === '(cleared)' ? '' : body,
         tags: [],
+        sessionId,
       })
     }
     return entries
@@ -237,6 +241,24 @@ export function createRecall(options = {}) {
         text: snippet(best.message.text, tokens, 240),
       },
     }
+  }
+
+  /** The alias table behind `expand:1`, readable and writable through ops. */
+  function aliasTable() {
+    return { file: aliases.file, table: aliases.map() }
+  }
+
+  function aliasSet(input = {}) {
+    const key = String(input.key ?? '')
+    const raw = Array.isArray(input.targets) ? input.targets : typeof input.targets === 'string' ? input.targets.split(/[,，\s]+/) : []
+    if (key.trim() === '') throw new Error('an alias key is required')
+    const written = aliases.set(key, raw)
+    return { ...written, file: aliases.file, table: aliases.map() }
+  }
+
+  function aliasRemove(input = {}) {
+    const removed = aliases.remove(String(input.key ?? ''))
+    return { key: String(input.key ?? '').trim(), removed, file: aliases.file, table: aliases.map() }
   }
 
   /** Every session this agent may read, with its indexed state (panel list). */
@@ -405,5 +427,16 @@ export function createRecall(options = {}) {
     }
   }
 
-  return { search, open, sessions, messages: messagesOf, reindex, state, SOURCES }
+  return {
+    search,
+    open,
+    sessions,
+    messages: messagesOf,
+    aliases: aliasTable,
+    aliasSet,
+    aliasRemove,
+    reindex,
+    state,
+    SOURCES,
+  }
 }

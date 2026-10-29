@@ -32,6 +32,10 @@ try {
 }
 assert.ok(tooLong, 'memory limit enforced')
 assert.ok(fs.readFileSync(path.join(memoryRoot, 'memory', `${agent.id}.log.md`), 'utf8').includes('Next: UI'))
+const withSession = store.writeMemory({ id: agent.id, content: 'session tagged save', sessionId: 'session-0123456789' })
+const logNow = fs.readFileSync(path.join(memoryRoot, 'memory', `${agent.id}.log.md`), 'utf8')
+assert.ok(logNow.includes('[session: session-0123456789]'), 'the audit log records the conversation')
+assert.equal(withSession.chars, 'session tagged save'.length)
 console.log('memory ok')
 
 // knowledge create

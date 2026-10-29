@@ -229,7 +229,7 @@ via       = "lexical" | "alias" | "ref" | "entity" | "session"
 ```
 
 - **为什么只 1 跳**：2 跳会穿过"共享一个常用实体"的弱连接，噪声增长远快于收益。需要更深时由模型用 `why.hub` 再调一次工具，可见、可控。
-- **别名表**：`<memoryDir>/index/aliases.json`，形如 `{"vault 插件": ["dsh-agent-vault"], "鲸鱼": ["dsh-whale-widget"]}`。中文检索的别名收益高于边本身，而且加一行就生效。
+- **别名表**：`<memoryDir>/index/aliases.json`，形如 `{"vault 插件": ["dsh-agent-vault"], "鲸鱼": ["dsh-whale-widget"]}`。中文检索的别名收益高于边本身，而且加一行就生效。写入通道有三个（同一份文件、按 mtime 判脏，写后立即生效）：直接编辑、面板「关联别名」卡片、模型侧 `agent_alias`；op 侧是 `memory.aliases` / `memory.alias`。别名是全局的，不按智能体隔离。
 - **边不落盘**：`journal.delete` 后立刻正确，省掉增量维护与迁移；当前 58 个节点量级重算 < 5ms。万级再考虑派生边表（可删、可重建）。
 
 #### 输出契约
@@ -271,6 +271,8 @@ via       = "lexical" | "alias" | "ref" | "entity" | "session"
 
 host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`（§6.5）。**不返回全文**，避免一次吃进太多 token。
 
+`2.0.0-alpha.7` 补的别名工具 `agent_alias`（`action: list|set|delete`，`key`，`targets[]`）走同一份 `aliases.json`，host op 是 `memory.aliases`（读）与 `memory.alias {key, targets}`（写，`remove: true` 删除）；面板同一张表也能编辑。三者共用 `createAliases` 的 mtime 缓存，写后下一次查询即生效，不需要 `memory.reindex`。
+
 ### 7.2 与既有工具的关系
 
 - `agent_journal search` → 内部改为调用同一个 rank，但只扫自己 journal（行为兼容，命中质量提升）。
@@ -307,6 +309,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - 召回面板纯前端查询，不影响 prompt，也不产生额外 token。
 - M3 起：会话来源的命中可以在展开项里「回到对话」（`uiWorkspace.openSession`，M3 ✅）；预览由 `rank.js` 的 `snippet()` 给出**命中词周围的窗口**，不再是正文开头 160 字。
 - M4 起：「对话来源」卡片逐会话勾选（`memory.sessions` / `memory.transcript`，落 `settings.json` 的 `transcriptExclude`），取消勾选的会话退出索引但保留打开入口。
+- M6 起（`2.0.0-alpha.7`）：记忆日志的标题行末尾带 `[session: session-…]`（`agent_memory_save` 写入时记下调用会话；面板手写记 `panel`、无会话则不加），解析时剥掉后缀填 `sessionId`，于是日志命中也能「回到对话」；旧日志无需迁移。
 - M5 起（`2.0.0-alpha.6`）：`session` 命中带 `hit: {seq, role, at, text}`，指向得分最高的那条消息；索引时保留 `{seq, role, at, text}` 消息列表，超预算按「留头 + 留尾、丢中间」裁剪，消息列表与正文共用同一子集；`memory.message` 按 `sessionId + seq` 取单条全文，面板提供「复制该条」。
 - **硬约束**：宿主 `uiWorkspace.openSession(target)` 只接受 `SessionId | SubagentAddress`，没有消息锚点；`ISessions.fork` 是唯一带 `seq` 的入口，且会分叉会话，不能用来定位。所以「自动滚动到第 N 条」做不到，M5 的交付止于「精确到消息 + 复制原文 + 回到会话」。
 - 未做：日志条目（`memory/<id>.log.md`）没有稳定的会话反查键，所以日志命中不提供跳转；检查点不进索引。
@@ -321,6 +324,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M3** `2.0.0-alpha.4` ✅ | 对话原文入索引：`transcripts.js` + 自带 zstd 帧解析、只读本智能体归属的会话、仅 user/assistant、密钥打码、每会话 12000 字上限、设置开关 | `test-transcripts.mjs` 全过（打码、`thinking` 丢弃、归属隔离、上限、截断提示）；真库 6 个工作区可读；会话未变时缓存命中 |
 | **M4** `2.0.0-alpha.5` ✅ | 结果片段围绕命中词（`snippet`）、逐会话勾选（`memory.sessions` / `memory.transcript`）、`/op` 的 404 映射 | `test-recall.mjs` 片段窗口、`test-transcripts.mjs` 排除后列表/检索、`test-host.mjs` 两个新 op 与 404 |
 | **M5** `2.0.0-alpha.6` ✅ | 消息级命中（`hit`）、`memory.message`、面板「复制该条」、超预算裁剪与消息列表同源 | `test-recall.mjs` 命中指向正确消息、`test-transcripts.mjs` 消息列表与预算、`test-host.mjs` 两个 404/400 |
+| **M6** `2.0.0-alpha.7` ✅ | 别名可写（`memory.aliases` / `memory.alias` / `agent_alias` / 面板卡片）、日志条目带 `sessionId` 可回到对话 | `test-recall.mjs` 别名写入即时生效、删除幂等、日志行带会话；`test-store.mjs` 日志含 `[session: …]`；`test-host.mjs` 别名 op 与工具 |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 
@@ -337,7 +341,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 
 1. ~~`agent_recall` 默认是否包含讨论室？~~ **已定：不包含**。讨论室目前是半成品（不自动调度、成员语义未稳定），2.0 既不入索引也不开 `source`，等它完工后按 `src:"rooms"` 加回，`rank.js` 的 `boost` 表已为它留位（0.7）。
 2. 是否允许跨 agent 召回？倾向**否**（journal 的隔离语义不能破），管理员视图另做。
-3. `aliases.json` 由谁维护？倾向：agent 用新 op `memory.alias` 写，面板可编辑——手填的别名最可靠，但没人会填。
+3. ~~`aliases.json` 由谁维护？~~ **已定（2.0.0-alpha.7）**：三条通道都给——直接编辑、面板卡片、`agent_alias` 工具（背后是 `memory.alias`）。别名全局共享，不按智能体隔离。
 4. 检查点历史是否需要面板可读（只读时间线）？倾向 M2 做只读列表，但**永不进 prompt**。
 5. `agent_journal list` 的 AND 语义改成 OR 后，是否影响既有调用方的预期？需要一次 CHANGELOG 明示。
 6. ~~是否做图？~~ **已定：做检索侧 1 跳扩展、不做画布**（M2.5 / `alpha.3`），边不落盘。

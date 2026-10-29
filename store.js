@@ -519,7 +519,9 @@ export function createStore(options = {}) {
     list[at] = { ...list[at], memoryUpdatedAt: now, updatedAt: now }
     saveRegistry(list)
     const note = collapse(input.note)
-    const line = `\n## ${now}${note === '' ? '' : ` — ${note}`}\n\n${text === '' ? '(cleared)' : text}\n`
+    const sessionId = String(input.sessionId ?? '').trim()
+    const tag = sessionId === '' ? '' : ` [session: ${sessionId}]`
+    const line = `\n## ${now}${note === '' ? '' : ` — ${note}`}${tag}\n\n${text === '' ? '(cleared)' : text}\n`
     try {
       fs.appendFileSync(logFile(agent.id), line, 'utf8')
     } catch {

@@ -123,6 +123,7 @@ function buildPrompt(store, sessionId) {
     `- Knowledge directory: ${store.knowledgeRoot()}`,
     '- Two more surfaces exist: `agent_room` for discussion rooms (a shared transcript several agents post into, each message attributed to its agent) and `agent_journal` for your private journal (detailed, diary-like, readable and writable by this agent only). Use the room when the user asks you to discuss something with other agents, and keep the journal for detail the short memory cannot hold.',
     '- You cannot read the memory yourself. The user decides when a memory is loaded into a session; when one is loaded it appears below as `<agent_memory>`.',
+    '- `agent_recall` searches the material above (journal, memory log, knowledge, and the conversations this agent owned); `agent_alias` maintains the alias table it folds into queries, for names people say but never write.',
   ]
   let active
   try {
@@ -244,6 +245,7 @@ function registerTools(ctx, store, rooms, journals, recall) {
             id: agent.id,
             content: args?.content,
             note: args?.note ?? (exec?.agent?.id ? `session ${String(exec.agent.id).slice(-8)}` : ''),
+            sessionId: exec?.agent?.id ?? '',
           })
           return { ok: true, ...result, limit: limit }
         }),
@@ -384,6 +386,48 @@ function registerTools(ctx, store, rooms, journals, recall) {
         }),
       },
       'agent-memory: recall tool',
+    )
+
+    register(
+      {
+        name: 'agent_alias',
+        description:
+          'Maintain the recall alias table (`index/aliases.json`): when a query contains the key, its targets are also searched. ' +
+          'Use it for names people say but never write — a Chinese nickname for a package, an old project name, a shorthand. ' +
+          '`action` defaults to "list"; "set" replaces one key; "delete" removes it.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['list', 'set', 'delete'], description: 'What to do. Defaults to "list".' },
+            key: { type: 'string', description: 'The phrase to recognise in a query, for example 小鲸鱼.' },
+            targets: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Words that should also be searched when the key appears. Empty removes the key.',
+            },
+          },
+        },
+        output: textOutput(
+          {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              targets: { type: 'array', items: { type: 'string' } },
+              removed: { type: 'boolean' },
+              file: { type: 'string' },
+              table: { type: 'object' },
+            },
+          },
+          () => 'aliases',
+        ),
+        execute: guard(async args => {
+          const action = String(args?.action ?? 'list')
+          if (action === 'set') return { ok: true, ...recall.aliasSet({ key: args?.key, targets: args?.targets }) }
+          if (action === 'delete') return { ok: true, ...recall.aliasRemove({ key: args?.key }) }
+          return { ok: true, ...recall.aliases() }
+        }),
+      },
+      'agent-memory: alias tool',
     )
 
     registerRoomTools(register, store, rooms)
@@ -1118,7 +1162,14 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
     case 'binding.list':
       return store.listBindings()
     case 'memory.save':
-      return store.writeMemory({ id: args.id, content: args.content, note: 'panel' })
+      return store.writeMemory({ id: args.id, content: args.content, note: 'panel', sessionId: args.sessionId })
+    case 'memory.aliases':
+      return recall.aliases()
+    case 'memory.alias': {
+      const key = String(args.key ?? '')
+      if (key.trim() === '') throw new MemoryError('bad-request', 'missing key')
+      return args.remove === true ? recall.aliasRemove({ key }) : recall.aliasSet({ key, targets: args.targets })
+    }
     case 'memory.recall': {
       const vault = store.resolveVault({ id: args.id })
       return recall.search({

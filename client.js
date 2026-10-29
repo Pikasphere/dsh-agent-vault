@@ -224,6 +224,14 @@ window.__ModuleLoader__.load({
         recallCopy: '复制该条',
         recallCopied: '已复制到剪贴板',
         recallCopyFail: '复制失败：浏览器拒绝了剪贴板写入',
+        recallAliases: '关联别名',
+        recallAliasesHint: '查询里出现键名时，把目标词一起检索',
+        recallAliasEmpty: '还没有别名',
+        recallAliasKey: '说法（如 小鲸鱼）',
+        recallAliasTargets: '目标词，逗号分隔',
+        recallAliasSave: '保存别名',
+        recallAliasSaved: '别名已保存',
+        recallAliasDelete: '删除',
         recallIndex: '索引状态',
         recallIndexTotal: '条目',
         recallBuilt: '构建于',
@@ -447,6 +455,14 @@ window.__ModuleLoader__.load({
         recallCopy: 'Copy this message',
         recallCopied: 'Copied to the clipboard',
         recallCopyFail: 'Copy failed: the browser refused clipboard access',
+        recallAliases: 'Aliases',
+        recallAliasesHint: 'when a query contains the key, its targets are searched as well',
+        recallAliasEmpty: 'No aliases yet',
+        recallAliasKey: 'phrase (e.g. 小鲸鱼)',
+        recallAliasTargets: 'target words, comma separated',
+        recallAliasSave: 'Save alias',
+        recallAliasSaved: 'Alias saved',
+        recallAliasDelete: 'Delete',
         recallIndex: 'Index status',
         recallIndexTotal: 'entries',
         recallBuilt: 'built',
@@ -528,6 +544,7 @@ window.__ModuleLoader__.load({
 .am-list{display:flex;flex-direction:column;gap:6px}
 .am-recall-hit{display:flex;flex-direction:column;gap:6px}
 .am-item-hit{font-size:11.5px;line-height:1.5;color:var(--dsw-alias-text-secondary);opacity:.85;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.am-alias-list{display:flex;flex-direction:column;gap:6px}.am-alias-row{display:flex;align-items:center;gap:8px;font-size:12px}.am-alias-key{font-weight:600}.am-alias-targets{flex:1;color:var(--dsw-alias-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .am-recall-detail{white-space:pre-wrap;padding:10px 12px;border-radius:10px;border:1px dashed var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 30%,transparent);font-size:12.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);max-height:320px;overflow:auto}
 .am-item{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 45%,transparent);color:inherit;font:inherit;cursor:pointer}
 .am-item:hover{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 40%,var(--dsw-alias-border-l1))}
@@ -762,6 +779,9 @@ window.__ModuleLoader__.load({
       const [indexData, setIndexData] = useState(null)
       const [indexVersion, setIndexVersion] = useState(0)
       const [sessionList, setSessionList] = useState(null)
+      const [aliasData, setAliasData] = useState(null)
+      const [aliasKey, setAliasKey] = useState('')
+      const [aliasTargets, setAliasTargets] = useState('')
       const draftKey = useRef('')
       const alive = useRef(true)
 
@@ -1047,6 +1067,25 @@ window.__ModuleLoader__.load({
       }, [tab, indexVersion])
 
       useEffect(() => {
+        if (tab !== 'recall') return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'memory.aliases', args: {} }),
+        })
+          .then(payload => {
+            if (live) setAliasData(payload.value?.table ?? null)
+          })
+          .catch(error => {
+            if (live) setAliasData(null)
+          })
+        return () => {
+          live = false
+        }
+      }, [tab, indexVersion])
+
+      useEffect(() => {
         if (data) setDirDraft(data.knowledgeDirConfigured ?? '')
       }, [data?.knowledgeDirConfigured])
 
@@ -1309,6 +1348,25 @@ window.__ModuleLoader__.load({
         setSessionList(current =>
           current === null ? current : current.map(item => (item.sessionId === sessionId ? { ...item, included: include } : item)),
         )
+        setIndexVersion(current => current + 1)
+      }
+
+      const saveAlias = async () => {
+        const key = aliasKey.trim()
+        if (key === '') return
+        const written = await call('memory.alias', { key, targets: aliasTargets })
+        if (written === undefined) return
+        setAliasData(written.table ?? null)
+        setAliasKey('')
+        setAliasTargets('')
+        setNotice(t('recallAliasSaved'))
+        setIndexVersion(current => current + 1)
+      }
+
+      const deleteAlias = async key => {
+        const removed = await call('memory.alias', { key, remove: true })
+        if (removed === undefined) return
+        setAliasData(removed.table ?? null)
         setIndexVersion(current => current + 1)
       }
 
@@ -2106,6 +2164,61 @@ window.__ModuleLoader__.load({
                     .join(' · ') || t('recallEmpty'),
                 ),
               ),
+          h(
+            'div',
+            { className: 'am-card' },
+            h(
+              'div',
+              { className: 'am-row' },
+              h('span', { className: 'am-label' }, t('recallAliases')),
+              h('span', { style: { flex: 1 } }),
+              h('span', { className: 'am-note-dim' }, t('recallAliasesHint')),
+            ),
+            h(
+              'div',
+              { className: 'am-alias-list' },
+              aliasData === null || Object.keys(aliasData).length === 0
+                ? h('div', { className: 'am-note-dim' }, t('recallAliasEmpty'))
+                : Object.entries(aliasData).map(([key, targets]) =>
+                    h(
+                      'div',
+                      { key, className: 'am-alias-row' },
+                      h('span', { className: 'am-alias-key' }, key),
+                      h('span', { className: 'am-alias-targets' }, targets.join(' · ')),
+                      h(
+                        'button',
+                        { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => void deleteAlias(key) },
+                        t('recallAliasDelete'),
+                      ),
+                    ),
+                  ),
+            ),
+            h(
+              'div',
+              { className: 'am-row' },
+              h('input', {
+                className: 'am-input',
+                placeholder: t('recallAliasKey'),
+                value: aliasKey,
+                onChange: event => setAliasKey(event.target.value),
+              }),
+              h('input', {
+                className: 'am-input',
+                placeholder: t('recallAliasTargets'),
+                value: aliasTargets,
+                onChange: event => setAliasTargets(event.target.value),
+              }),
+              h(
+                'button',
+                {
+                  className: 'am-btn am-btn-sm',
+                  disabled: busy !== '' || aliasKey.trim() === '',
+                  onClick: () => void saveAlias(),
+                },
+                t('recallAliasSave'),
+              ),
+            ),
+          ),
           sessionList === null || sessionList.length === 0
             ? null
             : h(

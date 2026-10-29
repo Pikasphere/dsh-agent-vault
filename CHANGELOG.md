@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-alpha.7 — 2026-10-29
+
+别名可写，日志命中可回到对话。
+
+### 新增
+
+- **`agent_alias` 工具**：`action: list | set | delete`，维护 `index/aliases.json`。
+- **`memory.aliases` / `memory.alias {key, targets}` op**：面板与外部通道都能读写别名表；`remove: true` 删除，空目标列表同样删除。
+- **面板「关联别名」卡片**：「回忆」页签下直接列出、新增、删除别名。
+- **日志条目带会话**：`agent_memory_save` 在日志标题行末尾写 `[session: session-…]`；解析时剥掉后缀填 `sessionId`，日志命中因此也能「回到对话」。旧日志无需迁移。
+
+### 说明
+
+- 别名全局共享，不按智能体隔离；写后立即生效（mtime 判脏），不需要重建索引。
+- 面板手写的记忆记 `panel`，没有会话可记时不加后缀。
 ## 2.0.0-alpha.6 — 2026-10-29
 
 命中定位到具体消息（M5）。
