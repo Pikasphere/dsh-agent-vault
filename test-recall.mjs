@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const load = name => import(`file://${path.join(here, name).replace(/\\/g, '/')}`)
-const { tokenize, scoreEntry, decay, rank } = await load('rank.js')
+const { tokenize, scoreEntry, decay, rank, snippet } = await load('rank.js')
 const { createStore } = await load('store.js')
 const { createJournals } = await load('journal.js')
 const { createRecall } = await load('recall.js')
@@ -201,6 +201,19 @@ assert.equal(
 for (const row of recall.search({ id: agent.id, query: 'dsh-agent-vault', limit: 25 }).results) {
   if (row.via === 'lexical') continue
   assert.ok(Number.isFinite(row.why?.weight) && row.why.weight >= 0.35, 'edge weight is reported and above the floor')
+}
+
+// A long body previews the window around the match, not its first 160 chars.
+{
+  const body = `${'无关内容 '.repeat(40)}这里提到 zstd 帧与压缩${' 后续无关内容'.repeat(40)}`
+  const cut = snippet(body, ['zstd'])
+  assert.ok(cut.includes('zstd'), 'snippet keeps the match')
+  assert.ok(cut.startsWith('…') && cut.endsWith('…'), 'both sides elided')
+  assert.ok(cut.length <= 165, `snippet size ${cut.length}`)
+  assert.equal(snippet('短文本', ['x']), '短文本')
+  const hits = snippet(body, ['zstd', '压缩'])
+  assert.ok(hits.includes('压缩'), 'densest window keeps both tokens')
+  assert.ok(snippet(body, []).length <= 162, 'no tokens falls back to the head')
 }
 
 console.log('ALL RECALL TESTS PASSED')

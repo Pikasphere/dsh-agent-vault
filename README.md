@@ -251,6 +251,12 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 代价是每次重建索引要读一遍相关会话文件（真库首轮约 1–2 秒，之后只对文件大小变化的会话重建）。如果只想看笔记和知识库，把开关关掉即可。
 
+### 命中片段与逐会话取舍（2.0.0-alpha.5）
+
+- **预览围绕命中词，而不是正文开头**：长对话的头几行通常是「继续」或一句寒暄，按开头截 160 字等于什么都没说。`rank.js` 的 `snippet()` 会在正文里找命中词最密集的 160 字窗口，两侧加省略号；一个词都没命中时才退回开头。
+- **逐会话勾选**：「回忆」页签下新增「对话来源」卡片，列出本智能体有权读的每个会话（标题、时间、入库字符数）。取消勾选后该会话立刻退出索引（检索不到，`memory.reindex` 也不再计入），但「回到对话」照常可用。取舍记在 `settings.json` 的 `transcriptExclude` 里，与全局开关并存。
+- 会话列表与勾选走 `memory.sessions` / `memory.transcript` 两个 op，`test-host.mjs` 覆盖了「未知会话被拒」与「没有会话时返回空列表」。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。

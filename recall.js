@@ -26,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { rank, round, preview as makePreview } from './rank.js'
+import { rank, round, snippet, tokenize } from './rank.js'
 import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEntities } from './graph.js'
 import { createTranscripts } from './transcripts.js'
 
@@ -36,13 +36,13 @@ export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9,
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
 
 /** One tool/panel row; `why` only exists for expanded hits. */
-function resultOf(entry, score, via, why) {
+function resultOf(entry, score, via, why, tokens) {
   const row = {
     id: entry.id,
     src: entry.src,
     at: entry.at,
     title: entry.title,
-    preview: makePreview(entry.text),
+    preview: snippet(entry.text, tokens ?? []),
     score: round(score),
     via,
   }
@@ -73,7 +73,12 @@ export function createRecall(options = {}) {
       ? null
       : typeof options.transcripts === 'object' && options.transcripts !== null
         ? options.transcripts
-        : createTranscripts({ rootDir: root, store, sessionsRoot: options.sessionsRoot })
+        : createTranscripts({
+            rootDir: root,
+            store,
+            sessionsRoot: options.sessionsRoot,
+            exclude: options.exclude ?? (() => store.settings().transcriptExclude ?? []),
+          })
 
   /** Entities are derived once per rebuild, never stored: graph edges cannot rot. */
   function decorate(entry) {
@@ -202,6 +207,12 @@ export function createRecall(options = {}) {
     return entries
   }
 
+  /** Every session this agent may read, with its indexed state (panel list). */
+  function sessions(agentId = '') {
+    if (transcripts === null) return []
+    return transcripts.list(agentId)
+  }
+
   /**
    * Search the calling agent's recallable material.
    *
@@ -217,6 +228,7 @@ export function createRecall(options = {}) {
     const source = SOURCES.includes(input.source) ? input.source : ''
     const since = Number.isFinite(Date.parse(String(input.since ?? ''))) ? Date.parse(String(input.since)) : 0
     const graph = !(input.expand === 0 || input.expand === '0' || input.expand === false)
+    const tokens = tokenize(query)
     const entries = collect(agentId, source).filter(entry => {
       if (since === 0) return true
       const time = Date.parse(entry.at)
@@ -229,7 +241,7 @@ export function createRecall(options = {}) {
         query,
         total: rows.length,
         expand: 0,
-        results: rows.slice(0, limit).map(row => resultOf(row.entry, row.score, 'lexical')),
+        results: rows.slice(0, limit).map(row => resultOf(row.entry, row.score, 'lexical', undefined, tokens)),
       }
     }
 
@@ -267,7 +279,7 @@ export function createRecall(options = {}) {
       query,
       total: final.length,
       expand: 1,
-      results: final.slice(0, limit).map(row => resultOf(row.entry, row.score, row.via, row.why)),
+      results: final.slice(0, limit).map(row => resultOf(row.entry, row.score, row.via, row.why, tokens)),
     }
   }
 
@@ -352,5 +364,5 @@ export function createRecall(options = {}) {
     }
   }
 
-  return { search, open, reindex, state, SOURCES }
+  return { search, open, sessions, reindex, state, SOURCES }
 }

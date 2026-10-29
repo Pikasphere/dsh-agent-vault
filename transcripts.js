@@ -112,9 +112,18 @@ function extract(records, sessionId) {
 /**
  * @param {{rootDir: string, store: {listBindings: () => {sessionId: string}[]}, sessionsRoot?: string}} options
  */
-export function createTranscripts({ rootDir, store, sessionsRoot }) {
+export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
   const dir = typeof sessionsRoot === 'string' && sessionsRoot !== '' ? sessionsRoot : path.join(os.homedir(), '.dsh', 'sessions')
   const cache = new Map()
+  const excluded = () => {
+    let list = []
+    try {
+      list = typeof exclude === 'function' ? exclude() : exclude ?? []
+    } catch {
+      list = []
+    }
+    return new Set(Array.isArray(list) ? list.filter(item => typeof item === 'string' && item !== '') : [])
+  }
 
   /**
    * Sessions the vault already knows, with the agents that own them: a session
@@ -200,11 +209,34 @@ export function createTranscripts({ rootDir, store, sessionsRoot }) {
     return entry
   }
 
-  /** Recall entries for the sessions this agent owns (`''` = every agent, for reindex). */
-  function entries(agentId = '') {
+  /** Every readable session of this agent, with its indexed state, for the panel list. */
+  function list(agentId = '') {
+    const skip = excluded()
     const out = []
     for (const [sessionId, agents] of owners()) {
       if (agentId !== '' && !agents.has(agentId)) continue
+      const entry = entryOf(sessionId)
+      if (entry === null) continue
+      out.push({
+        sessionId: entry.sessionId,
+        title: entry.title,
+        at: entry.at,
+        cwd: entry.cwd,
+        chars: entry.text.length,
+        toolCalls: entry.toolCalls,
+        included: !skip.has(sessionId),
+      })
+    }
+    return out.sort((a, b) => String(b.at).localeCompare(String(a.at)))
+  }
+
+  /** Recall entries for the sessions this agent owns (`''` = every agent, for reindex). */
+  function entries(agentId = '') {
+    const skip = excluded()
+    const out = []
+    for (const [sessionId, agents] of owners()) {
+      if (agentId !== '' && !agents.has(agentId)) continue
+      if (skip.has(sessionId)) continue
       const entry = entryOf(sessionId)
       if (entry === null) continue
       out.push({
@@ -226,5 +258,5 @@ export function createTranscripts({ rootDir, store, sessionsRoot }) {
     return null
   }
 
-  return { root: dir, known, owners, entries, get, read: entryOf }
+  return { root: dir, known, owners, entries, list, get, read: entryOf }
 }

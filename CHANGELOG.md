@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0-alpha.5 — 2026-10-29
+
+召回结果的可用性修补：片段定位与会话取舍。设计见 `docs/memory-recall-v2.md` §9。
+
+### 新增
+
+- **`rank.js` 的 `snippet(text, tokens, size)`**：返回命中词最密集的窗口（两侧补 `…`），无命中时退回正文开头。会话来源动辄上万字，原来按开头截取，预览几乎全是「继续」这类寒暄。
+- **逐会话勾选**：`memory.sessions` 列出本智能体有权读的会话（标题、时间、字符数、是否入库），`memory.transcript` 按 `sessionId` 开关；被排除的会话记在 `settings.json` 的 `transcriptExclude`，检索与 `memory.reindex` 都不再计入，但 `memory.open` 与「回到对话」不受影响。
+- 面板「回忆」页签新增「对话来源」卡片（勾选框 + 标题 + 时间 + 字符数），改动即时生效并刷新索引状态。
+- `test-transcripts.mjs` 覆盖排除后的列表 / 检索差异；`test-recall.mjs` 覆盖片段窗口；`test-host.mjs` 覆盖两个新 op。
+
+### 修复
+
+- `/op` 的错误响应把 `not-found` 也映射成 400，现在返回 404（`memory.transcript` 传未知会话时会用到）。
+
 ## 2.0.0-alpha.4 — 2026-10-28
 
 对话原文入索引（M3）。设计见 `docs/memory-recall-v2.md` §5.4。

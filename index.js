@@ -1133,6 +1133,22 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       const vault = store.resolveVault({ id: args.id })
       return { entry: recall.open({ id: vault.id, src: args.src, entry: args.entry }) }
     }
+    case 'memory.sessions': {
+      const vault = store.resolveVault({ id: args.id })
+      return { sessions: recall.sessions(vault.id) }
+    }
+    case 'memory.transcript': {
+      const vault = store.resolveVault({ id: args.id })
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+      if (sessionId === '') throw new MemoryError('bad-request', 'missing sessionId')
+      const known = recall.sessions(vault.id).some(item => item.sessionId === sessionId)
+      if (!known) throw new MemoryError('not-found', `session ${sessionId} is not readable by this agent`)
+      const current = store.settings().transcriptExclude
+      const include = args.include !== false
+      const next = include ? current.filter(item => item !== sessionId) : [...new Set([...current, sessionId])]
+      store.saveSettings({ transcriptExclude: next })
+      return { sessionId, included: include, exclude: next }
+    }
     case 'memory.reindex':
       return recall.reindex()
     case 'memory.index':
@@ -1317,7 +1333,15 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
       } catch (error) {
         const code = error instanceof MemoryError ? error.code : 'failed'
         const status =
-          code === 'body-too-large' ? 413 : code === 'bad-json' ? 400 : code === 'failed' ? 500 : 400
+          code === 'body-too-large'
+            ? 413
+            : code === 'bad-json'
+              ? 400
+              : code === 'failed'
+                ? 500
+                : code === 'not-found'
+                  ? 404
+                  : 400
         return json(res, status, { error: { code, message: String(error?.message ?? error) } })
       }
     }

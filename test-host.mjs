@@ -197,6 +197,11 @@ const opened = await call('POST', '/op', {
 })
 assert.equal(opened.payload.value.entry.src, 'knowledge')
 assert.ok(opened.payload.value.entry.text.length > 0)
+// session list is scoped to the agent (none here) and exclusion toggles reject unknown ids
+const noSessions = await call('POST', '/op', { op: 'memory.sessions', args: { id } })
+assert.deepEqual(noSessions.payload.value.sessions, [])
+const rejected = await call('POST', '/op', { op: 'memory.transcript', args: { id, sessionId: 'session-unknown', include: false } })
+assert.equal(rejected.status, 404)
 console.log('recall + reindex ok')
 
 // the library is shared: a second agent sees the first agent's entry

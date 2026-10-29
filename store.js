@@ -190,6 +190,9 @@ export function createStore(options = {}) {
       hideBoundSessions: raw.hideBoundSessions !== false,
       transcripts: raw.transcripts !== false,
       sessionsRoot: typeof raw.sessionsRoot === 'string' ? raw.sessionsRoot : '',
+      transcriptExclude: Array.isArray(raw.transcriptExclude)
+        ? raw.transcriptExclude.filter(item => typeof item === 'string' && item !== '')
+        : [],
     }
   }
 
@@ -405,6 +408,7 @@ export function createStore(options = {}) {
       hideBoundSessions: current.hideBoundSessions,
       transcripts: current.transcripts,
       sessionsRoot: current.sessionsRoot,
+      transcriptExclude: current.transcriptExclude,
       bindings: listBindings(),
       vaults: vaults,
     }
@@ -488,6 +492,9 @@ export function createStore(options = {}) {
     if (typeof patch.activeVault === 'string') next.activeVault = patch.activeVault
     if (typeof patch.hideBoundSessions === 'boolean') next.hideBoundSessions = patch.hideBoundSessions
     if (typeof patch.transcripts === 'boolean') next.transcripts = patch.transcripts
+    if (Array.isArray(patch.transcriptExclude)) {
+      next.transcriptExclude = [...new Set(patch.transcriptExclude.filter(item => typeof item === 'string' && item !== ''))].slice(0, 500)
+    }
     if (typeof patch.sessionsRoot === 'string') next.sessionsRoot = patch.sessionsRoot.trim()
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {
       next.activeVault = ''

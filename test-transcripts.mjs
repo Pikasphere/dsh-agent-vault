@@ -126,5 +126,20 @@ assert.ok(capped.text.includes('第 399 条'), 'the tail is kept')
 assert.ok(capped.text.includes('第 0 条'), 'the head is kept')
 assert.ok(elapsed < 1000, `single-session rebuild ${elapsed}ms`)
 
+// Panel list + per-session exclusion: excluded sessions keep their membership
+// (so they can be re-enabled) but stop feeding recall.
+{
+  fs.writeFileSync(file, Buffer.concat(frames))
+  const excluded = createTranscripts({ rootDir: root, sessionsRoot: sessions, store: { listBindings: () => bindings }, exclude: () => [sessionId] })
+  assert.equal(excluded.entries('demo-agent').length, 0, 'excluded session leaves recall')
+  const listed = excluded.list('demo-agent')
+  assert.equal(listed.length, 1, 'list still shows it')
+  assert.equal(listed[0].included, false)
+  assert.ok(listed[0].chars > 0 && listed[0].title === '包名与发布')
+  const open = createTranscripts({ rootDir: root, sessionsRoot: sessions, store: { listBindings: () => bindings }, exclude: () => [] })
+  assert.equal(open.list('demo-agent')[0].included, true)
+  assert.equal(open.entries('demo-agent').length, 1)
+}
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL TRANSCRIPT TESTS PASSED')

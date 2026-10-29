@@ -139,6 +139,45 @@ export function round(score, digits = 4) {
   return Math.round(score * factor) / factor
 }
 
+/**
+ * A window of `text` around the densest cluster of query tokens, for results
+ * whose body is long: a conversation's first user message usually says nothing
+ * about why it matched, so the head of the text is the wrong preview.
+ */
+export function snippet(text, tokens, size = 160) {
+  const body = String(text ?? '').replace(/\s+/g, ' ').trim()
+  if (body === '') return ''
+  if (body.length <= size) return body
+  const list = (Array.isArray(tokens) ? tokens : tokenize(tokens)).filter(token => token.length >= 2)
+  const lower = body.toLowerCase()
+  const hits = []
+  for (const token of new Set(list)) {
+    let from = 0
+    while (hits.length < 400) {
+      const at = lower.indexOf(token, from)
+      if (at === -1) break
+      hits.push(at)
+      from = at + token.length
+    }
+  }
+  if (hits.length === 0) return preview(body, size)
+  hits.sort((a, b) => a - b)
+  let anchor = hits[0]
+  let best = -1
+  for (const start of hits) {
+    const window = lower.slice(start, start + size)
+    let distinct = 0
+    for (const token of new Set(list)) if (window.includes(token)) distinct += 1
+    if (distinct > best) {
+      best = distinct
+      anchor = start
+    }
+  }
+  const from = Math.max(0, Math.min(anchor - Math.floor(size / 3), body.length - size))
+  const cut = body.slice(from, from + size).trim()
+  return `${from > 0 ? '…' : ''}${cut}${from + size < body.length ? '…' : ''}`
+}
+
 /** One-line preview of a body, for tool output. */
 export function preview(text, size = 160) {
   const flat = String(text ?? '').replace(/\s+/g, ' ').trim()

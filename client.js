@@ -229,6 +229,8 @@ window.__ModuleLoader__.load({
         transcripts: '对话入索引',
         transcriptsHint: '把本智能体交接过的会话（以及绑定到它的会话）里的用户与助手文本编进索引，供「回忆」检索；工具输出与推理过程不入库，密钥会被打码，每个会话最多 12000 字。改动需重启宿主才彻底生效。',
         recallSrcSession: '对话',
+        recallSessions: '对话来源',
+        recallSessionsHint: '以下是本智能体有权读取的会话。取消勾选后，该会话不再进入索引（检索不到），但「回到对话」仍可用。',
         recallGoSession: '回到对话',
         recallOpen: '展开全文',
         recallClose: '收起',
@@ -444,6 +446,8 @@ window.__ModuleLoader__.load({
         transcripts: 'Index conversations',
         transcriptsHint: 'Index the user and assistant text of sessions this agent handed off or is bound to, so recall can search them. Tool results and reasoning stay out, secrets are masked, and each session is capped at 12000 characters. Changes need a host restart to fully apply.',
         recallSrcSession: 'conversation',
+        recallSessions: 'Conversations',
+        recallSessionsHint: 'Sessions this agent may read. Uncheck one to keep it out of the index (it will not be searchable), while "Go to conversation" still works.',
         recallGoSession: 'Go to conversation',
         recallOpen: 'Open',
         recallClose: 'Close',
@@ -734,6 +738,7 @@ window.__ModuleLoader__.load({
       const [recallDetail, setRecallDetail] = useState(null)
       const [indexData, setIndexData] = useState(null)
       const [indexVersion, setIndexVersion] = useState(0)
+      const [sessionList, setSessionList] = useState(null)
       const draftKey = useRef('')
       const alive = useRef(true)
 
@@ -1000,6 +1005,25 @@ window.__ModuleLoader__.load({
       }, [tab, indexVersion])
 
       useEffect(() => {
+        if (tab !== 'recall') return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'memory.sessions', args: {} }),
+        })
+          .then(payload => {
+            if (live) setSessionList(payload.value?.sessions ?? [])
+          })
+          .catch(error => {
+            if (live) setSessionList([])
+          })
+        return () => {
+          live = false
+        }
+      }, [tab, indexVersion])
+
+      useEffect(() => {
         if (data) setDirDraft(data.knowledgeDirConfigured ?? '')
       }, [data?.knowledgeDirConfigured])
 
@@ -1241,6 +1265,14 @@ window.__ModuleLoader__.load({
         const ui = sessionsUi()
         if (ui === undefined || typeof ui.openSession !== 'function' || sessionId === '') return
         await ui.openSession(sessionId)
+      }
+
+      const toggleSession = async (sessionId, include) => {
+        await call('memory.transcript', { sessionId, include })
+        setSessionList(current =>
+          current === null ? current : current.map(item => (item.sessionId === sessionId ? { ...item, included: include } : item)),
+        )
+        setIndexVersion(current => current + 1)
       }
 
       const rebuildIndex = async () => {
@@ -2035,6 +2067,41 @@ window.__ModuleLoader__.load({
                   Object.entries(indexData.sources ?? {})
                     .map(([key, count]) => `${key} ${count}`)
                     .join(' · ') || t('recallEmpty'),
+                ),
+              ),
+          sessionList === null || sessionList.length === 0
+            ? null
+            : h(
+                'div',
+                { className: 'am-card' },
+                h(
+                  'div',
+                  { className: 'am-row' },
+                  h('span', { className: 'am-label' }, t('recallSessions')),
+                  h('span', { style: { flex: 1 } }),
+                  h(
+                    'span',
+                    { className: 'am-note-dim' },
+                    `${sessionList.filter(item => item.included).length}/${sessionList.length} ${t('recallUnit')}`,
+                  ),
+                ),
+                h('div', { className: 'am-note-dim' }, t('recallSessionsHint')),
+                h(
+                  'div',
+                  { className: 'am-session-list' },
+                  sessionList.map(item =>
+                    h(
+                      'label',
+                      { key: item.sessionId, className: 'am-session-row' },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: item.included,
+                        onChange: event => void toggleSession(item.sessionId, event.target.checked),
+                      }),
+                      h('span', { className: 'am-session-title' }, item.title || item.sessionId),
+                      h('span', { className: 'am-note-dim' }, `${ago(item.at, locale)} · ${item.chars}`),
+                    ),
+                  ),
                 ),
               ),
           recallData === null

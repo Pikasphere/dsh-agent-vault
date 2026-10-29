@@ -305,7 +305,9 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - 面板新增「回忆」页签：搜索框 + 来源下拉（日志 / 记忆 / 知识库）+ 起始日期 → 结果列表（来源徽标 / 时间 / 得分 / 预览）→ 点击展开全文（`memory.open`，再点收起）。
 - 索引状态卡片：条目总数、`builtAt`、各来源条数；「重建索引」按钮 → `memory.reindex`。
 - 召回面板纯前端查询，不影响 prompt，也不产生额外 token。
-- 未做：命中条目的「回到面板会话」链接——日志条目没有稳定的会话反查键（检查点才有 `sessionId`，而检查点不进索引），留到 M3 与对话层一起做。
+- M3 起：会话来源的命中可以在展开项里「回到对话」（`uiWorkspace.openSession`，M3 ✅）；预览由 `rank.js` 的 `snippet()` 给出**命中词周围的窗口**，不再是正文开头 160 字。
+- M4 起：「对话来源」卡片逐会话勾选（`memory.sessions` / `memory.transcript`，落 `settings.json` 的 `transcriptExclude`），取消勾选的会话退出索引但保留打开入口。
+- 未做：日志条目（`memory/<id>.log.md`）没有稳定的会话反查键，所以日志命中不提供跳转；检查点不进索引。
 
 ## 10. 里程碑
 
@@ -315,6 +317,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M2** `2.0.0-alpha.2` ✅ | 面板「回忆」页签、索引状态卡片、handoff 提示节流、`memory.open` 展开全文 | 面板可用；`acp_cache` 命中率不降 |
 | **M2.5** `2.0.0-alpha.3` ✅ | §6.5 关联扩展（`entity` / `ref` / `session`）、`aliases.json`、面板徽标 | `test-recall.mjs` 五类断言全过；真库 14 条查询 expand:0 与 expand:1 的 top-1 都是 92.9%、单查询扩展 ≤ 2 条；扩展不引入缓存失效 |
 | **M3** `2.0.0-alpha.4` ✅ | 对话原文入索引：`transcripts.js` + 自带 zstd 帧解析、只读本智能体归属的会话、仅 user/assistant、密钥打码、每会话 12000 字上限、设置开关 | `test-transcripts.mjs` 全过（打码、`thinking` 丢弃、归属隔离、上限、截断提示）；真库 6 个工作区可读；会话未变时缓存命中 |
+| **M4** `2.0.0-alpha.5` ✅ | 结果片段围绕命中词（`snippet`）、逐会话勾选（`memory.sessions` / `memory.transcript`）、`/op` 的 404 映射 | `test-recall.mjs` 片段窗口、`test-transcripts.mjs` 排除后列表/检索、`test-host.mjs` 两个新 op 与 404 |
 
 版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 
