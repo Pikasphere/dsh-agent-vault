@@ -101,7 +101,8 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 <memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数 / semantic 状态）
 <memoryDir>/index/aliases.json           别名表（手写，{"别名": ["实体", …]}）
 <memoryDir>/index/vectors.bin            语义向量（float32、L2 归一化，按 entries 顺序）
-<memoryDir>/index/vectors.json           向量的元数据（{key, src, at, hash}）
+<memoryDir>/index/vectors.json           向量的元数据（{key, row, src, at, hash, chunk, chunks}）
+<memoryDir>/index/access.json            引用/打开/曝光计数（2.0.0-beta.4 起，热度排序用）
 <memoryDir>/models/<model>/              本地 embedding 模型（不进 npm 包，用 scripts/fetch-model.mjs 下载）
 <memoryDir>/handoff.json                 接力配置（阈值、导出目录）
 <memoryDir>/handoff-state.json           每会话的接力阶段
@@ -359,6 +360,24 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 
 现状统计（改之前，真库）：日志 33 条命中 3 条（9%）、知识库 28 条命中 1 条（4%）、检查点 8 条 0 条——比例不高，但命中的正是"今天又复发一次"这类**跨周还要读的故障记录**。这条规则防的是几周后读错日期，不是检索分数，所以没有评测数字。
 
+### 热度、去重与多样性（2.0.0-beta.4）
+
+三条从 AstrBot-LivingMemory 借来的排序手段，都做成了可关的开关，默认值按"真库上量出来的"定：
+
+| 开关 | 默认 | 作用 | 依据 |
+|---|---|---|---|
+| `heat` | 0.25 | 被引用/被打开的条目在同分时靠前 | 只改同分，不会越过真正的相关度 |
+| `dedupe` | 0 | 高相似度的后续行降权、不删行 | 真库 59 条查询里 top-3 最大 Jaccard **0.19**，0.5/0.75 两个阈值下重复率都是 **0%** |
+| `mmr` | 0 | 真 MMR 贪心，用余弦拉开多样性 | 同上：没有重复可去，开了只是多算一次 |
+
+热度是**乘法因子**，`H = 1 + 0.25·(½·min(1, refs/10) + ½·min(1, (opens + exposed/4)/20))`：被引用（正文里出现 `j-xxxx`/`agent-xxxx`）和被人主动打开各算一半，曝光（出现在搜索结果里但没打开）只算四分之一，避免"搜过就算重要"的自激。同分值不移动，是因为真库里大多数查询只有一两条命中，任何强加的热度都会开始改变排序而不是破平局。
+
+打开一条旧笔记还会**把衰减的参照时间往前挪**（`max(at, lastRead)`，上限 `at + 180 天`）：400 天前的笔记被读一次，分数能涨 5 倍以上。上限是防止一次误点让它永久免疫衰减。
+
+面板「回忆」页签的**排序微调**卡片可以改这三个值，保存走 `recall.save`；`memory.index` 的 `settings` 字段回报当前生效值（面板不缓存默认值，避免用旧数字覆盖）。
+
+评测方式：`node eval/dupe-rate.mjs --agent <id>` 算 top-3 的 Jaccard 分布；所有评测脚本都以 `access: false` 构造 `createRecall`，否则测一次就写一次访问计数，第二次跑出来的数字和第一次不一样。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。
@@ -380,13 +399,14 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `journal.js` — 私有日志存储
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
 - `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源、语义融合
+- `access.js` — 引用/打开/曝光计数（`index/access.json`，热度排序用）
 - `embed.js` — 本地 BGE 推理：WordPiece 分词、ONNX 会话、查询指令前缀
 - `vectors.js` — 向量库：float32 落盘、按内容 hash 判脏、增量同步、按 420 字分块（取最大余弦）
 - `transcripts.js` — 会话原文读取：归属判定、切分消息、文本裁剪、密钥打码
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 2.0.0-beta.1）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0-beta.1）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 2.0.0-beta.4）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0-beta.4）。
 
 测试（无需安装依赖）：
 
@@ -419,6 +439,7 @@ node eval/embed-variants.mjs   # 嵌入输入（整篇 / 前 240 字 / 仅标题
 node eval/chunk-variants.mjs   # 分块 A/B：整条 vs 420 字 vs 260 字（临时库，不动真索引）
 node eval/title-vs-body.mjs    # 标题加权诊断：查询对标题 / 正文的余弦与两条排序
 node eval/knowledge-eval.mjs   # 知识库 14 条改写查询：lexical vs hybrid + 噪声探针
+node eval/dupe-rate.mjs        # 重复度：每条查询 top-3 的 Jaccard 分布（决定 dedupe/MMR 该不该开）
 ```
 
 用例本身在 `eval/cases.mjs`；`--dir` / `--agent` 可换记忆目录与智能体。

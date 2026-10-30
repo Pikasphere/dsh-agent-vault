@@ -32,7 +32,9 @@ const limit = Number(flag('limit') || 5)
 
 const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: memoryDir })
-const recall = createRecall({ rootDir: memoryDir, store, journals })
+// access: false — a measurement run must not read or write the live heat counters,
+// otherwise the second eval reports different numbers than the first.
+const recall = createRecall({ rootDir: memoryDir, store, journals, access: false })
 
 await recall.search({ id: agentId, query: '预热', source: 'knowledge', mode: 'hybrid' })
 

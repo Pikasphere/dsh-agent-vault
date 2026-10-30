@@ -211,6 +211,11 @@ export function createStore(options = {}) {
       // body, and the measured evidence (one interval just above zero on 45
       // queries) does not support going that far.
       titleWeight: clampWeight(recallRaw.titleWeight, 0) > 0.5 ? 0.5 : clampWeight(recallRaw.titleWeight, 0),
+      // heat is bounded at 0.5 for the same reason: the term exists to break
+      // ties, and above +50 % it starts deciding matches on its own.
+      heat: clampWeight(recallRaw.heat, 0.25) > 0.5 ? 0.5 : clampWeight(recallRaw.heat, 0.25),
+      dedupe: clampWeight(recallRaw.dedupe, 0),
+      mmr: clampWeight(recallRaw.mmr, 0),
     }
     return {
       version: 1,
@@ -538,6 +543,12 @@ export function createStore(options = {}) {
         const weight = clampWeight(patch.recall.titleWeight, merged.titleWeight)
         merged.titleWeight = weight > 0.5 ? 0.5 : weight
       }
+      if (patch.recall.heat !== undefined) {
+        const value = clampWeight(patch.recall.heat, merged.heat)
+        merged.heat = value > 0.5 ? 0.5 : value
+      }
+      if (patch.recall.dedupe !== undefined) merged.dedupe = clampWeight(patch.recall.dedupe, merged.dedupe)
+      if (patch.recall.mmr !== undefined) merged.mmr = clampWeight(patch.recall.mmr, merged.mmr)
       next.recall = merged
     }
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {

@@ -18,7 +18,9 @@ const { LEXICAL_CASES, PARAPHRASE_CASES } = await load('eval/cases.mjs')
 
 const store = createStore({ rootDir: os.homedir() + '/.dsh/agent-memory' })
 const journals = createJournals({ rootDir: store.root })
-const recall = createRecall({ rootDir: store.root, store, journals, vectors: false })
+// access: false — a measurement run must not read or write the live heat counters,
+// otherwise the second eval reports different numbers than the first.
+const recall = createRecall({ rootDir: store.root, store, journals, vectors: false , access: false })
 
 async function rankOf(query, expect) {
   const result = await recall.search({

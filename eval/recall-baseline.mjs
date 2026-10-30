@@ -32,7 +32,9 @@ const agentId = flag('agent') || 'demo-agent'
 
 const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: store.root })
-const recall = createRecall({ rootDir: store.root, store, journals })
+// access: false — a measurement run must not read or write the live heat counters,
+// otherwise the second eval reports different numbers than the first.
+const recall = createRecall({ rootDir: store.root, store, journals, access: false })
 
 /** Labels live in `eval/cases.mjs`: three scripts read the same list. */
 const { LEXICAL_CASES: CASES } = await load('eval/cases.mjs')

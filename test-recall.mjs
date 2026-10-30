@@ -270,7 +270,121 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   const explicit = await recall.search({ id: agent.id, query: 'anything', mode: 'hybrid' })
   assert.equal(explicit.mode, 'hybrid', 'an explicit mode overrides the setting')
   store.saveSettings({ recall: { mode: 'hybrid' } })
-  assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20, titleWeight: 0 })
+  assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20, titleWeight: 0, heat: 0.25, dedupe: 0, mmr: 0 })
 }
+
+// ── access counters (2.0.0-beta.4) ──────────────────────────────────────────
+{
+  const { createAccess } = await load('access.js')
+  const accessRoot = path.join(scratch, 'access-unit')
+  const first = createAccess({ rootDir: accessRoot, flushMs: 5 })
+  first.record('journal:j-x', 'read')
+  first.record('journal:j-x', 'exposed')
+  assert.equal(first.stats('journal:j-x').opens, 1)
+  assert.equal(first.stats('journal:j-x').exposed, 1)
+  first.flush()
+  const second = createAccess({ rootDir: accessRoot })
+  assert.deepEqual(second.stats('journal:j-x')?.opens, 1, 'counters survive a reload')
+  assert.equal(second.stats('journal:j-x')?.exposed, 1)
+  assert.equal(second.stats('journal:unknown'), null)
+}
+
+// ── heat: a cited entry breaks a tie, a read breaks it back ─────────────────
+{
+  const heatRoot = path.join(scratch, 'heat')
+  const heatStore = createStore({ rootDir: heatRoot })
+  const heatAgent = heatStore.createAgent({ name: 'Heat' })
+  const heatJournals = createJournals({ rootDir: heatStore.root })
+  const stamp = new Date(Date.now() - 90 * 86400000).toISOString()
+  // Written peer-first on purpose: with equal scores the file order decides, so
+  // without heat the peer wins and only the heat term can move the cited one up.
+  const lines = [
+    { id: 'j-heat0002', at: stamp, kind: 'note', title: 'kv cache', text: 'kv cache policy' },
+    { id: 'j-heat0001', at: stamp, kind: 'note', title: 'kv cache', text: 'kv cache policy' },
+    { id: 'j-heat0003', at: stamp, kind: 'note', title: '引用', text: 'see j-heat0001 for the cache decision' },
+  ]
+  fs.mkdirSync(path.dirname(heatJournals.fileOf(heatAgent.id)), { recursive: true })
+  fs.writeFileSync(heatJournals.fileOf(heatAgent.id), lines.map(line => `${JSON.stringify(line)}\n`).join(''), 'utf8')
+  const heatRecall = createRecall({ rootDir: heatStore.root, store: heatStore, journals: heatJournals, vectors: false, transcripts: false })
+
+  heatStore.saveSettings({ recall: { heat: 0 } })
+  const cold = await heatRecall.search({ id: heatAgent.id, query: 'kv cache', expand: 0 })
+  assert.deepEqual(cold.results.slice(0, 2).map(row => row.id), ['j-heat0002', 'j-heat0001'], 'with heat off the peer first in the file wins the tie')
+
+  heatStore.saveSettings({ recall: { heat: 0.25 } })
+  const hot = await heatRecall.search({ id: heatAgent.id, query: 'kv cache', expand: 0 })
+  assert.deepEqual(hot.results.slice(0, 2).map(row => row.id), ['j-heat0001', 'j-heat0002'], 'a cited entry wins the tie')
+
+  heatRecall.open({ id: heatAgent.id, src: 'journal', entry: 'j-heat0002' })
+  heatRecall.open({ id: heatAgent.id, src: 'journal', entry: 'j-heat0002' })
+  const read = await heatRecall.search({ id: heatAgent.id, query: 'kv cache', expand: 0 })
+  assert.deepEqual(read.results.slice(0, 2).map(row => row.id), ['j-heat0002', 'j-heat0001'], 'two reads outweigh one citation')
+
+  heatStore.saveSettings({ recall: { heat: 0 } })
+  const off = await heatRecall.search({ id: heatAgent.id, query: 'kv cache', expand: 0 })
+  assert.deepEqual(off.results.slice(0, 2).map(row => row.id), ['j-heat0002', 'j-heat0001'], 'heat: 0 restores the plain tie-break')
+
+  // Drift guard: the exposure counter must not let repeated identical queries
+  // reorder their own results.
+  const stable = []
+  for (let round = 0; round < 20; round += 1) {
+    const page = await heatRecall.search({ id: heatAgent.id, query: 'kv cache', expand: 0 })
+    stable.push(page.results[0].id)
+  }
+  assert.equal(new Set(stable).size, 1, 'twenty identical searches keep the same top-1')
+}
+
+// ── a read pulls the decay reference time forward, bounded at 180 days ──────
+{
+  const readRoot = path.join(scratch, 'read-decay')
+  const readStore = createStore({ rootDir: readRoot })
+  const readAgent = readStore.createAgent({ name: 'Read' })
+  const readJournals = createJournals({ rootDir: readStore.root })
+  const ancient = new Date(Date.now() - 400 * 86400000).toISOString()
+  fs.mkdirSync(path.dirname(readJournals.fileOf(readAgent.id)), { recursive: true })
+  fs.writeFileSync(
+    readJournals.fileOf(readAgent.id),
+    `${JSON.stringify({ id: 'j-old0001', at: ancient, kind: 'note', title: 'zstd', text: 'zstd dictionary' })}\n`,
+    'utf8',
+  )
+  const readRecall = createRecall({ rootDir: readStore.root, store: readStore, journals: readJournals, vectors: false, transcripts: false })
+  const before = await readRecall.search({ id: readAgent.id, query: 'zstd', expand: 0 })
+  assert.equal(before.results[0]?.id, 'j-old0001')
+  readRecall.open({ id: readAgent.id, src: 'journal', entry: 'j-old0001' })
+  const after = await readRecall.search({ id: readAgent.id, query: 'zstd', expand: 0 })
+  assert.ok(after.results[0].score > before.results[0].score * 5, `reading an old note revives it (${before.results[0].score} → ${after.results[0].score})`)
+}
+
+// ── dedupe / mmr reorder, never drop ────────────────────────────────────────
+{
+  const dupRoot = path.join(scratch, 'dedupe')
+  const dupStore = createStore({ rootDir: dupRoot })
+  const dupAgent = dupStore.createAgent({ name: 'Dup' })
+  const dupJournals = createJournals({ rootDir: dupStore.root })
+  const base = Date.now()
+  const lines = [
+    { id: 'j-dup0001', at: new Date(base).toISOString(), kind: 'note', title: 'kv cache', text: 'kv cache policy notes about prompt ordering' },
+    { id: 'j-dup0002', at: new Date(base - 60000).toISOString(), kind: 'note', title: 'kv cache', text: 'kv cache policy notes about prompt ordering' },
+    { id: 'j-dup0003', at: new Date(base - 120000).toISOString(), kind: 'note', title: 'kv cache 的另一面', text: 'kv cache eviction and capacity' },
+  ]
+  fs.mkdirSync(path.dirname(dupJournals.fileOf(dupAgent.id)), { recursive: true })
+  fs.writeFileSync(dupJournals.fileOf(dupAgent.id), lines.map(line => `${JSON.stringify(line)}\n`).join(''), 'utf8')
+  const dupRecall = createRecall({ rootDir: dupStore.root, store: dupStore, journals: dupJournals, vectors: false, transcripts: false })
+  const plain = await dupRecall.search({ id: dupAgent.id, query: 'kv cache', expand: 0, limit: 3 })
+  assert.deepEqual(plain.results.map(row => row.id), ['j-dup0001', 'j-dup0002', 'j-dup0003'])
+  assert.equal(plain.total, 3, 'total is the pre-slice count')
+
+  dupStore.saveSettings({ recall: { dedupe: 0.75 } })
+  const deduped = await dupRecall.search({ id: dupAgent.id, query: 'kv cache', expand: 0, limit: 3 })
+  assert.deepEqual(deduped.results.map(row => row.id), ['j-dup0001', 'j-dup0003', 'j-dup0002'], 'the duplicate is demoted, not dropped')
+  assert.equal(deduped.total, 3, 'dedupe keeps total unchanged')
+  assert.equal(deduped.results[0].id, 'j-dup0001', 'dedupe never touches rank 1')
+
+  dupStore.saveSettings({ recall: { dedupe: 0, mmr: 0.2 } })
+  const spread = await dupRecall.search({ id: dupAgent.id, query: 'kv cache', expand: 0, limit: 3 })
+  assert.deepEqual(spread.results.map(row => row.id), ['j-dup0001', 'j-dup0003', 'j-dup0002'], 'MMR also prefers the distinct row')
+  assert.equal(spread.results.length, 3, 'MMR reorders, it does not drop')
+}
+
 
 console.log('ALL RECALL TESTS PASSED')

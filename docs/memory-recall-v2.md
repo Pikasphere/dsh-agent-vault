@@ -332,6 +332,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M8** `2.0.0-alpha.10` ✅ | 面板「语义索引」卡片（状态 / 准备·同步向量 / 混合·仅关键词开关）、`recall.save`、`settings.json` 的 `recall` 段真正生效、`store.state().recall` | `test-store.mjs` 归一化与夹取、`test-recall.mjs` 持久化模式与显式覆盖、`test-host.mjs` `recall.save` 白名单与 `state.recall` |
 | **M9** `2.0.0-beta.1` ✅ | 版本口径转 beta、**契约冻结**（工具 / op / 设置键 / 磁盘格式，见 §13）、发布到 npm 的 `beta` 渠道，`latest` 保持 1.3.3 | 无行为变化；`npm test` 11 个脚本全绿、`test-package.mjs` 通过；`npm publish --tag beta` 后 `npm view dsh-agent-vault dist-tags` 为 `{latest:1.3.3, beta:2.0.0-beta.1}` |
 | **M10** `2.0.0-beta.2` ✅ | 标题加权与知识库语义两处实测（都没有上线）+ `recall.titleWeight` 旋钮 + 两个评测脚本 | 标题加权在改写族上单调变差（0.281 → 0.280 → 0.251）、知识库 lexical 与 hybrid 同为 78.6% 且噪声峰值 0.471 > 0.45；`npm test` 11 个脚本全绿（2026-10-30 达成） |
+| **M11** `2.0.0-beta.4` ✅ | 热度（引用入度 / 打开 / 曝光）只破同分、读取移动衰减参照时间（上限 180 天）、去重与 MMR 开关、面板「排序微调」卡片 | 重复度实测 0%（59 条查询 top-3 最大 Jaccard 0.19）→ `dedupe`/`mmr` 默认 0；`heat` 0.25 只影响同分（`test-recall.mjs` 四组断言）；12 个测试脚本全绿（2026-10-30 达成） |
 
 版本口径：**beta 起冻结契约**——工具参数、宿主 op 的请求/返回形状、`settings.json` 键名、磁盘文件格式在 `2.0.0` 正式版之前不再改（清单见 §13）；仍可变的是默认参数值（按 `eval/` 的配对区间改）、内部实现与面板文案。npm 用 `--tag beta` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 
@@ -359,6 +360,6 @@ beta 的含义是「接口不再变，实现和默认值还可以变」。下面
 
 - **工具**：`agent_recall`（`query` / `limit` / `source` / `since` / `expand` / `mode`）与 `agent_alias`（`list` / `set` / `delete`）的名字、参数名与返回结构（`results` 行含 `id` / `src` / `at` / `title` / `preview` / `score` / `via`，`session` 行另带 `hit`；扩展行另带 `why`）。
 - **宿主 op**：`memory.recall`、`memory.reindex`、`memory.index`、`memory.open`、`memory.message`、`memory.sessions`、`memory.transcript`、`memory.model`、`memory.aliases`、`memory.alias`、`recall.save`；错误码 `no-agent` / `no-sessions` / `bad-request` / `not-found` 与 HTTP 映射（400 / 404）。
-- **设置键**：`recall.mode`（`hybrid` / `lexical`）、`recall.lexicalWeight`、`recall.semanticWeight`、`recall.minCosine`、`recall.rrfK`、`transcriptExclude`、`transcriptInclude`、`hideBoundSessions`、`knowledgeDir`、`activeVault`。
-- **磁盘格式**：`journal/<agentId>.jsonl`、`checkpoints/<agentId>.jsonl`、`journal` 条目的 `id` 形如 `j-[a-z0-9]{4,16}`、记忆日志标题行末尾的 `[session: …]`、`index/state.json`、`index/aliases.json`、`index/vectors.json`（version 2）+ `index/vectors.bin`（float32 小端、L2 归一化、一行一个分块，`row` 形如 `key#chunk`）。
+- **设置键**：`recall.mode`（`hybrid` / `lexical`）、`recall.lexicalWeight`、`recall.semanticWeight`、`recall.minCosine`、`recall.rrfK`、`recall.titleWeight`、`recall.heat`、`recall.dedupe`、`recall.mmr`、`transcriptExclude`、`transcriptInclude`、`hideBoundSessions`、`knowledgeDir`、`activeVault`。**后加的键只做增量**：缺省时按上文默认值补齐（`titleWeight` 0、`heat` 0.25、`dedupe` 0、`mmr` 0），旧 `settings.json` 不需要迁移。
+- **磁盘格式**：`journal/<agentId>.jsonl`、`checkpoints/<agentId>.jsonl`、`journal` 条目的 `id` 形如 `j-[a-z0-9]{4,16}`、记忆日志标题行末尾的 `[session: …]`、`index/state.json`、`index/aliases.json`、`index/access.json`（`{version:1, entries}`，可随时删除，删了热度归零）、`index/vectors.json`（version 2）+ `index/vectors.bin`（float32 小端、L2 归一化、一行一个分块，`row` 形如 `key#chunk`）。
 - **降级路径**：删掉 `index/` 只是重建索引；删掉 `checkpoints/` 会丢检查点历史（但日志笔记不受影响）；从 2.x 退回 1.3.x 前必须把 checkpoints 行并回 journal。

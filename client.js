@@ -278,6 +278,12 @@ window.__ModuleLoader__.load({
         recallModeLexical: '仅关键词',
         recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
         recallModeSaved: '排序模式已保存',
+        recallTuning: '排序微调',
+        recallTuningSave: '保存',
+        recallHeat: '热度加权',
+        recallDedupe: '去重阈值',
+        recallMmr: '多样性',
+        recallTuningHint: '热度 = 被引用/被打开越多，同分时越靠前（0–0.5，0 关闭）；去重与多样性默认 0，实测语料里没有重复条目可去。',
       },
       en: {
         nav: 'Agents',
@@ -533,6 +539,12 @@ window.__ModuleLoader__.load({
         recallModeLexical: 'Keywords only',
         recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
         recallModeSaved: 'Ranking mode saved',
+        recallTuning: 'Rank tuning',
+        recallTuningSave: 'Save',
+        recallHeat: 'Heat',
+        recallDedupe: 'Dedupe',
+        recallMmr: 'Diversity',
+        recallTuningHint: 'Heat = cited/opened entries win ties (0–0.5, 0 disables); dedupe and diversity default to 0 — the real corpus had nothing to dedupe.',
       },
     }
 
@@ -586,6 +598,7 @@ window.__ModuleLoader__.load({
 .am-btn-danger{border-color:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary)) 45%,transparent);color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary));background:transparent}
 .am-btn-sm{padding:4px 10px;font-size:12px;border-radius:8px}
 .am-input{width:100%;box-sizing:border-box;padding:8px 11px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 60%,transparent);color:inherit;font:inherit;outline:none}
+.am-input-sm{width:72px;flex:0 0 auto;padding:5px 8px;font-size:12px}
 .am-field{display:flex;flex-direction:column;gap:5px}
 .am-label{font-size:11px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
 .am-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:13px}
@@ -830,6 +843,9 @@ window.__ModuleLoader__.load({
       const [semanticData, setSemanticData] = useState(null)
       const [semanticBusy, setSemanticBusy] = useState(false)
       const [indexVersion, setIndexVersion] = useState(0)
+      // null until the user touches a field: the card shows the persisted values
+      // straight from memory.index, so a stale panel can never "save" old numbers.
+      const [tuningDraft, setTuningDraft] = useState(null)
       const [sessionList, setSessionList] = useState(null)
       const [aliasData, setAliasData] = useState(null)
       const [aliasKey, setAliasKey] = useState('')
@@ -1471,6 +1487,26 @@ window.__ModuleLoader__.load({
       const rebuildIndex = async () => {
         const rebuilt = await call('memory.reindex', {})
         if (rebuilt !== undefined) setIndexVersion(current => current + 1)
+      }
+
+      /**
+       * Heat, dedupe and MMR are all "off or subtle" by default, so the card is a
+       * flat row of three controls rather than a form — the point is to let a
+       * curious user turn one knob and re-run a search, not to configure a ranker.
+       */
+      const tuning = tuningDraft ?? indexData?.settings ?? { heat: 0.25, dedupe: 0, mmr: 0 }
+
+      const saveTuning = async () => {
+        const saved = await call('recall.save', {
+          recall: {
+            heat: Number(tuning.heat),
+            dedupe: Number(tuning.dedupe),
+            mmr: Number(tuning.mmr),
+          },
+        })
+        if (saved === undefined) return
+        setTuningDraft(null)
+        setIndexVersion(current => current + 1)
       }
 
       /**
@@ -2441,6 +2477,56 @@ window.__ModuleLoader__.load({
               ),
             ),
             h('div', { className: 'am-note-dim' }, t('recallModeHint')),
+          ),
+          h(
+            'div',
+            { className: 'am-card' },
+            h(
+              'div',
+              { className: 'am-row' },
+              h('span', { className: 'am-label' }, t('recallTuning')),
+              h('span', { style: { flex: 1 } }),
+              h(
+                'button',
+                { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => void saveTuning() },
+                t('recallTuningSave'),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'am-row' },
+              h('span', { className: 'am-note-dim' }, t('recallHeat')),
+              h('input', {
+                className: 'am-input am-input-sm',
+                type: 'number',
+                min: '0',
+                max: '0.5',
+                step: '0.05',
+                value: tuning.heat,
+                onChange: event => setTuningDraft({ ...tuning, heat: event.target.value }),
+              }),
+              h('span', { className: 'am-note-dim' }, t('recallDedupe')),
+              h('input', {
+                className: 'am-input am-input-sm',
+                type: 'number',
+                min: '0',
+                max: '1',
+                step: '0.05',
+                value: tuning.dedupe,
+                onChange: event => setTuningDraft({ ...tuning, dedupe: event.target.value }),
+              }),
+              h('span', { className: 'am-note-dim' }, t('recallMmr')),
+              h('input', {
+                className: 'am-input am-input-sm',
+                type: 'number',
+                min: '0',
+                max: '1',
+                step: '0.05',
+                value: tuning.mmr,
+                onChange: event => setTuningDraft({ ...tuning, mmr: event.target.value }),
+              }),
+            ),
+            h('div', { className: 'am-note-dim' }, t('recallTuningHint')),
           ),
           h(
             'div',

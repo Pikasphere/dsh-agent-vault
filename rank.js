@@ -112,15 +112,21 @@ export function decay(at, now = Date.now(), halfLifeDays = HALF_LIFE_DAYS) {
  */
 export function rank(entries, query, options = {}) {
   const now = Number(options.now) || Date.now()
+  // `boost` also receives the entry, so a caller can fold a per-entry weight
+  // (the access heat term) into the same multiplier as the per-source weight.
   const boost = options.boost ?? (() => 1)
+  // `at` overrides the timestamp decay uses: a note read yesterday is not as
+  // stale as its write date suggests (see docs §7.4). Default stays the write time.
+  const at = options.at ?? (entry => entry?.at)
   const tokens = tokenize(query)
   const rows = []
   for (const entry of entries) {
     const src = String(entry?.src ?? '')
-    if (boost(src) === 0) continue
+    const weight = boost(src, entry)
+    if (weight === 0) continue
     const raw = tokens.length === 0 ? 0 : scoreEntry(entry, tokens)
     if (tokens.length > 0 && raw === 0) continue
-    const score = tokens.length === 0 ? 0 : raw * decay(entry?.at, now) * boost(src)
+    const score = tokens.length === 0 ? 0 : raw * decay(at(entry), now) * weight
     // A sub-microscopic score is noise; dropping it keeps results honest.
     if (score < 1e-6) continue
     rows.push({ entry, score })

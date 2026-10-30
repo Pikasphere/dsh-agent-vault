@@ -84,7 +84,9 @@ for (const variant of VARIANTS) {
   const vectorsDir = path.join(tempRoot, `chunk-${variant.chunkChars}`)
   fs.mkdirSync(path.join(vectorsDir, 'index'), { recursive: true })
   note(`[${variant.label}] building`)
-  const recall = createRecall({ rootDir: store.root, store, journals, vectorsDir, chunkChars: variant.chunkChars })
+  // access: false — a measurement run must not read or write the live heat counters,
+// otherwise the second eval reports different numbers than the first.
+const recall = createRecall({ rootDir: store.root, store, journals, vectorsDir, chunkChars: variant.chunkChars , access: false })
   const startedAt = Date.now()
   const prepared = await recall.prepare()
   const buildMs = Date.now() - startedAt

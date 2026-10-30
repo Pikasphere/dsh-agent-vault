@@ -31,7 +31,9 @@ const titleWeight = flag('title-weight') === '' ? null : Number(flag('title-weig
 
 const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: store.root })
-const recall = createRecall({ rootDir: store.root, store, journals })
+// access: false — a measurement run must not read or write the live heat counters,
+// otherwise the second eval reports different numbers than the first.
+const recall = createRecall({ rootDir: store.root, store, journals, access: false })
 
 /**
  * Labels live in `eval/cases.mjs`. Cases the keyword path already answers are

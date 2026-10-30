@@ -31,6 +31,7 @@ import { SEED_COUNT, createAliases, entryKey, expand as expandGraph, extractEnti
 import { createTranscripts } from './transcripts.js'
 import { createEmbedder } from './embed.js'
 import { createVectors } from './vectors.js'
+import { createAccess } from './access.js'
 
 export const SOURCES = ['journal', 'log', 'knowledge', 'session']
 export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9, room: 0.7, checkpoint: 0 }
@@ -51,8 +52,24 @@ export const DEFAULT_MODEL = 'bge-small-zh-v1.5'
  *   probe still peaks at 0.361, so 0.40 buys nothing it can prove and sits closer
  *   to the junk level than 0.45 does. alpha.11 moved it on a point estimate of an
  *   underpowered set; that was the wrong call, not a wrong direction.
+ *
+ * `heat` / `dedupe` / `mmr` are the three knobs added in 2.0.0-beta.4 (docs
+ * §7.4/§7.5). Only `heat` is on: it is inert until an entry has been read or
+ * exposed at all, and it is bounded at +25 %. `dedupe` and `mmr` default to 0
+ * because the measurement said so — on 59 labelled queries the worst top-3
+ * Jaccard was 0.19, i.e. there was nothing to de-duplicate (`eval/dupe-rate.mjs`).
  */
-export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20, titleWeight: 0 }
+export const RECALL_DEFAULTS = {
+  mode: 'hybrid',
+  lexicalWeight: 0.6,
+  semanticWeight: 0.4,
+  minCosine: 0.45,
+  rrfK: 20,
+  titleWeight: 0,
+  heat: 0.25,
+  dedupe: 0,
+  mmr: 0,
+}
 export const MODES = ['hybrid', 'lexical']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
@@ -90,6 +107,12 @@ export function createRecall(options = {}) {
   const statePath = path.join(indexDir, 'state.json')
   const cache = new Map()
   const aliases = createAliases({ rootDir: root })
+  /**
+   * Access counters power the heat term (§7.4). They live under `index/`, so
+   * deleting the index resets them along with everything else, and they are
+   * optional: `access: false` (tests, evals) keeps a search side-effect free.
+   */
+  const access = options.access === false ? null : (options.access ?? createAccess({ rootDir: root }))
   const transcripts =
     options.transcripts === false
       ? null
@@ -144,7 +167,139 @@ export function createRecall(options = {}) {
     merged.rrfK = Number.isFinite(rrfK) ? Math.min(Math.max(Math.round(rrfK), 1), 200) : RECALL_DEFAULTS.rrfK
     const titleWeight = Number(merged.titleWeight)
     merged.titleWeight = Number.isFinite(titleWeight) ? Math.min(Math.max(titleWeight, 0), 0.5) : RECALL_DEFAULTS.titleWeight
+    const heat = Number(merged.heat)
+    merged.heat = Number.isFinite(heat) ? Math.min(Math.max(heat, 0), 0.5) : RECALL_DEFAULTS.heat
+    const dedupe = Number(merged.dedupe)
+    merged.dedupe = Number.isFinite(dedupe) ? Math.min(Math.max(dedupe, 0), 1) : RECALL_DEFAULTS.dedupe
+    const mmr = Number(merged.mmr)
+    merged.mmr = Number.isFinite(mmr) ? Math.min(Math.max(mmr, 0), 1) : RECALL_DEFAULTS.mmr
     return merged
+  }
+
+  /**
+   * How often each id is cited by *other* entries: one regex sweep over the
+   * corpus instead of the O(n²) `cites()` pair test. The ref edge in `graph.js`
+   * is exactly "one text literally contains the other's id", so counting which
+   * texts mention an id gives its in-degree for free.
+   */
+  const CITE_ID = /(?:agent|j)-[a-z0-9]{4,16}/g
+  function citeCounts(entries) {
+    const counts = new Map()
+    for (const entry of entries) {
+      const text = String(entry?.text ?? '')
+      if (text === '') continue
+      const own = String(entry?.id ?? '')
+      const seen = new Set()
+      for (const match of text.matchAll(CITE_ID)) {
+        const id = match[0]
+        if (id === own || seen.has(id)) continue
+        seen.add(id)
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+    }
+    return counts
+  }
+
+  /**
+   * Heat: `1 + heatMax × (½·φ(refs,10) + ½·φ(reads+¼·exposures,20))`.
+   * The log ratio keeps the first few uses valuable and later ones cheap — going
+   * from 1 to 3 reads says more than from 31 to 33 — and the cap keeps the whole
+   * term inside ±25 %, i.e. a tie-breaker, never a way for a bad match to win.
+   */
+  const heatOf = (entry, settings, refs) => {
+    if (settings.heat <= 0 || access === null) return 1
+    const stat = access.stats(entryKey(entry))
+    const reads = Number(stat?.opens ?? 0)
+    const exposed = Number(stat?.exposed ?? 0)
+    const evidence = reads + 0.25 * exposed
+    const phi = (value, cap) => Math.min(1, Math.log1p(Math.max(0, value)) / Math.log1p(cap))
+    const heat = 0.5 * phi(refs, 10) + 0.5 * phi(evidence, 20)
+    return 1 + settings.heat * heat
+  }
+
+  /**
+   * Decay uses the write time, unless the entry was *read* later: a note opened
+   * yesterday is fresher than its date claims. The read time may pull the
+   * reference time forward by at most 180 days, so a five-year-old note opened
+   * once today cannot outrank everything written this month.
+   */
+  const READ_EXTENDS_DAYS = 180
+  function referenceTime(entry) {
+    const source = entry?.at
+    const own = Date.parse(String(source ?? ''))
+    if (!Number.isFinite(own) || access === null) return source
+    const read = Date.parse(String(access.stats(entryKey(entry))?.lastRead ?? ''))
+    if (!Number.isFinite(read) || read <= own) return source
+    return new Date(Math.min(read, own + READ_EXTENDS_DAYS * 86400000)).toISOString()
+  }
+
+  /**
+   * Reorder — never drop — near-duplicate rows (§7.5).
+   *
+   * `dedupe > 0` demotes a row that overlaps an already-chosen row above the
+   * threshold to the end of the list, which leaves the first row (the answer most
+   * queries are judged on) untouched. `mmr > 0` is full maximal marginal
+   * relevance, which does trade top-1 accuracy for spread; it ships off because
+   * the measurement in `eval/dupe-rate.mjs` found nothing to spread out.
+   */
+  function diversify(rows, settings) {
+    if (rows.length < 3) return rows
+    const threshold = settings.dedupe
+    const lambda = settings.mmr
+    if (threshold <= 0 && lambda <= 0) return rows
+    const bags = rows.map(row => new Set(tokenize(`${row.entry?.title ?? ''} ${String(row.entry?.text ?? '').slice(0, 400)}`)))
+    const sim = (left, right) => {
+      const a = bags[left]
+      const b = bags[right]
+      if (a.size === 0 || b.size === 0) return 0
+      let shared = 0
+      for (const token of a) if (b.has(token)) shared += 1
+      return shared / (a.size + b.size - shared)
+    }
+    if (lambda > 0) {
+      const scores = rows.map(row => Number(row.score) || 0)
+      const low = Math.min(...scores)
+      const high = Math.max(...scores)
+      const norm = value => (high > low ? (value - low) / (high - low) : 1)
+      const chosen = []
+      const rest = rows.map((row, index) => ({ row, index }))
+      while (rest.length > 0) {
+        let best = 0
+        let bestValue = -Infinity
+        for (let index = 0; index < rest.length; index += 1) {
+          const { row, index: source } = rest[index]
+          let overlap = 0
+          for (const picked of chosen) overlap = Math.max(overlap, sim(source, picked.index))
+          const value = lambda * norm(row.score) - (1 - lambda) * overlap
+          if (value > bestValue) {
+            bestValue = value
+            best = index
+          }
+        }
+        chosen.push(rest[best])
+        rest.splice(best, 1)
+      }
+      return chosen.map(item => item.row)
+    }
+    const kept = []
+    const deferred = []
+    for (const row of rows) {
+      const source = rows.indexOf(row)
+      const duplicate = kept.some(item => sim(source, item.source) >= threshold)
+      if (duplicate) deferred.push({ row, source })
+      else kept.push({ row, source })
+    }
+    return [...kept, ...deferred].map(item => item.row)
+  }
+
+  /**
+   * Exposure counters: a row that reached the caller is worth a quarter of a
+   * read (see `access.js`). Recorded only for what is returned, never for the
+   * whole candidate list — otherwise a broad query would heat everything.
+   */
+  function recordExposure(rows) {
+    if (access === null) return
+    for (const row of rows) access.record(entryKey(row.entry), 'exposed')
   }
 
   /** Load the model ahead of the first query so a search does not pay the 150 ms. */
@@ -416,8 +571,14 @@ export function createRecall(options = {}) {
       const time = Date.parse(entry.at)
       return Number.isFinite(time) && time >= since
     })
-    const boost = src => DEFAULT_BOOST[src] ?? 1
-    const rows = rank(entries, query, { boost })
+    // Heat is computed over the entries in play, so a source filter changes the
+    // citation counts of what it returns (a filtered search sees fewer citers).
+    // That is honest: in-degree is a property of the corpus you are searching.
+    const refs = settings.heat > 0 ? citeCounts(entries) : null
+    const boost = (src, entry) =>
+      (DEFAULT_BOOST[src] ?? 1) * (refs === null ? 1 : heatOf(entry, settings, refs.get(String(entry?.id ?? '')) ?? 0))
+    const when = entry => (settings.heat > 0 ? referenceTime(entry) : entry?.at)
+    const rows = rank(entries, query, { boost, at: when })
 
     /**
      * Semantic similarity is computed over the agent's whole journal layer (not
@@ -443,7 +604,7 @@ export function createRecall(options = {}) {
     // Entries it turns up enter as weaker seeds, and lexical hits it confirms
     // get a nudge, mirroring §6.5's "seed weight ×1.2".
     for (const alias of aliases.expandQuery(query)) {
-      for (const row of rank(entries, alias.target, { boost })) {
+      for (const row of rank(entries, alias.target, { boost, at: when })) {
         const key = entryKey(row.entry)
         const known = scores.get(key)
         if (known === undefined) {
@@ -519,14 +680,14 @@ export function createRecall(options = {}) {
       .sort((a, b) => b.score - a.score)
 
     if (!graph) {
+      const page = diversify(ranked, settings).slice(0, limit)
+      recordExposure(page)
       return {
         query,
         mode,
         total: ranked.length,
         expand: 0,
-        results: ranked
-          .slice(0, limit)
-          .map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
+        results: page.map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
       }
     }
 
@@ -536,14 +697,14 @@ export function createRecall(options = {}) {
     const seeds = ranked.filter(row => row.via !== 'semantic').slice(0, SEED_COUNT)
     const extras = expandGraph(seeds, entries).filter(row => !effective.scores.has(entryKey(row.entry)))
     const final = [...ranked, ...extras].sort((a, b) => b.score - a.score)
+    const page = diversify(final, settings).slice(0, limit)
+    recordExposure(page)
     return {
       query,
       mode,
       total: final.length,
       expand: 1,
-      results: final
-        .slice(0, limit)
-        .map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
+      results: page.map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
     }
   }
 
@@ -559,6 +720,9 @@ export function createRecall(options = {}) {
     if (src === '' || entry === '') return null
     const found = collect(agentId, src).find(item => item.id === entry)
     if (found === undefined) return null
+    // An explicit open is the strongest "this was useful" signal we have, so it
+    // counts fully (and may even pull the entry's decay forward).
+    if (access !== null) access.record(entryKey(found), 'read')
     const entryOut = { id: found.id, src: found.src, at: found.at, title: found.title, text: found.text, tags: found.tags }
     if (typeof found.sessionId === 'string' && found.sessionId !== '') entryOut.sessionId = found.sessionId
     return entryOut
@@ -639,6 +803,14 @@ export function createRecall(options = {}) {
       sources: persisted?.sources ?? {},
       cached,
       mode: settings.mode,
+      // The panel edits these three in place (§7.4/§7.5); reporting them keeps
+      // the UI from carrying a second copy of the defaults.
+      settings: {
+        heat: settings.heat,
+        dedupe: settings.dedupe,
+        mmr: settings.mmr,
+        titleWeight: settings.titleWeight,
+      },
       semantic: vectors === null
         ? { available: false, model: '', error: embedderError || 'model-missing' }
         : { available: true, embedderError, ...vectors.status() },

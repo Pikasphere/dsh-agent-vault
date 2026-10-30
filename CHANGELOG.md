@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.0.0-beta.4 — 2026-10-30
+
+三条从 AstrBot-LivingMemory 借来的排序手段：热度、读取移动衰减参照时间、去重 / MMR。前两条上线（改排序），后两条只留开关（真库上量不出收益）。工具参数与 op 的返回结构不变，只新增三个设置键、一个 `memory.index` 的 `settings` 字段与面板一张卡片。
+
+### 新增
+
+- `access.js`：`createAccess({ rootDir, now, flushMs })` → `record(key, 'read' | 'exposed')` / `stats(key)` / `flush()` / `size`；落 `index/access.json`（`{version:1, entries}`），2 s 合并写、原子 rename、上限 5000 键、保留 365 天、损坏时重建。
+- 热度：`recall.heat`（0–0.5，默认 **0.25**）。`H = 1 + heat·(½·min(1, refs/10) + ½·min(1, (opens + exposed/4)/20))`，`refs` 由一次正则扫全语料得到（`CITE_ID`）；`memory.open` 记一次 read，结果页出现记一次 exposed。热度是乘法因子，**只在同分时可能改变顺序**。
+- 读取移动衰减参照时间：`referenceTime = min(max(at, lastRead), at + 180d)`。400 天前的笔记被读一次，分数可涨 5 倍以上。
+- 去重 / MMR：`recall.dedupe`、`recall.mmr`（0–1，默认 **0**）。`dedupe > 0` 时对 top-3 相似行贪心降权（不删行、不动第 1 名）；`mmr > 0` 时走真 MMR 贪心。`total` 始终是截断前的条数。
+- `memory.index` 返回值新增 `settings: { heat, dedupe, mmr, titleWeight }`（增量字段，旧客户端忽略即可）。
+- 面板「回忆」页签新增**排序微调**卡片：三个数字输入 + 保存（走 `recall.save`）；卡片显示的是宿主回报的生效值，不是本地默认值。
+- `eval/dupe-rate.mjs`：每条查询 top-3 两两 Jaccard，报分位与两个阈值下的重复率。
+
+### 修复
+
+- 所有评测脚本改为 `createRecall({ …, access: false })`：测一次就写一次访问计数，会让第二次跑出来的数字和第一次不一样。
+
+### 实测
+
+- 重复度（真库 59 条查询 × 两种 mode）：top-3 最大 Jaccard **0.19**（分位 p90 ≤ 0.13），0.5 / 0.75 阈值下重复率 **0%** → 没有东西可去重，`dedupe`/`mmr` 默认 0，机制保留。
+- 热度只破平局：`test-recall.mjs` 里同分三条，被引用者反超、两次打开再翻回来、`heat: 0` 回到文件序、20 次重复查询 top-1 不漂移。
+- 回归：词法族 92.9% / 100% / 0.952 不动；改写族 hybrid 13.3% / 37.8% / 0.281（与 beta.2 同量级）。
+
+### 说明
+
+- 为什么不做 astrbot 那种 `0.5×相关 + 0.25×重要 + 0.25×新鲜`：真库多数查询只有一两条命中，强加权重会开始改变排序而不是打破平局，而评测灵敏度只有 ±0.128 MRR，测不出这种改动。
+- `heat` 上限 0.5 与 `titleWeight` 同理：再高就不是「破平局」而是「主导排序」。
+- 删掉 `index/access.json` 是安全的，只是热度归零；`settings.json` 里缺这三个键时按默认值补齐，不需要迁移。
+
 ## 2.0.0-beta.3 — 2026-10-30
 
 写入时的相对时间归一：三条写入工具都要求绝对日期，宿主再用窄口径校验补一行提醒。工具参数、op 返回结构、磁盘格式都不变。
