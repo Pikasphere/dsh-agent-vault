@@ -330,8 +330,9 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M6** `2.0.0-alpha.7` ✅ | 别名可写（`memory.aliases` / `memory.alias` / `agent_alias` / 面板卡片）、日志条目带 `sessionId` 可回到对话 | `test-recall.mjs` 别名写入即时生效、删除幂等、日志行带会话；`test-store.mjs` 日志含 `[session: …]`；`test-host.mjs` 别名 op 与工具 |
 | **M7** `2.0.0-alpha.8` ✅ | 本地 BGE 语义层（`embed.js` / `vectors.js`）、RRF 混合排名、`mode` 参数、`memory.model`、`scripts/fetch-model.mjs`、改写评测 | `eval/recall-paraphrase.mjs`：hybrid top-1 41.7% / MRR 0.528 vs lexical 25.0% / 0.403（+16.7 pt / +0.125，55 ms）；词法基线 92.9% 不动；`test-embed.mjs` 全过（含 RRF 量纲回归） |
 | **M8** `2.0.0-alpha.10` ✅ | 面板「语义索引」卡片（状态 / 准备·同步向量 / 混合·仅关键词开关）、`recall.save`、`settings.json` 的 `recall` 段真正生效、`store.state().recall` | `test-store.mjs` 归一化与夹取、`test-recall.mjs` 持久化模式与显式覆盖、`test-host.mjs` `recall.save` 白名单与 `state.recall` |
+| **M9** `2.0.0-beta.1` ✅ | 版本口径转 beta、**契约冻结**（工具 / op / 设置键 / 磁盘格式，见 §13）、发布到 npm 的 `beta` 渠道，`latest` 保持 1.3.3 | 无行为变化；`npm test` 11 个脚本全绿、`test-package.mjs` 通过；`npm publish --tag beta` 后 `npm view dsh-agent-vault dist-tags` 为 `{latest:1.3.3, beta:2.0.0-beta.1}` |
 
-版本口径：alpha 之间允许破坏性调整（返回结构、字段名），**beta 起冻结契约**；npm 用 `--tag alpha` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
+版本口径：**beta 起冻结契约**——工具参数、宿主 op 的请求/返回形状、`settings.json` 键名、磁盘文件格式在 `2.0.0` 正式版之前不再改（清单见 §13）；仍可变的是默认参数值（按 `eval/` 的配对区间改）、内部实现与面板文案。npm 用 `--tag beta` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 
 ## 11. 风险与取舍
 
@@ -340,7 +341,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - **隐私**：L2 含路径与片段；M3 入对话层前需要脱敏规则（token/密钥正则 + 可选白名单目录）。
 - **索引漂移**：手工编辑 JSONL 会让 offset 失效 → 长度回退检测 + 全量重建兜底。
 - **性能**：1 万条以内进程内可行；超过后换 `node:sqlite` FTS5（Node ≥ 22.5 才有 `node:sqlite`，本机 CLI 为 v24.21.0 可用，但 **Electron 主进程的 Node 版本需单独确认**，这是引入前的必查项）。
-- **破坏性**：2.0 的破坏只在"checkpoints 目录分离 + 条目 ns 字段"，旧版读取会缺 checkpoint 但不会写坏；`package.json` version 走 `2.0.0-alpha.N`，收口为 `2.0.0-beta.N`。
+- **破坏性**：2.0 的破坏只在"checkpoints 目录分离 + 条目 ns 字段"，旧版读取会缺 checkpoint 但不会写坏；`package.json` version 走 `2.0.0-alpha.N`，自 `2.0.0-beta.1` 起为 `2.0.0-beta.N` 并冻结契约（§13）。
 
 ## 12. 开放问题
 
@@ -350,3 +351,13 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 4. ~~检查点历史是否需要面板可读？~~ **已定（`2.0.0-alpha.9`）**：面板新增只读「检查点」页签，**永不进 prompt、永不进索引**。
 5. ~~`agent_journal list` 的 AND 语义改成 OR 后，是否影响既有调用方的预期？~~ **已定**：召回排序本来就是 OR（任一 token 命中即计入），靠「覆盖率平方」把只命中一部分的条目压下去，近似软 AND；已在 `2.0.0-alpha.1` 的 CHANGELOG「说明」里写明，调用方不需要改。
 6. ~~是否做图？~~ **已定：做检索侧 1 跳扩展、不做画布**（M2.5 / `alpha.3`），边不落盘。
+
+## 13. 2.0.0-beta.1 冻结的契约
+
+beta 的含义是「接口不再变，实现和默认值还可以变」。下面这些面在 `2.0.0` 正式版之前视为稳定；要改就是 3.0 的事，或者先发一个 major 的预告。
+
+- **工具**：`agent_recall`（`query` / `limit` / `source` / `since` / `expand` / `mode`）与 `agent_alias`（`list` / `set` / `delete`）的名字、参数名与返回结构（`results` 行含 `id` / `src` / `at` / `title` / `preview` / `score` / `via`，`session` 行另带 `hit`；扩展行另带 `why`）。
+- **宿主 op**：`memory.recall`、`memory.reindex`、`memory.index`、`memory.open`、`memory.message`、`memory.sessions`、`memory.transcript`、`memory.model`、`memory.aliases`、`memory.alias`、`recall.save`；错误码 `no-agent` / `no-sessions` / `bad-request` / `not-found` 与 HTTP 映射（400 / 404）。
+- **设置键**：`recall.mode`（`hybrid` / `lexical`）、`recall.lexicalWeight`、`recall.semanticWeight`、`recall.minCosine`、`recall.rrfK`、`transcriptExclude`、`transcriptInclude`、`hideBoundSessions`、`knowledgeDir`、`activeVault`。
+- **磁盘格式**：`journal/<agentId>.jsonl`、`checkpoints/<agentId>.jsonl`、`journal` 条目的 `id` 形如 `j-[a-z0-9]{4,16}`、记忆日志标题行末尾的 `[session: …]`、`index/state.json`、`index/aliases.json`、`index/vectors.json`（version 2）+ `index/vectors.bin`（float32 小端、L2 归一化、一行一个分块，`row` 形如 `key#chunk`）。
+- **降级路径**：删掉 `index/` 只是重建索引；删掉 `checkpoints/` 会丢检查点历史（但日志笔记不受影响）；从 2.x 退回 1.3.x 前必须把 checkpoints 行并回 journal。

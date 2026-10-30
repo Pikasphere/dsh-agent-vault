@@ -40,7 +40,7 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 
 DSH 插件以 profile 包的形式安装。任选一种：
 
-> **npm 版本注意**：1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。请用 **1.3.3**（当前正式版；1.3.1 起已修好打包，1.3.3 另含右键菜单与交接修复）。要从源码改代码，用目录或 `link:` 安装。
+> **npm 版本注意**：1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。稳定版用 **1.3.3**（1.3.1 起已修好打包，1.3.3 另含右键菜单与交接修复）。要试 2.0 的召回层，装 beta 渠道：`dsh plugin add dsh-agent-vault@beta`（`latest` 仍指向 1.3.3）。要从源码改代码，用目录或 `link:` 安装。
 
 ### 方式一：从目录安装
 
@@ -128,7 +128,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 `agent_recall` 永远不返回检查点：检查点是权威状态（整段注入、旧的可能误导），只属于「读取」，不属于「检索」。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
 
-> **2.0.0-alpha**：召回层从 2.0 开始进入 alpha，破坏性只发生在检查点目录分离与 `index/` 新增上；旧数据首次访问会自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点。
+> **2.0.0-beta**：召回层从 2.0 进入 beta，契约已冻结（工具参数、宿主 op、设置键、磁盘格式见 `CHANGELOG` 的 beta.1 小节），破坏性只发生在检查点目录分离与 `index/` 新增上；旧数据首次访问会自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点。
 
 ## 接力（交棒检查点）
 
@@ -213,7 +213,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 - 键盘：打开后方向键上下移动，Esc 或点击别处关闭。
 - **在智能体名下创建新对话**：取该智能体最近一个已绑定对话的工作区，调用 `agent.newSession` 新建会话并立即绑定，然后切过去；没有历史对话时会话落在默认工作区。它不继承审批策略（那是「续会话」/ 交接的语义），需要继承时用面板的「续会话」。
 
-## 回忆（2.0 alpha）
+## 回忆（2.0）
 
 「回忆」页签是召回层的前端：按关键词检索**当前智能体**的日志笔记、它的记忆审计记录，以及共享知识库。
 
@@ -369,7 +369,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.13）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.13）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 2.0.0-beta.1）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0-beta.1）。
 
 测试（无需安装依赖）：
 

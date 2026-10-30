@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0.0-beta.1 — 2026-10-30
+
+版本口径从 alpha 转 beta：**契约冻结，进入 beta 渠道**。这一版没有行为变化——`2.0.0-alpha.13` 的代码原样发布，改的是版本号、发布渠道与文档里的承诺。冻结的意思很具体：下面这些面在 `2.0.0` 正式版之前不再改，改就要等 3.0。
+
+### 冻结的契约
+
+- **两个工具**：`agent_recall`（`query` / `limit` / `source` / `since` / `expand` / `mode`）与 `agent_alias`（`list` / `set` / `delete`）的名字、参数、返回结构。
+- **宿主 op**：`memory.recall`、`memory.reindex`、`memory.index`、`memory.open`、`memory.message`、`memory.sessions`、`memory.transcript`、`memory.model`、`memory.aliases`、`memory.alias`、`recall.save` 的请求与返回形状。
+- **设置键**：`settings.json` 的 `recall.mode` / `lexicalWeight` / `semanticWeight` / `minCosine` / `rrfK`、`transcriptExclude`、`transcriptInclude`、`hideBoundSessions`。
+- **磁盘格式**：`checkpoints/<agentId>.jsonl`、`index/state.json`、`index/aliases.json`、`index/vectors.json`（version 2）+ `index/vectors.bin`、记忆日志标题行的 `[session: …]` 后缀。
+- **测试套件**：`npm test` 覆盖的 11 个脚本是发布门槛，删减需要理由。
+
+### 仍然可以变
+
+默认参数值（按 `eval/` 的配对区间证据改）、内部实现与文件布局之外的细节、面板文案与排版。beta 期间每改一次默认值，都要重跑 `eval/recall-grid.mjs` 并把区间写进 README。
+
+### 发布渠道
+
+`npm publish --tag beta`：`dsh-agent-vault@beta` 指向 `2.0.0-beta.N`，`latest` 仍停在 **1.3.3**，直到 `2.0.0` 正式版。
+
 ## 2.0.0-alpha.13 — 2026-10-30
 
 长笔记不再被 512 token 截断：一条笔记改成多行向量，相似度取各段最大值。这一版上线的理由是**正确性**，不是分数——A/B 的差值落在评测灵敏度之内，文档里如实写了。
