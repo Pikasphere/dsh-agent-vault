@@ -1,0 +1,93 @@
+model bge-small-zh-v1.5 dim 512, 155 vectors, synced
+14 lexical + 45 paraphrase queries over 24 notes (agent demo-agent, source journal)
+
+## reference (1456 ms)
+lexical family, mode=lexical     top-1  92.9%  top-3 100.0%  MRR 0.952
+lexical family, mode=hybrid (default) top-1 100.0%  top-3 100.0%  MRR 1.000
+paraphrase family, mode=hybrid   top-1  13.3%  top-3  33.3%  MRR 0.247
+  paraphrase MRR 0.247 [0.127, 0.383]  top-1 13.3%
+
+## weights (paired against default, resampled by note)
+  w=0.4/0.6    MRR 0.254 [0.000, 0.019]  delta +0.007  not distinguishable from 0  991 ms
+  w=0.5/0.5    MRR 0.248 [-0.010, 0.013]  delta +0.001  not distinguishable from 0  1016 ms
+  w=0.7/0.3    MRR 0.247 [0.000, 0.000]  delta +0.000  not distinguishable from 0  1011 ms
+  w=0.8/0.2    MRR 0.237 [-0.039, 0.009]  delta -0.010  not distinguishable from 0  1046 ms
+  -> keep 0.6/0.4
+
+## RRF k (paired against default, resampled by note)
+  k=5          MRR 0.247 [0.000, 0.000]  delta +0.000  not distinguishable from 0  1012 ms
+  k=10         MRR 0.247 [0.000, 0.000]  delta +0.000  not distinguishable from 0  1027 ms
+  k=40         MRR 0.247 [0.000, 0.000]  delta +0.000  not distinguishable from 0  982 ms
+  k=60         MRR 0.247 [0.000, 0.000]  delta +0.000  not distinguishable from 0  1013 ms
+  -> keep k=20
+
+## separation probe (off-topic cosine, floor at 0)
+  max 0.361  median 0.314  -> floors that admit junk: 0.3, 0.35
+
+## cosine floor (paired against default, resampled by note)
+  cos=0.4      MRR 0.253 [-0.047, 0.056]  delta +0.006  not distinguishable from 0  992 ms
+  cos=0.5      MRR 0.212 [-0.105, 0.025]  delta -0.035  not distinguishable from 0  1081 ms
+  cos=0.6      MRR 0.159 [-0.189, -0.003]  delta -0.088  worse  1100 ms
+  -> keep cos=0.45  (safe set 0.4, 0.45, 0.5, 0.6)
+
+## chosen configuration
+lexical family, mode=hybrid      top-1 100.0%  top-3 100.0%  MRR 1.000
+paraphrase family, mode=hybrid   top-1  13.3%  top-3  33.3%  MRR 0.247
+  paraphrase MRR 0.247 [0.127, 0.383]  top-1 13.3%
+
+## lexical-path invariance
+  ok: the keyword ranking is identical across k values
+
+## paraphrase cases still not rank 1 (39/45)
+  会话怎么被收起来               j-mvgva9bdbd
+  两个会话之间怎么接上             j-mvgqxcdas7
+  装大模型踩了什么坑              j-mvqmackkpk
+  改完名字就打不开               j-mvi09989v2
+  侧栏那块是自己画的吗             j-mvgv0njbvu
+  上下文怎么这么短               j-mvqmvhhf9x
+  这个对话算谁的                j-mvgumrcv76
+  接手的人从哪读起               j-mvgsum3yow
+  把整个界面推倒重来按哪里           j-mvgt465qut
+  换到新对话还记得刚才的安排吗         j-mvgt7pwseu
+  把难听的字眼从界面上拿掉           j-mvhnyi2v9p
+  给模型加个看图的附件             j-mvqqd0f3pt
+  它自己换了窗口却没人知道           j-mvp1eh79qd
+  一句话交代不完时怎么把话传下去        j-mvgqxcdas7
+  写给后来者的一份现状说明           j-mvgsum3yow
+  第一次亲眼看到界面时做的检查         j-mvgt465qut
+  把方案推倒重写第二版的起因          j-mvgt465qut
+  真的关掉再打开看它自己做对没有        j-mvgtec7g9w
+  把上次用的那个选择沿用下来          j-mvgtzwnuqo
+  发版前先把最要紧的一项做完          j-mvgtzwnuqo
+  实测它确实照抄了上次的选择          j-mvgu47yxa6
+  对话全堆在一个地方太乱            j-mvgumrcv76
+  转手的时候把环境一起带过去          j-mvgumrcv76
+  原生位置加不进去只好自己画一块        j-mvgv0njbvu
+  旧对话自动收进抽屉但还能翻          j-mvgva9bdbd
+  收起来和彻底藏起来是两档           j-mvgva9bdbd
+  一个参数传错整件事没反应           j-mvhmoxlset
+  收起来的对话点开是空白            j-mvhmznvxht
+  链接断了要重新接一遍             j-mvhpm9ce8h
+  照着别人的仓库重新装一份           j-mvnyyuucjh
+  提示让它换它却始终不动            j-mvp1eh79qd
+  新开的这段启动配置不对            j-mvp1rnqbnc
+  断了从上次的地方接着下            j-mvqmackkpk
+  把它挂到本机的模型服务上           j-mvqmackkpk
+  一天干完五件事的流水账            j-mvqmhhdda9
+  没有钥匙却被放行               j-mvqmnzkuyw
+  只装一半的知识范围              j-mvqmnzkuyw
+  它以为我只能装那么多             j-mvqmvhhf9x
+  多装一个配件就能读图             j-mvqqd0f3pt
+
+## sensitivity of this set
+  45 queries over 24 notes -> anything smaller than +/-0.128 MRR is not measurable here
+  top-1 6/45 = 13.3%, 95 % interval 2.2% .. 26.8%
+
+## recommended (paste into settings.json -> recall)
+{
+  "mode": "hybrid",
+  "lexicalWeight": 0.6,
+  "semanticWeight": 0.4,
+  "minCosine": 0.45,
+  "rrfK": 20
+}

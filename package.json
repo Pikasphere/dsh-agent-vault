@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-vault",
-  "version": "2.0.0-alpha.11",
+  "version": "2.0.0-alpha.12",
   "description": "Per-agent memory, one shared knowledge base, and per-conversation agent roles for DeepSeek Harness",
   "type": "module",
   "exports": {
@@ -29,6 +29,7 @@
     "icon.svg",
     "docs/*.md",
     "eval/*.mjs",
+    "eval/results/*.txt",
     "scripts/*.mjs",
     "README.md",
     "CHANGELOG.md",

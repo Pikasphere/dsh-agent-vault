@@ -36,13 +36,23 @@ export const SOURCES = ['journal', 'log', 'knowledge', 'session']
 export const DEFAULT_BOOST = { journal: 1, log: 1, knowledge: 0.8, session: 0.9, room: 0.7, checkpoint: 0 }
 export const DEFAULT_MODEL = 'bge-small-zh-v1.5'
 /**
- * Defaults chosen by `eval/recall-grid.mjs` (2.0.0-alpha.11): weights 0.6/0.4
- * is the argmax over 150 combinations; RRF's k makes no measurable difference
- * (spread 0.010 MRR) so it stays 20; the cosine floor moved 0.45 → 0.40 because
- * the off-topic probe peaks at 0.359, so 0.40 keeps a margin of 0.04 while
- * admitting targets the 0.45 floor was throwing away.
+ * Defaults that survived `eval/recall-grid.mjs` in 2.0.0-alpha.12, i.e. the
+ * values whose alternative could **not** be shown to be better. The grid walks
+ * one axis at a time at the current choice (weights, then k, then the floor) and
+ * only moves a value when the paired, note-clustered 95 % interval against the
+ * default excludes zero.
+ *
+ * - weights 0.6/0.4: every candidate sat inside the interval (best: 0.4/0.6,
+ *   +0.007). Keep the default.
+ * - k = 20: k never mattered (all deltas exactly 0.000); the only requirement is
+ *   the keyword path being untouched, which holds.
+ * - minCosine 0.45: this is the *revert* of alpha.11's 0.40. On the 45-query set
+ *   the difference is +0.006 [-0.047, +0.056] — not evidence — and the off-topic
+ *   probe still peaks at 0.361, so 0.40 buys nothing it can prove and sits closer
+ *   to the junk level than 0.45 does. alpha.11 moved it on a point estimate of an
+ *   underpowered set; that was the wrong call, not a wrong direction.
  */
-export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.4, rrfK: 20 }
+export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20 }
 export const MODES = ['hybrid', 'lexical']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)

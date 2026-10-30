@@ -205,7 +205,7 @@ export function createStore(options = {}) {
       mode: recallRaw.mode === 'lexical' ? 'lexical' : 'hybrid',
       lexicalWeight: clampWeight(recallRaw.lexicalWeight, 0.6),
       semanticWeight: clampWeight(recallRaw.semanticWeight, 0.4),
-      minCosine: clampWeight(recallRaw.minCosine, 0.4),
+      minCosine: clampWeight(recallRaw.minCosine, 0.45),
       rrfK: clampRrfK(recallRaw.rrfK, 20),
     }
     return {
