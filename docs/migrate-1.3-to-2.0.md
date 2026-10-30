@@ -32,18 +32,21 @@
 |---|---|
 | 工具列表 | 多出 `agent_recall`、`agent_alias` 两个工具 |
 | 面板「回忆」 | 「索引」卡片显示笔记/日志条数；「语义索引」卡片显示模型未就绪（**正常**，模型 24 MB 不随 npm 包发布） |
-| 面板「日志」 | 只有笔记，条数与升级前一致 |
+| 面板「日志」 | 只剩笔记；检查点搬到「检查点」页签。两个页签加起来 = 升级前「日志」里的总条数 |
 | 面板「检查点」 | 升级前的交棒检查点都在，只读、没有删除按钮 |
 | 侧栏「智能体对话」 | 右键对话出现菜单：打开 / 归档 / 转化为强归档 / 取消归档 / 新建对话 |
 | 绑定关系 | 各对话的智能体绑定没变（`bindings.json` 没被改写） |
 
-想试语义检索（可选，24 MB 本地模型）：
+想试语义检索（可选，24 MB 本地模型）。顺序是「先下模型，再建向量」——2.0.0 里 `memory.model` 只有 `status` 与 `prepare` 两个动作，**不会替你下载**；模型缺失时面板的「准备向量」按钮是禁用的，卡片上写着缺什么。
+
+下载脚本在插件的 `scripts/` 里（profile 安装的在 `<profile>/node_modules/dsh-agent-vault/scripts/`；源码安装的在仓库里）。`--dir` 是**模型目录**，默认 `~/.dsh/agent-memory/models/bge-small-zh-v1.5`：
 
 ```bash
-node scripts/fetch-model.mjs --dest ~/.dsh/agent-memory/models/bge-small-zh-v1.5
+node scripts/fetch-model.mjs              # 默认目录，逐文件校验 size + sha256，可续传
+node scripts/fetch-model.mjs --dir <modelsDir> --force
 ```
 
-然后在面板「回忆 → 语义索引」点「准备向量」。模型缺失时 `hybrid` 会自动降级成纯词法，并在面板显示原因——不会报错。
+下完重启 DSH（或等面板刷新），再点「准备向量」。任何一步失败都只是降级成纯词法，并在面板显示原因——不会报错，也不会让检索不可用。
 
 ## 3. 磁盘上会变什么
 
@@ -60,11 +63,11 @@ node scripts/fetch-model.mjs --dest ~/.dsh/agent-memory/models/bge-small-zh-v1.5
 
 ### 检查点拆分：怎么发生的
 
-1.3 的 `journal/<agentId>.jsonl` 里，笔记和检查点是同一行格式（`kind: 'note'` / `'checkpoint'`）混着存的。2.0 首次读某个智能体的日志时：
+1.3 的 `journal/<agentId>.jsonl` 里，笔记和检查点是同一行格式（`kind: 'note'` / `'checkpoint'`）混着存的。2.0 **首次读取或写入**某个智能体的日志时（`readAll` / `write` 都会触发）：
 
 1. 把 `kind === 'checkpoint'` 的行**追加**到 `checkpoints/<agentId>.jsonl`；
 2. 重写 `journal/<agentId>.jsonl`，只留笔记；
-3. 之后读日志时两个文件**合并后按 `at` 排序**，所以面板里看到的总条数不变。
+3. 之后读日志时两个文件**合并后按 `at` 排序**，所以「日志 + 检查点」两个页签加起来与升级前的总条数一致。
 
 这一步是幂等的：已经拆过的文件再读不会有第二次动作（探测 `raw.includes('"kind":"checkpoint"')`）。风险只有一处——**拆完再用 1.3 读，检查点就不显示了**（不会写坏数据）。
 
