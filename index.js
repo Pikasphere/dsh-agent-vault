@@ -27,6 +27,7 @@ import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall } from './recall.js'
+import { withTimeHint } from './time.js'
 
 const API_BASE = '/api/agent-memory'
 const MAX_BODY_BYTES = 1024 * 1024
@@ -203,6 +204,15 @@ const textOutput = (schema, make) => ({
   },
 })
 
+// One rule, three write paths. Nothing in the host can rewrite the model's
+// prose, so the constraint lives where it is read at write time (the tool
+// description) and is backed by a hint in the result (see time.js).
+const TIME_RULE =
+  'Write absolute dates, not relative ones: when your own text says 今天/昨天/明天/下周/上个月 or the like, convert it to ' +
+  'YYYY-MM-DD first — a reader weeks or months later cannot resolve "today". A quoted user sentence stays as written; ' +
+  'add the date in brackets after it.'
+
+
 function guard(fn) {
   return async (args, exec) => {
     try {
@@ -230,7 +240,8 @@ function registerTools(ctx, store, rooms, journals, recall) {
         description:
           'Write the short, inheritable memory of one agent. Call it once a task is finished or before handing work off. ' +
           `The text replaces the current memory and must stay under ${limit} characters; summarize rather than log. ` +
-          'The user loads this memory into a later session; you cannot read it back.',
+          'The user loads this memory into a later session; you cannot read it back. ' +
+          `${TIME_RULE} This memory is injected into every later request, so a stale "yesterday" misleads for as long as it is loaded.`,
         parameters: {
           type: 'object',
           properties: {
@@ -255,7 +266,7 @@ function registerTools(ctx, store, rooms, journals, recall) {
             note: args?.note ?? (exec?.agent?.id ? `session ${String(exec.agent.id).slice(-8)}` : ''),
             sessionId: exec?.agent?.id ?? '',
           })
-          return { ok: true, ...result, limit: limit }
+          return withTimeHint({ ok: true, ...result, limit: limit }, args?.content)
         }),
       },
       'agent-memory: memory tool',
@@ -310,7 +321,8 @@ function registerTools(ctx, store, rooms, journals, recall) {
         name: 'agent_knowledge_write',
         description:
           'Record or refine one entry in the shared knowledge base: what was tried, what worked, exact paths or commands, and why. ' +
-          'Pass `entry` with an id returned by agent_knowledge_search to refine that entry instead of adding a duplicate.',
+          'Pass `entry` with an id returned by agent_knowledge_search to refine that entry instead of adding a duplicate. ' +
+          `${TIME_RULE} Other agents read this entry in other sessions and weeks later, so dates matter here more than anywhere.`,
         parameters: {
           type: 'object',
           properties: {
@@ -331,17 +343,20 @@ function registerTools(ctx, store, rooms, journals, recall) {
               : bound !== ''
                 ? bound
                 : store.settings().activeVault
-          return {
-            ok: true,
-            ...store.saveKnowledge({
-              id: contributor,
-              entry: args?.entry,
-              title: args?.title,
-              content: args?.content,
-              tags: args?.tags,
-              source: exec?.agent?.id ? `session ${String(exec.agent.id).slice(-8)}` : '',
-            }),
-          }
+          return withTimeHint(
+            {
+              ok: true,
+              ...store.saveKnowledge({
+                id: contributor,
+                entry: args?.entry,
+                title: args?.title,
+                content: args?.content,
+                tags: args?.tags,
+                source: exec?.agent?.id ? `session ${String(exec.agent.id).slice(-8)}` : '',
+              }),
+            },
+            args?.content,
+          )
         }),
       },
       'agent-memory: knowledge write tool',
@@ -515,7 +530,8 @@ function registerJournalTools(register, store, journals) {
       description:
         'Your private journal: the detailed, diary-like record of this one agent. No other agent can read or extend it, and nothing is injected ' +
         'automatically — you decide when to consult it. action="list" shows recent entries, "search" filters them, "read" returns one entry, ' +
-        '"write" appends a new one. Use it for detail a short memory cannot hold.',
+        '"write" appends a new one. Use it for detail a short memory cannot hold. ' +
+        `${TIME_RULE}`,
       parameters: {
         type: 'object',
         properties: {
@@ -535,7 +551,8 @@ function registerJournalTools(register, store, journals) {
         if (action === 'list') return { ok: true, ...journals.list({ id, limit: args?.limit }) }
         if (action === 'search') return { ok: true, ...journals.list({ id, query: args?.query, limit: args?.limit }) }
         if (action === 'read') return { ok: true, ...journals.read({ id, entry: args?.entry }) }
-        if (action === 'write') return { ok: true, ...journals.write({ id, title: args?.title, text: args?.text }) }
+        if (action === 'write')
+          return withTimeHint({ ok: true, ...journals.write({ id, title: args?.title, text: args?.text }) }, args?.text)
         throw new MemoryError('bad-action', `unknown action: ${action}`)
       }),
     },
@@ -572,6 +589,7 @@ function handoffHint(threshold) {
     '在这一步先完成两件事，然后继续手上的工作：',
     '1) `agent_memory_save`：写一段不超过 400 字的记忆（下一步做什么、关键决策、遗留问题）',
     '2) `agent_journal` 的 `write`：追加一条详细日志（这次做了什么、为什么、踩了什么坑）',
+    '两处都用绝对日期（2026-10-30），不要写「今天/昨天」：下一段会话可能在几周后读它。',
     '两件都完成后会自动生成一份交棒检查点，本会话仍可继续使用。',
   ].join('\n')
 }
