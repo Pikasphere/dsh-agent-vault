@@ -692,6 +692,30 @@ window.__ModuleLoader__.load({
 .am-side-session.is-selected:hover,.am-side-agent-row.is-selected:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 22%,transparent)}
 .am-toast-bar{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:90;padding:7px 14px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);box-shadow:0 8px 26px rgba(0,0,0,.24);font-size:12px;color:var(--dsw-alias-label-secondary);pointer-events:none}
 .am-toast-bar.is-failed{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));border-color:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-border-l2)) 45%,transparent)}
+/* narrow screens (phones): the panel is a two-column layout with a 264px rail,
+   which leaves the main column ~90px wide at 360px and clips the tab strip.
+   Below 720px the rail turns into a horizontal vault strip, the tabs wrap into
+   a 4-per-row grid so all eight stay visible and tappable. */
+@media (max-width:720px){
+  .am-root{flex-direction:column}
+  .am-side{width:auto;flex:none;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}
+  .am-side-head{padding:10px 12px 6px}
+  .am-side-foot{display:none}
+  .am-vaults{flex-direction:row;gap:6px;overflow-x:auto;padding:0 12px 10px;scrollbar-width:none}
+  .am-vaults::-webkit-scrollbar{display:none}
+  .am-vault{flex:0 0 auto;width:auto;max-width:190px;flex-direction:row;align-items:center;gap:6px;padding:7px 11px;border-radius:999px}
+  .am-vault-name{flex:0 1 auto;min-width:0;max-width:150px}
+  .am-vault-meta{display:none}
+  .am-head{padding:14px 12px 10px;gap:10px;flex-wrap:wrap}
+  .am-head-name{font-size:15px}
+  .am-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 4px;padding:8px 6px 0}
+  .am-tab{padding:8px 2px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .am-body{padding:12px}
+  .am-empty{padding:24px 12px}
+  .am-room-members{padding:8px 12px}
+  .am-room-flow{padding:12px}
+  .am-room-compose{padding:10px 12px 14px}
+}
 `
 
     // ── locale ──────────────────────────────────────────────────────────────
