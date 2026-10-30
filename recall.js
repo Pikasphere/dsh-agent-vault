@@ -124,7 +124,15 @@ export function createRecall(options = {}) {
   const vectors =
     options.vectors === false || embedder === null
       ? null
-      : createVectors({ rootDir: root, embedder, model: options.model ?? DEFAULT_MODEL })
+      : createVectors({
+          // `vectorsDir` exists for the A/B eval scripts: they build several
+          // stores (whole-note vs chunked) over the same corpus without touching
+          // the real index.
+          rootDir: options.vectorsDir ?? root,
+          embedder,
+          model: options.model ?? DEFAULT_MODEL,
+          chunkChars: options.chunkChars,
+        })
 
   function recallSettings() {
     const raw = store.settings().recall

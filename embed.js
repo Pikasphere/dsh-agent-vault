@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
-const MAX_TOKENS = 512;
+export const MAX_TOKENS = 512;
 const CLS = '[CLS]';
 const SEP = '[SEP]';
 const UNK = '[UNK]';

@@ -44,6 +44,7 @@ const { createStore } = await load('store.js')
 const { createJournals } = await load('journal.js')
 const { createRecall } = await load('recall.js')
 const { LEXICAL_CASES, PARAPHRASE_CASES } = await load('eval/cases.mjs')
+import { BOOT, clusterBootstrap, makeRandom, pct } from './stats.mjs'
 
 const argv = process.argv.slice(2)
 const flag = name => {
@@ -85,52 +86,6 @@ const LIMIT = 5
 /** Queries with no correct answer in the corpus: whatever they match is junk. */
 const OFF_TOPIC = ['今天天气怎么样', '给我讲个笑话', '晚饭吃什么好', '汇率怎么算', '明天股市开盘吗', '推荐一部电影']
 
-const pct = value => `${value.toFixed(1)}%`
-
-/**
- * Statistics. A point estimate over a few dozen queries is not a measurement of
- * a parameter: the 95 % interval on MRR with 45 cases is roughly +/-0.06, so a
- * difference of 0.01-0.03 between two parameter sets is indistinguishable from
- * noise. Resampling is therefore **by note**, not by query: the queries are 1-3
- * phrasings of the same notes, and treating them as independent cases would
- * understate the interval. Seeded, so two runs print the same numbers.
- */
-const BOOT = 4000
-const makeRandom = seed => {
-  let state = seed >>> 0
-  return () => {
-    state ^= state << 13
-    state >>>= 0
-    state ^= state >>> 17
-    state ^= state << 5
-    state >>>= 0
-    return state / 4294967296
-  }
-}
-
-function clusterBootstrap(values, clusters, seed = 0x9e3779b9) {
-  const rnd = makeRandom(seed ^ values.length)
-  const cells = new Map()
-  values.forEach((value, index) => {
-    const key = clusters[index]
-    if (!cells.has(key)) cells.set(key, [])
-    cells.get(key).push(value)
-  })
-  const units = [...cells.values()]
-  const draws = []
-  for (let round = 0; round < BOOT; round += 1) {
-    let sum = 0
-    let count = 0
-    for (let pick = 0; pick < units.length; pick += 1) {
-      const cell = units[Math.floor(rnd() * units.length)]
-      for (const value of cell) sum += value
-      count += cell.length
-    }
-    draws.push(sum / count)
-  }
-  draws.sort((a, b) => a - b)
-  return { lo: draws[Math.floor(0.025 * BOOT)], hi: draws[Math.floor(0.975 * BOOT)] }
-}
 
 const fade = ({ lo, hi }) => `[${lo.toFixed(3)}, ${hi.toFixed(3)}]`
 

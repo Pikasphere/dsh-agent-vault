@@ -333,6 +333,15 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 
 结论：**参数已经调不动了**，而且这次是能说清楚的「调不动」。改写族 hybrid top-1 13.3%（6/45）、MRR 0.247，卡住它的是检索质量本身——纯语义排名里目标能排第一的只有 4/15，中位名次 6/25。下一步的收益在「换更强模型 / 分块 / 标题加权」，不在参数。
 
+### 分块嵌入（2.0.0-alpha.13）
+
+编码器只读 512 token，而本库笔记的中位数是 **654 token、28 条里 22 条超限**（`eval/token-check.mjs`）——整条嵌入等于把长笔记的尾部丢掉，而查询问的往往正是尾部那个细节（5,085 个 token 从未进过编码器）。
+
+- **一条笔记对应多行向量**：按约 420 字切窗口（重叠 60 字，尽量落在句末），每段前面重复标题，`index/vectors.json` 升级到 v2（`row: "key#chunk"`、`chunks` 记段数），旧布局读到即作废重建。
+- **相似度取各段最大值**，不取平均：一条笔记通常只讲一件事，平均会让别的段落冲淡真正对上的那一段。
+- **A/B 结论（`eval/chunk-variants.mjs`，45 条改写 / 14 条词法）**：改写族 MRR 0.247 → 0.253（+0.006 [-0.066, +0.088]），260 字版本 0.266（+0.019 [-0.078, +0.115]）——**两个区间都跨 0**，所以不宣称提升；词法族 100% 不动；无关查询的噪声峰值 0.407 → 0.424，仍在 0.45 下限内。
+- 上线的理由是正确性而不是分数：尾部信息重新可见，且没有任何一族回退。260 字窗口行数多 70% 且噪声更靠近下限，故取 420 字；`chunkChars: 0` 可复现 alpha.12。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。
@@ -355,12 +364,12 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
 - `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源、语义融合
 - `embed.js` — 本地 BGE 推理：WordPiece 分词、ONNX 会话、查询指令前缀
-- `vectors.js` — 向量库：float32 落盘、按内容 hash 判脏、增量同步
+- `vectors.js` — 向量库：float32 落盘、按内容 hash 判脏、增量同步、按 420 字分块（取最大余弦）
 - `transcripts.js` — 会话原文读取：归属判定、切分消息、文本裁剪、密钥打码
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.12）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.12）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 alpha.13）、`docs/embedding-local.md`（本地语义索引，已实现到 alpha.13）。
 
 测试（无需安装依赖）：
 
@@ -390,6 +399,7 @@ node eval/recall-paraphrase.mjs # 15 条改写查询：lexical vs hybrid
 node eval/recall-grid.mjs      # 顺序轴参数评估（权重 → k → 下限）+ 配对自助法 + 噪声探针（约 10 s）
 node eval/semantic-rank.mjs   # 纯语义排名：融合前的检索质量（区分「参数不行」与「检索不行」）
 node eval/embed-variants.mjs   # 嵌入输入（整篇 / 前 240 字 / 仅标题）的对照实验
+node eval/chunk-variants.mjs   # 分块 A/B：整条 vs 420 字 vs 260 字（临时库，不动真索引）
 ```
 
 用例本身在 `eval/cases.mjs`；`--dir` / `--agent` 可换记忆目录与智能体。

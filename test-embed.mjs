@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const load = name => import(`file://${path.join(here, name).replace(/\\/g, '/')}`)
 const { basicTokenize, wordPiece, createEmbedder, cosine, QUERY_PREFIX } = await load('embed.js')
-const { createVectors, hashText } = await load('vectors.js')
+const { createVectors, hashText, chunksOf, CHUNK_CHARS } = await load('vectors.js')
 const { createStore } = await load('store.js')
 const { createJournals } = await load('journal.js')
 const { createRecall, RECALL_DEFAULTS } = await load('recall.js')
@@ -86,7 +86,11 @@ assert.ok(fs.existsSync(path.join(store.root, 'index', 'vectors.bin')), 'vectors
 const meta = JSON.parse(fs.readFileSync(path.join(store.root, 'index', 'vectors.json'), 'utf8'))
 assert.equal(meta.dim, DIM)
 assert.equal(meta.entries.length, 2)
-assert.equal(meta.entries[0].hash, hashText(`归档动作\n右键把会话收进归档`))
+// Rows are sorted by entry key, so look the note up instead of indexing the file.
+const archiveRow = meta.entries.find(entry => entry.key === `journal:${first.id}`)
+assert.ok(archiveRow, 'the archive note has a row')
+assert.equal(archiveRow.hash, hashText(["归档动作","右键把会话收进归档"].join(String.fromCharCode(10))))
+assert.equal(archiveRow.chunk, 0, 'a short note is a single chunk')
 
 built = await vectors.sync(entries())
 assert.equal(built.embedded, 0, 'unchanged text is not re-embedded')
@@ -211,6 +215,57 @@ if (fs.existsSync(path.join(realDir, 'onnx', 'model_quantized.onnx'))) {
 } else {
   console.log('  real model not installed, skipped the native check')
 }
+
+// ── chunking: a long note spans several rows, and its score is the best one ─
+// BGE reads 512 tokens and the median note in this vault is ~654, so alpha.13
+// embeds ~420-character windows instead of truncating. A note's similarity is
+// the max over its chunks: averaging would let the note's other topics dilute
+// the one precise paragraph a query is after.
+const cutScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-memory-chunk-'))
+const cutStore = createStore({ rootDir: path.join(cutScratch, 'mem'), knowledgeDir: path.join(cutScratch, 'kb') })
+const cutJournals = createJournals({ rootDir: cutStore.root })
+const cutAgent = cutStore.createAgent({ name: 'Chunks' })
+const cutTitle = '长笔记'
+const cutBody = `${'这一段在讲离题的话。'.repeat(100)}最后一句才是答案。`
+cutJournals.write({ id: cutAgent.id, title: cutTitle, text: cutBody })
+const cutEntries = () =>
+  cutJournals.notes(cutAgent.id).map(row => ({
+    id: row.id,
+    src: 'journal',
+    at: String(row.at),
+    title: String(row.title),
+    text: String(row.text),
+    tags: [],
+  }))
+const pieces = chunksOf({ title: cutTitle, text: cutBody }, CHUNK_CHARS)
+assert.ok(pieces.length >= 2, `a long note splits (${pieces.length} chunks)`)
+const pieceVectors = new Map(
+  pieces.map((piece, index) => [piece, index === pieces.length - 1 ? [0.9, 0.43589] : [0.2, 0.9798]]),
+)
+const chunkEmbedder = {
+  modelPath: '/stub/onnx/model_quantized.onnx',
+  dim: 2,
+  embed: async texts => texts.map(text => Float32Array.from(pieceVectors.get(text) ?? [0, 1])),
+  embedOne: async () => Float32Array.from([1, 0]),
+}
+const cutVectors = createVectors({ rootDir: cutStore.root, embedder: chunkEmbedder, model: 'chunked' })
+const cutBuilt = await cutVectors.sync(cutEntries())
+assert.equal(cutBuilt.count, 1, 'count is notes, not rows')
+assert.equal(cutBuilt.chunks, pieces.length, 'one row per chunk')
+assert.equal(cutBuilt.embedded, pieces.length)
+const cutMeta = JSON.parse(fs.readFileSync(path.join(cutStore.root, 'index', 'vectors.json'), 'utf8'))
+assert.equal(cutMeta.version, 2, 'version 2 marks the chunked layout')
+assert.deepEqual(
+  cutMeta.entries.map(entry => entry.chunk),
+  pieces.map((_, index) => index),
+  'chunk indices are contiguous',
+)
+const cutScores = await cutVectors.score(cutEntries(), '任意查询')
+const cutScore = [...cutScores.values()][0]
+assert.ok(Math.abs(cutScore - 0.9) < 0.02, `a note scores as its best chunk (${cutScore.toFixed(3)})`)
+const rewritten = await cutVectors.sync(cutEntries(), { chunkChars: 200 })
+assert.ok(rewritten.embedded > 0, 'a different chunkChars rebuilds the note')
+fs.rmSync(cutScratch, { recursive: true, force: true })
 
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL EMBED TESTS PASSED')
