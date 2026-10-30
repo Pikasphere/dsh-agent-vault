@@ -1,22 +1,14 @@
 # Changelog
 
-## 2.0.2-beta.1 — 2026-10-31
+## 2.0.2 — 2026-10-31
 
-窄屏记忆库横条补上常驻滑块。只动客户端 CSS。
-
-- 2.0.2-beta.0 把记忆库栏改成横向胶囊条时把滚动条藏了（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），结果是列表再长也看不出还有几个智能体——只能靠「第三个胶囊被切一半」猜。
-- 现在改成 6px 高的细滑块（`scrollbar-width:thin` + 自定义 `::-webkit-scrollbar` 轨道/滑块，滑块色用 `--dsw-alias-border-l2`，悬停提到 `--dsw-alias-label-tertiary`），横条底部留 4px 内边距，滑块不会压住胶囊。
-- 触摸屏上原生滚动条是覆盖式的（iOS Safari 尤其不认 `::-webkit-scrollbar`），这类设备仍然靠左右滑动，滑块只是桌面/安卓上的常驻提示。
-- 验证：同样的静态骨架 + 无头 Edge，在 320 / 360px 各截图核对滑块位置与胶囊间距（滑块完整显示、胶囊不被压住）。
-
-## 2.0.2-beta.0 — 2026-10-31
-
-窄屏（手机）布局修复，只动客户端 CSS，没有宿主侧改动。
+窄屏（手机）布局修复 + 记忆库横条常驻滑块。只动客户端 CSS，没有宿主侧改动，刷新页面即可。
 
 - **症状**：视口窄时面板仍是「264px 记忆库栏 + 主栏」，主栏被挤到几十像素，八个页签里靠右的几个被 `overflow:hidden` 裁掉——看不到也点不到。
 - **修法**：新增 `@media (max-width:720px)`：记忆库栏转为顶部横向胶囊条（`overflow-x:auto`，不撑宽面板）；页签容器由 `flex` 改为 `grid; grid-template-columns:repeat(4,minmax(0,1fr))`，八项固定 4×2 全可见；头部/页签/正文内边距 26px → 12px；讨论室成员条、消息流、输入区同步收窄。
+- **滑块**：横条最初把滚动条藏了（`scrollbar-width:none`），列表再长也看不出还有几个智能体。现在改成 6px 高的常驻细滑块（`scrollbar-width:thin` + 自定义 `::-webkit-scrollbar` 轨道/滑块，滑块色 `--dsw-alias-border-l2`、悬停 `--dsw-alias-label-tertiary`），横条底部留 4px 内边距，滑块不压胶囊。触摸屏上原生滚动条是覆盖式的（iOS Safari 不认 `::-webkit-scrollbar`），这类设备照常左右滑动。
 - 桌面宽度下所有原规则不变（新样式全部包在媒体查询里）。
-- 验证方式：把插件真实的 `CSS` 常量抽出来，套一份等价的 DOM 骨架，用无头 Edge 在 320 / 360 / 720 / 1100px 四档宽度各截图核对（4×2 页签在 320px 下仍完整；1100px 与改动前一致）。截图存于 `docs/images/narrow-panel.png`（不打进 npm 包）。
+- 验证：把插件真实的 `CSS` 常量抽出来套一份等价 DOM 骨架，用无头 Edge 在 320 / 360 / 720 / 1100px 四档宽度各截图核对（4×2 页签在 320px 下仍完整；1100px 与改动前一致；滑块完整显示、胶囊不被压住）。截图存于 `docs/images/narrow-panel.png`（不打进 npm 包）。
 
 ## 2.0.1 — 2026-10-30
 
