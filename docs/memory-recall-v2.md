@@ -1,7 +1,7 @@
-# 记忆召回 v2：日志层检索 + 检查点隔离（设计草案）
+# 记忆召回 v2：日志层检索 + 检查点隔离
 
-> 状态：**M1 已实现**（`2.0.0-alpha.1`，2026-10-28）；M2/M2.5/M3 未开始。目标版本 `2.0.0-alpha.1`（alpha 阶段允许破坏性调整；beta 起冻结返回契约）。
-> 本文只描述设计与验收口径；落码前请先用 `cordis_inspect_query` 复核文中引用的 API 行号与 DSH 预览版行为。
+> 状态：**已随 `2.0.0` 发布**（2026-10-30）。里程碑 M1–M11 全部落地；契约自 2.0.0 起按 §13 冻结，破坏性调整留给 3.0。
+> 本文只描述设计与验收口径；文中引用的 DSH API 行号以 2.0.0 发布时的契约为准。
 
 ## 1. 问题
 
@@ -334,7 +334,9 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M10** `2.0.0-beta.2` ✅ | 标题加权与知识库语义两处实测（都没有上线）+ `recall.titleWeight` 旋钮 + 两个评测脚本 | 标题加权在改写族上单调变差（0.281 → 0.280 → 0.251）、知识库 lexical 与 hybrid 同为 78.6% 且噪声峰值 0.471 > 0.45；`npm test` 11 个脚本全绿（2026-10-30 达成） |
 | **M11** `2.0.0-beta.4` ✅ | 热度（引用入度 / 打开 / 曝光）只破同分、读取移动衰减参照时间（上限 180 天）、去重与 MMR 开关、面板「排序微调」卡片 | 重复度实测 0%（59 条查询 top-3 最大 Jaccard 0.19）→ `dedupe`/`mmr` 默认 0；`heat` 0.25 只影响同分（`test-recall.mjs` 四组断言）；12 个测试脚本全绿（2026-10-30 达成） |
 
-版本口径：**beta 起冻结契约**——工具参数、宿主 op 的请求/返回形状、`settings.json` 键名、磁盘文件格式在 `2.0.0` 正式版之前不再改（清单见 §13）；仍可变的是默认参数值（按 `eval/` 的配对区间改）、内部实现与面板文案。npm 用 `--tag beta` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
+| **M12** `2.0.0` ✅ | 收尾转正：版本口径改「已发布」、契约冻结自本版生效、升级/回退文档 `docs/migrate-1.3-to-2.0.md`、npm `latest` 指向 2.0.0 | 12 个测试脚本全绿；`npm test` + `test-package.mjs` 通过；升级文档覆盖自检清单、磁盘变化与回退命令（2026-10-30 达成） |
+
+版本口径：**2.0.0 已发布，契约冻结生效**——工具参数、宿主 op 的请求/返回形状、`settings.json` 键名、磁盘文件格式在 2.x 内不再改（清单见 §13）；仍可变的是默认参数值（按 `eval/` 的配对区间改）、内部实现与面板文案。npm `latest` 指向 2.0.0，`1.3.3` 是上一条稳定线。
 
 ## 11. 风险与取舍
 
@@ -343,7 +345,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 - **隐私**：L2 含路径与片段；M3 入对话层前需要脱敏规则（token/密钥正则 + 可选白名单目录）。
 - **索引漂移**：手工编辑 JSONL 会让 offset 失效 → 长度回退检测 + 全量重建兜底。
 - **性能**：1 万条以内进程内可行；超过后换 `node:sqlite` FTS5（Node ≥ 22.5 才有 `node:sqlite`，本机 CLI 为 v24.21.0 可用，但 **Electron 主进程的 Node 版本需单独确认**，这是引入前的必查项）。
-- **破坏性**：2.0 的破坏只在"checkpoints 目录分离 + 条目 ns 字段"，旧版读取会缺 checkpoint 但不会写坏；`package.json` version 走 `2.0.0-alpha.N`，自 `2.0.0-beta.1` 起为 `2.0.0-beta.N` 并冻结契约（§13）。
+- **破坏性**：2.0 相对 1.3.x 的破坏只在「checkpoints 目录分离」与新增 `index/`，旧版读取会缺 checkpoint 但不会写坏（回退前把 checkpoints 行并回 journal，步骤见 `docs/migrate-1.3-to-2.0.md`）；`package.json` version 走 `2.0.0-alpha.N` → `2.0.0-beta.N` → `2.0.0`，契约自 2.0.0 起冻结（§13）。
 
 ## 12. 开放问题
 
@@ -354,9 +356,9 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 5. ~~`agent_journal list` 的 AND 语义改成 OR 后，是否影响既有调用方的预期？~~ **已定**：召回排序本来就是 OR（任一 token 命中即计入），靠「覆盖率平方」把只命中一部分的条目压下去，近似软 AND；已在 `2.0.0-alpha.1` 的 CHANGELOG「说明」里写明，调用方不需要改。
 6. ~~是否做图？~~ **已定：做检索侧 1 跳扩展、不做画布**（M2.5 / `alpha.3`），边不落盘。
 
-## 13. 2.0.0-beta.1 冻结的契约
+## 13. 2.0.0 冻结的契约
 
-beta 的含义是「接口不再变，实现和默认值还可以变」。下面这些面在 `2.0.0` 正式版之前视为稳定；要改就是 3.0 的事，或者先发一个 major 的预告。
+冻结从 `2.0.0-beta.1` 开始，随 `2.0.0` 正式生效。下面这些面在 2.x 内视为稳定：默认值和内部实现可以改，**接口与磁盘格式不改**；要改就是 3.0 的事，或者先发一个 major 的预告。
 
 - **工具**：`agent_recall`（`query` / `limit` / `source` / `since` / `expand` / `mode`）与 `agent_alias`（`list` / `set` / `delete`）的名字、参数名与返回结构（`results` 行含 `id` / `src` / `at` / `title` / `preview` / `score` / `via`，`session` 行另带 `hit`；扩展行另带 `why`）。
 - **宿主 op**：`memory.recall`、`memory.reindex`、`memory.index`、`memory.open`、`memory.message`、`memory.sessions`、`memory.transcript`、`memory.model`、`memory.aliases`、`memory.alias`、`recall.save`；错误码 `no-agent` / `no-sessions` / `bad-request` / `not-found` 与 HTTP 映射（400 / 404）。

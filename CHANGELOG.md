@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0 — 2026-10-30
+
+2.0 转正。相对 1.3.3 的主体是「召回层」：日志、审计日志、知识库、对话原文都能按当前智能体检索，`agent_recall` 把结果作为工具返回值交给模型——**不进 system prompt**，所以不会顶掉前缀缓存。beta.1 冻结的契约自本版生效，破坏性调整留给 3.0。
+
+### 1.3.3 → 2.0.0 一览
+
+- **工具**：新增 `agent_recall`（`query` / `limit` / `source` / `since` / `expand` / `mode`，`session` 行带 `hit`，扩展行带 `why`，检查点永不返回）与 `agent_alias`（`list` / `set` / `delete`）。原有工具只多了一条「写入用绝对日期」的说明。
+- **面板**：8 个页签，新增「回忆」（检索、展开全文、索引状态、语义索引、排序微调、别名表）与「检查点」（只读）；侧栏「智能体对话」支持右键菜单与 Ctrl/⌘、Shift 多选。
+- **检索**：词法（标题 6 : 正文 min(count,40)，覆盖率平方，30 天半衰期）+ 一跳关联扩展（引用 / 实体 / 会话三类边，不落盘）+ 别名表 + 本地语义（BGE-small-zh，`onnxruntime-node` 缺失则降级）+ RRF 融合（`k=20`，余弦下限 0.45）；对话原文按会话入索引，可逐会话排除，正文 12000 字预算。
+- **热度**：引用入度 / 打开 / 曝光计数（`index/access.json`）只破同分；打开旧笔记会把衰减参照时间前移（上限 180 天）。
+- **磁盘**：新增 `checkpoints/<agentId>.jsonl`（检查点与笔记分文件，旧文件首访时惰性拆分）、`index/`（`state.json` / `aliases.json` / `vectors.*` / `access.json`）、`models/`（可选模型）；`settings.json` 新增 `recall.*` 键。
+- **依赖**：`onnxruntime-node` 为 `optionalDependencies`，加载失败自动降级为纯词法。
+- **npm**：`latest` 指向 2.0.0；`1.3.3` 保留在上一条稳定线。
+
+升级与回退的逐步说明（含检查点合并命令）见 [`docs/migrate-1.3-to-2.0.md`](docs/migrate-1.3-to-2.0.md)。2.0 线内部的取舍与实测（哪些做了、哪些量完没上线）见下文的 beta.4 → beta.1 小节，以及 `docs/memory-recall-v2.md` §7–§10。
+
+### 说明
+
+- 语义检索是**可选**的：不下载模型时 `hybrid` 会降级成词法并在面板说明原因，功能不缺块。
+- 检索灵敏度：45 条改写用例的配对区间宽度 ±0.128 MRR——小于这个量级的改动不宣称提升，`docs/embedding-local.md` 里每条参数决定都附区间。
+- 契约冻结面（工具参数、11 个 op、设置键、磁盘格式）逐条列在 `docs/memory-recall-v2.md` §13。
+
 ## 2.0.0-beta.4 — 2026-10-30
 
 三条从 AstrBot-LivingMemory 借来的排序手段：热度、读取移动衰减参照时间、去重 / MMR。前两条上线（改排序），后两条只留开关（真库上量不出收益）。工具参数与 op 的返回结构不变，只新增三个设置键、一个 `memory.index` 的 `settings` 字段与面板一张卡片。

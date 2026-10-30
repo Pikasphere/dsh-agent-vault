@@ -40,7 +40,7 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 
 DSH 插件以 profile 包的形式安装。任选一种：
 
-> **npm 版本注意**：1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完 Node 会报 `ERR_MODULE_NOT_FOUND`，DSH 把它标记为启动失败。稳定版用 **1.3.3**（1.3.1 起已修好打包，1.3.3 另含右键菜单与交接修复）。要试 2.0 的召回层，装 beta 渠道：`dsh plugin add dsh-agent-vault@beta`（`latest` 仍指向 1.3.3）。要从源码改代码，用目录或 `link:` 安装。
+> **版本提示**：npm 的 `latest` 从 **2.0.0** 起指向 2.0（召回层、检查点页签、侧栏右键菜单）。仍在 1.3.3 上的，按 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md) 走一遍即可，磁盘上只会多出 `checkpoints/` 与 `index/`。1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完会报 `ERR_MODULE_NOT_FOUND`，不要用这两个版本。要从源码改代码，用目录或 `link:` 安装。
 
 ### 方式一：从目录安装
 
@@ -129,7 +129,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 `agent_recall` 永远不返回检查点：检查点是权威状态（整段注入、旧的可能误导），只属于「读取」，不属于「检索」。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
 
-> **2.0.0-beta**：召回层从 2.0 进入 beta，契约已冻结（工具参数、宿主 op、设置键、磁盘格式见 `CHANGELOG` 的 beta.1 小节），破坏性只发生在检查点目录分离与 `index/` 新增上；旧数据首次访问会自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点。
+> **2.0.0**：召回层随 2.0 转正，契约冻结（工具参数、宿主 op、设置键、磁盘格式见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md) §13），从 2.0 起破坏性变更只发生在 3.0。磁盘上只多出 `checkpoints/` 与 `index/` 两个目录，旧数据首次访问时自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点；完整迁移与回退步骤见 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md)。
 
 ## 接力（交棒检查点）
 
@@ -406,7 +406,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现到 2.0.0-beta.4）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0-beta.4）。
+设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现并随 2.0.0 冻结）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0）、`docs/migrate-1.3-to-2.0.md`（升级与回退步骤）。
 
 测试（无需安装依赖）：
 
