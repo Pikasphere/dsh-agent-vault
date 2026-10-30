@@ -27,6 +27,7 @@ const flag = name => {
 const memoryDir = flag('dir') || process.env.AGENT_MEMORY_DIR || path.join(os.homedir(), '.dsh', 'agent-memory')
 const agentId = flag('agent') || 'demo-agent'
 const only = ['lexical', 'hybrid'].includes(flag('mode')) ? flag('mode') : 'both'
+const titleWeight = flag('title-weight') === '' ? null : Number(flag('title-weight'))
 
 const store = createStore({ rootDir: memoryDir })
 const journals = createJournals({ rootDir: store.root })
@@ -47,7 +48,7 @@ async function measure(mode, limit = 5) {
   const rows = []
   for (const [query, expected] of CASES) {
     const started = Date.now()
-    const hits = await recall.search({ id: agentId, query, source: 'journal', limit, mode })
+    const hits = await recall.search({ id: agentId, query, source: 'journal', limit, mode, ...(titleWeight === null ? {} : { titleWeight }) })
     ms += Date.now() - started
     const rank = hits.results.findIndex(item => item.id === expected) + 1
     const semantic = hits.results.filter(item => item.via === 'semantic')
@@ -79,7 +80,7 @@ const hybrid = only === 'lexical' ? null : await measure('hybrid')
 
 const line = result => `top-1 ${result.top1.toFixed(1)}%  top-3 ${result.top3.toFixed(1)}%  MRR ${result.mrr.toFixed(3)}  ${result.latency.toFixed(0)} ms/query`
 if (lexical) console.log(`lexical  ${line(lexical)}`)
-if (hybrid) console.log(`hybrid   ${line(hybrid)}`)
+if (hybrid) console.log(`hybrid   ${line(hybrid)}${titleWeight === null ? '' : `  (titleWeight ${titleWeight})`}`)
 
 if (lexical && hybrid) {
   console.log(`\ndelta    top-1 ${(hybrid.top1 - lexical.top1).toFixed(1)} pt, MRR ${(hybrid.mrr - lexical.mrr).toFixed(3)}`)
@@ -99,3 +100,7 @@ if (lexical && hybrid) {
 if (hybrid && summary.present === false && only !== 'lexical') {
   console.log('\nnote: no vectors on disk — hybrid ran as lexical. Build them with `memory.reindex`.')
 }
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)

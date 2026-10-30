@@ -48,3 +48,7 @@ for (const [family, cases] of [['lexical', LEXICAL_CASES], ['paraphrase', PARAPH
   }
   console.log(`  -> ${good}/${cases.length} usable`)
 }
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)

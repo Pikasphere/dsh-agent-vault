@@ -85,3 +85,7 @@ for (const row of graph.rows) {
 if (noisy.length > 0) {
   console.log(`\nsuspect (more than two unrelated neighbours): ${noisy.map(row => row.query).join(', ')}`)
 }
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)

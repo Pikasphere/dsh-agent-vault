@@ -342,6 +342,13 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **A/B 结论（`eval/chunk-variants.mjs`，45 条改写 / 14 条词法）**：改写族 MRR 0.247 → 0.253（+0.006 [-0.066, +0.088]），260 字版本 0.266（+0.019 [-0.078, +0.115]）——**两个区间都跨 0**，所以不宣称提升；词法族 100% 不动；无关查询的噪声峰值 0.407 → 0.424，仍在 0.45 下限内。
 - 上线的理由是正确性而不是分数：尾部信息重新可见，且没有任何一族回退。260 字窗口行数多 70% 且噪声更靠近下限，故取 420 字；`chunkChars: 0` 可复现 alpha.12。
 
+### 标题加权与知识库语义：两个负结果（2.0.0-beta.2）
+
+两件事都量过，都不上线，但旋钮和证据留下。
+
+- **标题加权（`recall.titleWeight`，默认 0）。** 诊断脚本 `eval/title-vs-body.mjs`：词法族 14 条查询对标题的余弦确实系统性更高（0.689 vs 0.592，14/14 条），但改写族 45 条反过来（-0.041，只有 10/45 条标题更高）。改成「标题单独一行向量、与正文按权重混合」接进真实管线后，改写族 hybrid 变差：w=0 时 13.3% / MRR 0.281，w=0.15 是 11.1% / 0.280，w=0.25 是 8.9% / 0.251。原因是词法路径本来就给标题 6:1 的权重，再往语义列里塞一次标题等于双计，而 RRF 融合后单路语义的收益被稀释掉了——**标题的好处已经通过词法前排拿到了**。旋钮保留（`recall.titleWeight`，夹在 0–0.5），只有 >0 时才真的物化标题行，改它会触发一次重建。
+- **知识库语义（`vectors.js` 的 `VECTOR_SOURCES` 不含 `knowledge`）。** 25 条共享条目、14 条改写查询（`eval/knowledge-eval.mjs`）：lexical 与 hybrid 都是 top-1 78.6% / top-3 92.9% / MRR 0.857，名次互换两条（修好 2 条、弄坏 2 条），净收益为零；更要命的是 6 条无关问题的余弦峰值 **0.471 > 0.45 下限**，接上就是每个无关查询都漏知识条目。所以知识库继续走词法（它的标题本身就是强信号），评测脚本留着，换模型或换下限口径时可以直接复跑。
+
 ## 已知限制
 
 - **改动插件后必须完全重启 DSH。** 运行中热加载这类 Host 插件会让工具执行上下文失效（所有工具报 `cannot get requested service "sessionProjections" in inactive context`）。这是实测结论，与插件逻辑无关。
@@ -395,11 +402,13 @@ node test-embed.mjs      # 语义层：WordPiece、降级、RRF 量纲、向量�
 node eval/dump-notes.mjs      # 列笔记 id + 标题，方便重新标注用例
 node eval/check-cases.mjs      # 用例体检：每条改写查询在纯词法下的真实名次
 node eval/recall-baseline.mjs  # 14 条词面可对查询：expand 0/1 对照
-node eval/recall-paraphrase.mjs # 15 条改写查询：lexical vs hybrid
+node eval/recall-paraphrase.mjs # 45 条改写查询：lexical vs hybrid（--title-weight 可扫标题混合）
 node eval/recall-grid.mjs      # 顺序轴参数评估（权重 → k → 下限）+ 配对自助法 + 噪声探针（约 10 s）
 node eval/semantic-rank.mjs   # 纯语义排名：融合前的检索质量（区分「参数不行」与「检索不行」）
 node eval/embed-variants.mjs   # 嵌入输入（整篇 / 前 240 字 / 仅标题）的对照实验
 node eval/chunk-variants.mjs   # 分块 A/B：整条 vs 420 字 vs 260 字（临时库，不动真索引）
+node eval/title-vs-body.mjs    # 标题加权诊断：查询对标题 / 正文的余弦与两条排序
+node eval/knowledge-eval.mjs   # 知识库 14 条改写查询：lexical vs hybrid + 噪声探针
 ```
 
 用例本身在 `eval/cases.mjs`；`--dir` / `--agent` 可换记忆目录与智能体。

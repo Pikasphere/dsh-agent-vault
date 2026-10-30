@@ -163,3 +163,7 @@ console.log('  resolve (+-0.13 MRR), so no gain is claimed: the lexical family i
 console.log('  noise ceiling stays below the 0.45 floor. `chunkChars: 0` reproduces alpha.12 for A/B.')
 
 fs.rmSync(tempRoot, { recursive: true, force: true })
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)

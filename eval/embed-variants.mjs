@@ -64,3 +64,7 @@ for (const [name, build] of Object.entries(variants)) {
     `${name.padEnd(6)} semantic-only: top-1 ${String(top1).padStart(2)}/${queries.length}  top-5 ${String(inTop5).padStart(2)}/${queries.length}  MRR ${(mrr / queries.length).toFixed(3)}`,
   )
 }
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)

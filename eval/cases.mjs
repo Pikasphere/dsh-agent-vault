@@ -119,5 +119,31 @@ export const DROPPED_CASES = [
   ['工具用到一半全报同一个错', 'j-mvp1rnqbnc'],
 ]
 
+/**
+ * Knowledge-base queries: the target is a *knowledge entry* (shared library, ids
+ * are slugs), phrased the way a person would ask. Same rule as the paraphrase
+ * family — a query the keyword path already answers is not evidence.
+ */
+export const KNOWLEDGE_CASES = [
+  ['把 PDF 里的文字取出来', 'pdf-pdftotext-python-pdf'],
+  ['下载大文件老是在中途报格式错误', 'hf-download-xet-cas-format-error-hf-hub-'],
+  ['给已经导入的模型补一个看图的能力', 'ollama-gguf-mmproj'],
+  ['提示超出模型窗口是怎么回事', 'bili-exceeds-the-model-window-6144-dsh-o'],
+  ['插件改了代码怎么才能生效', 'dsh-client-host'],
+  ['插件装好了却显示缺失', 'desktop-profile-bundle-availability-miss'],
+  ['没法截图的时候怎么验证网页界面', 'dsh-web-gui-cdp-browser-session-cookie'],
+  ['自动切换一直失败', 'dsh-agent-vault-preset-invalid-context'],
+  ['把一首歌拆成人声和伴奏', 'comfyui-audio-separation-analysis-asa'],
+  ['扫描版乐谱里的音符怎么认', 'audiveris-bandscore-pdf-8va-windows'],
+  ['鸿蒙上跑原生游戏卡在哪一步', 'lmlh-mc-java'],
+  ['解开一个 C# 单文件程序', 'net-8-exe-nte-guitar'],
+  ['授权校验那段逻辑藏在哪', 'guitar-pro-8-guitarpro-exe-licencemodel-'],
+  ['国内下载模型被限速怎么办', 'hf-modelscope-windows-acl'],
+]
+
 /** Both families in one place, for scripts that do not care which is which. */
-export const ALL_CASES = { lexical: LEXICAL_CASES, paraphrase: PARAPHRASE_CASES }
+export const ALL_CASES = {
+  lexical: LEXICAL_CASES,
+  paraphrase: PARAPHRASE_CASES,
+  knowledge: KNOWLEDGE_CASES,
+}

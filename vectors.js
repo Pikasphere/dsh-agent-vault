@@ -31,6 +31,10 @@ import path from 'node:path'
 
 import { entryKey } from './graph.js'
 
+// `knowledge` is deliberately absent: measured 2026-10-30, embedding the 25
+// shared entries left top-1 unchanged (78.6%) while the unrelated-query cosine
+// peaked at 0.471 — above the 0.45 floor — so it would only leak. See
+// `eval/knowledge-eval.mjs` and README "知识库为什么不走语义".
 export const VECTOR_SOURCES = ['journal', 'log']
 
 /**
@@ -96,12 +100,13 @@ export function chunksOf(entry, chunkChars = CHUNK_CHARS) {
   return pieces.map(piece => piece.trim()).filter(piece => piece !== '').map(withTitle)
 }
 
-export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS } = {}) {
+export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS, titleWeight = 0 } = {}) {
   const dir = path.join(rootDir, 'index')
   const binPath = path.join(dir, 'vectors.bin')
   const metaPath = path.join(dir, 'vectors.json')
   const modelName = model || (embedder === null ? '' : path.basename(path.dirname(embedder.modelPath)))
   let lastError = ''
+  let titleBlend = Math.max(0, Math.min(0.5, Number(titleWeight) || 0))
   let memory = null // {model, dim, builtAt, keys:string[], meta:[], rows:Float32Array, at:Map<entryKey, number[]>}
   let writing = Promise.resolve()
 
@@ -178,14 +183,18 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
       .filter(entry => VECTOR_SOURCES.includes(entry.src) && sourceText(entry).trim() !== '')
       .sort((a, b) => entryKey(a).localeCompare(entryKey(b)))
     const current = load()
-    const known = new Map() // entry key -> {hash, rows:[Float32Array]}
+    const known = new Map() // entry key -> {hash, chunkRows:[Float32Array], titleRow: Float32Array|null}
     if (current !== null) {
       const dim = current.dim
       for (const [key, indices] of current.at) {
-        known.set(key, {
-          hash: String(current.meta[indices[0]]?.hash ?? ''),
-          rows: indices.map(index => current.rows.subarray(index * dim, (index + 1) * dim)),
-        })
+        const chunkRows = []
+        let titleRow = null
+        for (const index of indices) {
+          const vector = current.rows.subarray(index * dim, (index + 1) * dim)
+          if (Number(current.meta[index]?.chunk) === -1) titleRow = vector
+          else chunkRows.push(vector)
+        }
+        known.set(key, { hash: String(current.meta[indices[0]]?.hash ?? ''), chunkRows, titleRow })
       }
     }
     const keys = []
@@ -197,31 +206,55 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
       const chunks = chunksOf(entry, size)
       if (chunks.length === 0) continue
       const hash = hashText(sourceText(entry))
+      // The title can also get its own row (`chunk: -1`): it is the same text
+      // every query sees once, and blending it in is a score-side decision. The
+      // row is only materialised when the weight is non-zero — see the comment
+      // in `scoreMap` for why the default is zero (measured: it hurts).
+      const titleText = String(entry.title ?? '').trim()
+      const titleRow = titleBlend > 0 && titleText !== '' ? titleText : null
       const hit = known.get(key)
-      const reusable = hit !== undefined && hit.hash === hash && hit.rows.length === chunks.length
+      const reusable =
+        hit !== undefined &&
+        hit.hash === hash &&
+        hit.chunkRows.length === chunks.length &&
+        (hit.titleRow === null) === (titleRow === null)
       if (reusable) {
         chunks.forEach((_, chunk) => {
           keys.push(rowId(key, chunk))
           metas.push({ key, row: rowId(key, chunk), src: entry.src, at: entry.at, hash, chunk, chunks: chunks.length })
-          vectors.push(Float32Array.from(hit.rows[chunk]))
+          vectors.push(Float32Array.from(hit.chunkRows[chunk]))
         })
+        if (titleRow !== null) {
+          keys.push(rowId(key, 'title'))
+          metas.push({ key, row: rowId(key, 'title'), src: entry.src, at: entry.at, hash, chunk: -1, chunks: chunks.length })
+          vectors.push(Float32Array.from(hit.titleRow))
+        }
       } else {
         chunks.forEach((_, chunk) => {
           keys.push(rowId(key, chunk))
           metas.push({ key, row: rowId(key, chunk), src: entry.src, at: entry.at, hash, chunk, chunks: chunks.length })
           vectors.push(null)
         })
-        pending.push({ key, entry, chunks, first: keys.length - chunks.length })
+        if (titleRow !== null) {
+          keys.push(rowId(key, 'title'))
+          metas.push({ key, row: rowId(key, 'title'), src: entry.src, at: entry.at, hash, chunk: -1, chunks: chunks.length })
+          vectors.push(null)
+        }
+        pending.push({ key, entry, chunks, title: titleRow, first: keys.length - chunks.length - (titleRow === null ? 0 : 1) })
       }
     }
     if (pending.length > 0) {
       if (embedder === null) throw new Error('embedder-missing')
-      const texts = pending.flatMap(item => item.chunks)
+      const texts = pending.flatMap(item => (item.title === null ? item.chunks : [...item.chunks, item.title]))
       const fresh = await embedder.embed(texts)
       let cursor = 0
       for (const item of pending) {
         for (let chunk = 0; chunk < item.chunks.length; chunk += 1) vectors[item.first + chunk] = fresh[cursor + chunk]
         cursor += item.chunks.length
+        if (item.title !== null) {
+          vectors[item.first + item.chunks.length] = fresh[cursor]
+          cursor += 1
+        }
       }
     }
     const changed =
@@ -235,19 +268,22 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     }
     const entryCount = new Set(keys.map(key => key.slice(0, key.lastIndexOf('#')))).size
     const before = current === null ? 0 : new Set(current.keys.map(key => key.slice(0, key.lastIndexOf('#')))).size
+    const chunkRows = metas.filter(meta => Number(meta.chunk) !== -1).length
     return {
       count: entryCount,
-      chunks: keys.length,
-      embedded: pending.reduce((sum, item) => sum + item.chunks.length, 0),
+      chunks: chunkRows,
+      titles: keys.length - chunkRows,
+      embedded: pending.reduce((sum, item) => sum + item.chunks.length + (item.title === null ? 0 : 1), 0),
       dropped: current === null ? 0 : Math.max(0, before - entryCount),
     }
   }
 
-  function scoreMap(entries, queryVector) {
+  function scoreMap(entries, queryVector, weight = titleWeight) {
     const current = load()
     if (current === null || queryVector === null) return new Map()
     const out = new Map()
     const dim = current.dim
+    const blend = Math.max(0, Math.min(0.5, Number(weight) || 0))
     for (const entry of entries) {
       const key = entryKey(entry)
       const indices = current.at.get(key)
@@ -256,12 +292,25 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
       // window speaks for it. Averaging would dilute a short, precise chunk with
       // the note's other topics and sink exactly the hits chunking is here for.
       let best = Number.NEGATIVE_INFINITY
+      let title = Number.NEGATIVE_INFINITY
       for (const index of indices) {
         let sum = 0
         const base = index * dim
         for (let i = 0; i < dim; i += 1) sum += current.rows[base + i] * queryVector[i]
-        if (sum > best) best = sum
+        if (Number(current.meta[index]?.chunk) === -1) title = sum
+        else if (sum > best) best = sum
       }
+      if (!Number.isFinite(best)) best = title
+      // `titleWeight` blends the note's score towards its title-only vector. It
+      // exists because the title is a better summary than any single chunk in
+      // isolation (`eval/title-vs-body.mjs`: using titles alone beats body
+      // chunks on both families, and 0.85/0.15 blending beat the chunk score on
+      // the paraphrase set). It defaults to **0** because in the real pipeline
+      // that gain disappears: the lexical path already weighs titles 6:1, so
+      // folding them into the semantic column double-counts them and the fused
+      // result got worse (13.3 % → 11.1 % → 8.9 % top-1 at 0 / 0.15 / 0.25 on
+      // the 45-query set). Kept as a knob with evidence on both sides.
+      if (blend > 0 && Number.isFinite(title)) best = (1 - blend) * best + blend * title
       out.set(key, best)
     }
     return out
@@ -286,16 +335,23 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
    * agent here would make two agents invalidate each other on every other
    * query, re-embedding ~100 entries each time.
    */
-  async function score(entries, query) {
+  async function score(entries, query, weight = titleBlend) {
     if (embedder === null) return new Map()
     try {
       const queryVector = await embedder.embedOne(query)
       lastError = ''
-      return scoreMap(entries, queryVector)
+      return scoreMap(entries, queryVector, weight)
     } catch (error) {
       lastError = String(error?.message ?? error)
       return new Map()
     }
+  }
+
+  /** The recall layer reads the weight from settings on every query, so this is
+   * the one place a settings change has to land. */
+  function setTitleWeight(value) {
+    titleBlend = Math.max(0, Math.min(0.5, Number(value) || 0))
+    return titleBlend
   }
 
   async function rebuild(entries) {
@@ -312,14 +368,18 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
 
   function status() {
     const current = load()
+    const rows = current?.keys.length ?? 0
+    const titles = current === null ? 0 : [...current.at.values()].filter(indices => indices.some(index => Number(current.meta[index]?.chunk) === -1)).length
     return {
       present: current !== null,
       model: modelName,
       available: embedder !== null,
       dim: current?.dim ?? 0,
       count: current?.at.size ?? 0,
-      chunks: current?.keys.length ?? 0,
+      chunks: rows - titles,
+      titles,
       chunkChars,
+      titleWeight: titleBlend,
       builtAt: current?.builtAt ?? '',
       lastError,
       binFile: binPath,
@@ -327,5 +387,5 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     }
   }
 
-  return { status, sync, score, similarities, rebuild, VECTOR_SOURCES, chunkChars }
+  return { status, sync, score, similarities, rebuild, setTitleWeight, VECTOR_SOURCES, chunkChars }
 }

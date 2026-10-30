@@ -207,6 +207,10 @@ export function createStore(options = {}) {
       semanticWeight: clampWeight(recallRaw.semanticWeight, 0.4),
       minCosine: clampWeight(recallRaw.minCosine, 0.45),
       rrfK: clampRrfK(recallRaw.rrfK, 20),
+      // Upper bound 0.5 on purpose: past the midpoint the title outvotes the
+      // body, and the measured evidence (one interval just above zero on 45
+      // queries) does not support going that far.
+      titleWeight: clampWeight(recallRaw.titleWeight, 0) > 0.5 ? 0.5 : clampWeight(recallRaw.titleWeight, 0),
     }
     return {
       version: 1,
@@ -530,6 +534,10 @@ export function createStore(options = {}) {
       if (patch.recall.semanticWeight !== undefined) merged.semanticWeight = clampWeight(patch.recall.semanticWeight, merged.semanticWeight)
       if (patch.recall.minCosine !== undefined) merged.minCosine = clampWeight(patch.recall.minCosine, merged.minCosine)
       if (patch.recall.rrfK !== undefined) merged.rrfK = clampRrfK(patch.recall.rrfK, merged.rrfK)
+      if (patch.recall.titleWeight !== undefined) {
+        const weight = clampWeight(patch.recall.titleWeight, merged.titleWeight)
+        merged.titleWeight = weight > 0.5 ? 0.5 : weight
+      }
       next.recall = merged
     }
     if (next.activeVault !== '' && !registry().some(item => item.id === next.activeVault)) {

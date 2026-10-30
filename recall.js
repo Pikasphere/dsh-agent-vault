@@ -52,7 +52,7 @@ export const DEFAULT_MODEL = 'bge-small-zh-v1.5'
  *   to the junk level than 0.45 does. alpha.11 moved it on a point estimate of an
  *   underpowered set; that was the wrong call, not a wrong direction.
  */
-export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20 }
+export const RECALL_DEFAULTS = { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20, titleWeight: 0 }
 export const MODES = ['hybrid', 'lexical']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
@@ -142,6 +142,8 @@ export function createRecall(options = {}) {
     merged.minCosine = Number.isFinite(minCosine) ? Math.min(Math.max(minCosine, 0), 1) : RECALL_DEFAULTS.minCosine
     const rrfK = Number(merged.rrfK)
     merged.rrfK = Number.isFinite(rrfK) ? Math.min(Math.max(Math.round(rrfK), 1), 200) : RECALL_DEFAULTS.rrfK
+    const titleWeight = Number(merged.titleWeight)
+    merged.titleWeight = Number.isFinite(titleWeight) ? Math.min(Math.max(titleWeight, 0), 0.5) : RECALL_DEFAULTS.titleWeight
     return merged
   }
 
@@ -402,6 +404,10 @@ export function createRecall(options = {}) {
       const value = Number(input.rrfK)
       if (Number.isFinite(value) && value >= 1) settings.rrfK = Math.min(Math.round(value), 200)
     }
+    if (input.titleWeight !== undefined) {
+      const value = Number(input.titleWeight)
+      if (Number.isFinite(value) && value >= 0 && value <= 0.5) settings.titleWeight = value
+    }
     const mode = MODES.includes(input.mode) ? input.mode : settings.mode
     const hybrid = mode === 'hybrid' && vectors !== null
     const tokens = tokenize(query)
@@ -420,6 +426,7 @@ export function createRecall(options = {}) {
      */
     let sims = new Map()
     if (hybrid && query !== '') {
+      vectors.setTitleWeight(settings.titleWeight)
       await vectors.sync(vectorEntries())
       sims = await vectors.score(collect(agentId, ''), query)
     }

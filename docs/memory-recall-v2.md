@@ -331,6 +331,7 @@ host op：`memory.recall`。返回 §6.3 结构，扩展项另带 `via` / `why`�
 | **M7** `2.0.0-alpha.8` ✅ | 本地 BGE 语义层（`embed.js` / `vectors.js`）、RRF 混合排名、`mode` 参数、`memory.model`、`scripts/fetch-model.mjs`、改写评测 | `eval/recall-paraphrase.mjs`：hybrid top-1 41.7% / MRR 0.528 vs lexical 25.0% / 0.403（+16.7 pt / +0.125，55 ms）；词法基线 92.9% 不动；`test-embed.mjs` 全过（含 RRF 量纲回归） |
 | **M8** `2.0.0-alpha.10` ✅ | 面板「语义索引」卡片（状态 / 准备·同步向量 / 混合·仅关键词开关）、`recall.save`、`settings.json` 的 `recall` 段真正生效、`store.state().recall` | `test-store.mjs` 归一化与夹取、`test-recall.mjs` 持久化模式与显式覆盖、`test-host.mjs` `recall.save` 白名单与 `state.recall` |
 | **M9** `2.0.0-beta.1` ✅ | 版本口径转 beta、**契约冻结**（工具 / op / 设置键 / 磁盘格式，见 §13）、发布到 npm 的 `beta` 渠道，`latest` 保持 1.3.3 | 无行为变化；`npm test` 11 个脚本全绿、`test-package.mjs` 通过；`npm publish --tag beta` 后 `npm view dsh-agent-vault dist-tags` 为 `{latest:1.3.3, beta:2.0.0-beta.1}` |
+| **M10** `2.0.0-beta.2` ✅ | 标题加权与知识库语义两处实测（都没有上线）+ `recall.titleWeight` 旋钮 + 两个评测脚本 | 标题加权在改写族上单调变差（0.281 → 0.280 → 0.251）、知识库 lexical 与 hybrid 同为 78.6% 且噪声峰值 0.471 > 0.45；`npm test` 11 个脚本全绿（2026-10-30 达成） |
 
 版本口径：**beta 起冻结契约**——工具参数、宿主 op 的请求/返回形状、`settings.json` 键名、磁盘文件格式在 `2.0.0` 正式版之前不再改（清单见 §13）；仍可变的是默认参数值（按 `eval/` 的配对区间改）、内部实现与面板文案。npm 用 `--tag beta` 发布，`latest` 保持 1.3.x 直到 `2.0.0` 正式版。
 

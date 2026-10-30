@@ -268,3 +268,7 @@ console.log(
 console.log('')
 console.log('## recommended (paste into settings.json -> recall)')
 console.log(JSON.stringify({ mode: 'hybrid', lexicalWeight: chosenWeights[0], semanticWeight: chosenWeights[1], minCosine: chosenCos, rrfK: chosenK }, null, 2))
+
+// The native ORT session keeps the event loop alive on some runs; exit
+// explicitly so a finished eval does not hang the shell.
+process.exit(0)
