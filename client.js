@@ -701,8 +701,13 @@ window.__ModuleLoader__.load({
   .am-side{width:auto;flex:none;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l1)}
   .am-side-head{padding:10px 12px 6px}
   .am-side-foot{display:none}
-  .am-vaults{flex-direction:row;gap:6px;overflow-x:auto;padding:0 12px 10px;scrollbar-width:none}
-  .am-vaults::-webkit-scrollbar{display:none}
+  /* the rail becomes a horizontal strip; keep a visible slider (a touch-only
+     overlay scrollbar gives no hint that more agents exist off-screen) */
+  .am-vaults{flex-direction:row;gap:6px;overflow-x:auto;padding:0 12px 4px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent}
+  .am-vaults::-webkit-scrollbar{height:6px}
+  .am-vaults::-webkit-scrollbar-track{background:transparent}
+  .am-vaults::-webkit-scrollbar-thumb{border-radius:999px;background:var(--dsw-alias-border-l2)}
+  .am-vaults::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-tertiary)}
   .am-vault{flex:0 0 auto;width:auto;max-width:190px;flex-direction:row;align-items:center;gap:6px;padding:7px 11px;border-radius:999px}
   .am-vault-name{flex:0 1 auto;min-width:0;max-width:150px}
   .am-vault-meta{display:none}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.2-beta.1 — 2026-10-31
+
+窄屏记忆库横条补上常驻滑块。只动客户端 CSS。
+
+- 2.0.2-beta.0 把记忆库栏改成横向胶囊条时把滚动条藏了（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），结果是列表再长也看不出还有几个智能体——只能靠「第三个胶囊被切一半」猜。
+- 现在改成 6px 高的细滑块（`scrollbar-width:thin` + 自定义 `::-webkit-scrollbar` 轨道/滑块，滑块色用 `--dsw-alias-border-l2`，悬停提到 `--dsw-alias-label-tertiary`），横条底部留 4px 内边距，滑块不会压住胶囊。
+- 触摸屏上原生滚动条是覆盖式的（iOS Safari 尤其不认 `::-webkit-scrollbar`），这类设备仍然靠左右滑动，滑块只是桌面/安卓上的常驻提示。
+- 验证：同样的静态骨架 + 无头 Edge，在 320 / 360px 各截图核对滑块位置与胶囊间距（滑块完整显示、胶囊不被压住）。
+
 ## 2.0.2-beta.0 — 2026-10-31
 
 窄屏（手机）布局修复，只动客户端 CSS，没有宿主侧改动。
