@@ -89,6 +89,8 @@ window.__ModuleLoader__.load({
         deleteVault: '删除智能体',
         deleteVaultHint: '只删除这个智能体的记忆；共享知识库里它贡献的条目会保留。',
         deleteVaultConfirm: '删除智能体「{name}」？',
+        confirmDelete: '确认删除',
+        confirmCancel: '取消',
         busy: '处理中…',
         loadFailed: '无法连接插件后端',
         retry: '重试',
@@ -350,6 +352,8 @@ window.__ModuleLoader__.load({
         deleteVault: 'Delete agent',
         deleteVaultHint: 'Removes this agent’s memory only; entries it contributed stay in the shared library.',
         deleteVaultConfirm: 'Delete agent “{name}”?',
+        confirmDelete: 'Delete',
+        confirmCancel: 'Cancel',
         busy: 'Working…',
         loadFailed: 'Cannot reach the plugin backend',
         retry: 'Retry',
@@ -549,7 +553,7 @@ window.__ModuleLoader__.load({
     }
 
     const CSS = `
-.am-root{height:100%;min-height:0;display:flex;align-items:stretch;font-size:13px;line-height:1.55;color:var(--dsw-alias-label-primary);overflow:hidden}
+.am-root{position:relative;height:100%;min-height:0;display:flex;align-items:stretch;font-size:13px;line-height:1.55;color:var(--dsw-alias-label-primary);overflow:hidden}
 .am-side{width:264px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 40%,transparent)}
 .am-side-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 14px 10px}
 .am-side-title{font-size:12px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary)}
@@ -692,6 +696,12 @@ window.__ModuleLoader__.load({
 .am-side-session.is-selected:hover,.am-side-agent-row.is-selected:hover{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 22%,transparent)}
 .am-toast-bar{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:90;padding:7px 14px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);box-shadow:0 8px 26px rgba(0,0,0,.24);font-size:12px;color:var(--dsw-alias-label-secondary);pointer-events:none}
 .am-toast-bar.is-failed{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));border-color:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-border-l2)) 45%,transparent)}
+/* in-panel confirmation: window.confirm() is silently dropped by some mobile
+   webviews, so destructive buttons ask here instead of dying without feedback */
+.am-modal-mask{position:absolute;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.5)}
+.am-modal{width:100%;max-width:340px;box-sizing:border-box;padding:16px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.am-modal-text{margin:0 0 14px;font-size:13px;line-height:1.6;color:var(--dsw-alias-label-primary);word-break:break-word}
+.am-modal-actions{display:flex;gap:8px;justify-content:flex-end}
 /* narrow screens (phones): the panel is a two-column layout with a 264px rail,
    which leaves the main column ~90px wide at 360px and clips the tab strip.
    Below 720px the rail turns into a horizontal vault strip, the tabs wrap into
@@ -720,6 +730,10 @@ window.__ModuleLoader__.load({
   .am-room-members{padding:8px 12px}
   .am-room-flow{padding:12px}
   .am-room-compose{padding:10px 12px 14px}
+  /* thumbs need a real target: 40px tall actions, full-width text */
+  .am-modal-mask{padding:16px}
+  .am-modal-actions{flex-direction:column-reverse;gap:8px}
+  .am-modal-actions .am-btn{width:100%;min-height:38px;justify-content:center}
 }
 `
 
@@ -881,6 +895,35 @@ window.__ModuleLoader__.load({
       const [aliasTargets, setAliasTargets] = useState('')
       const draftKey = useRef('')
       const alive = useRef(true)
+      // window.confirm() is silently dropped in some embedded/mobile webviews,
+      // which made destructive buttons look dead. Ask inside the panel instead.
+      const [confirmView, setConfirmView] = useState(null)
+      const confirmResolve = useRef(null)
+
+      const askConfirm = useCallback(
+        text =>
+          new Promise(resolve => {
+            confirmResolve.current = resolve
+            setConfirmView({ text })
+          }),
+        [],
+      )
+
+      const settleConfirm = useCallback(ok => {
+        const resolve = confirmResolve.current
+        confirmResolve.current = null
+        setConfirmView(null)
+        if (resolve) resolve(ok)
+      }, [])
+
+      useEffect(() => {
+        if (!confirmView) return undefined
+        const onKey = event => {
+          if (event.key === 'Escape') settleConfirm(false)
+        }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+      }, [confirmView, settleConfirm])
 
       useEffect(() => {
         alive.current = true
@@ -1250,7 +1293,7 @@ window.__ModuleLoader__.load({
 
       const deleteRoom = async () => {
         if (!roomData?.room) return
-        if (!window.confirm(`${t('deleteRoom')} “${roomData.room.name}”?`)) return
+        if (!(await askConfirm(`${t('deleteRoom')} “${roomData.room.name}”?`))) return
         await call('room.delete', { id: roomData.room.id })
         setRoomId('')
         setRoomData(null)
@@ -1281,7 +1324,7 @@ window.__ModuleLoader__.load({
       }
 
       const resetHandoff = async sessionId => {
-        if (!window.confirm(t('handoffResetConfirm'))) return
+        if (!(await askConfirm(t('handoffResetConfirm')))) return
         const value = await call('handoff.reset', { sessionId })
         if (value) setHandoffVersion(item => item + 1)
       }
@@ -1382,7 +1425,7 @@ window.__ModuleLoader__.load({
 
       const journalDelete = async () => {
         if (!vault || !journalEditor || journalEditor.id === '') return
-        if (!window.confirm(t('deleteEntry'))) return
+        if (!(await askConfirm(t('deleteEntry')))) return
         const removed = await call('journal.delete', { id: vault.id, entry: journalEditor.id })
         if (removed) {
           setJournalEditor(null)
@@ -1421,7 +1464,7 @@ window.__ModuleLoader__.load({
 
       const deleteVault = async () => {
         if (!vault) return
-        if (!window.confirm(t('deleteVaultConfirm').replace('{name}', vault.name))) return
+        if (!(await askConfirm(t('deleteVaultConfirm').replace('{name}', vault.name)))) return
         const removed = await call('vault.delete', { id: vault.id, deleteKnowledge: false })
         if (removed) {
           setTab('memory')
@@ -1606,7 +1649,7 @@ window.__ModuleLoader__.load({
 
       const deleteEntry = async () => {
         if (!vault || !editor || editor.id === '') return
-        if (!window.confirm(`${t('deleteEntry')} “${editor.title || editor.id}”?`)) return
+        if (!(await askConfirm(`${t('deleteEntry')} “${editor.title || editor.id}”?`))) return
         const removed = await call('knowledge.delete', { id: vault.id, entry: editor.id })
         if (removed) {
           setEditor(null)
@@ -3072,7 +3115,34 @@ window.__ModuleLoader__.load({
               ),
             )
 
-      return h('div', { className: 'am-root' }, side, view === 'rooms' ? roomMain : main)
+      const confirmModal = confirmView
+        ? h(
+            'div',
+            {
+              className: 'am-modal-mask',
+              onMouseDown: event => {
+                if (event.target === event.currentTarget) settleConfirm(false)
+              },
+            },
+            h(
+              'div',
+              { className: 'am-modal', role: 'dialog', 'aria-modal': 'true' },
+              h('p', { className: 'am-modal-text' }, confirmView.text),
+              h(
+                'div',
+                { className: 'am-modal-actions' },
+                h('button', { className: 'am-btn am-btn-sm', onClick: () => settleConfirm(false) }, t('confirmCancel')),
+                h(
+                  'button',
+                  { className: 'am-btn am-btn-sm am-btn-danger', autoFocus: true, onClick: () => settleConfirm(true) },
+                  t('confirmDelete'),
+                ),
+              ),
+            ),
+          )
+        : null
+
+      return h('div', { className: 'am-root' }, side, view === 'rooms' ? roomMain : main, confirmModal)
     }
 
     // ── new-conversation agent picker ───────────────────────────────────────

@@ -209,6 +209,12 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 桌面宽度下布局完全不变（没有改动任何桌面端规则）。截图见 [docs/images/narrow-panel.png](docs/images/narrow-panel.png)。
 
+### 危险操作的确认（2.0.3）
+
+删除智能体、删除讨论室、重置接力、删除知识条目都要二次确认。确认框是**面板自己画的**（遮罩 + 居中卡片），不是浏览器的 `window.confirm()`——后者在部分手机/平板的 WebView 里会被静默丢弃，点击后既不弹框也不执行，看起来像按钮坏了。窄屏下两枚按钮竖排、整宽，拇指够得到；点遮罩空白或按 Esc 等于取消。
+
+`test-client.mjs` 会拦住回退：`client.js` 里再出现 `window.confirm(` 就测试失败；同时校验每个 `t('key')` 都在中英两份字典里有定义。
+
 ## 侧栏右键菜单
 
 侧栏「智能体对话」段（vault 自建的列表）支持右键：
