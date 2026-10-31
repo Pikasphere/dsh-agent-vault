@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-vault",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Per-agent memory, one shared knowledge base, and per-conversation agent roles for DeepSeek Harness",
   "type": "module",
   "exports": {
@@ -11,6 +11,7 @@
   },
   "files": [
     "index.js",
+    "reveal.js",
     "store.js",
     "rooms.js",
     "rank.js",
@@ -64,7 +65,7 @@
   },
   "scripts": {
     "prepack": "node test-package.mjs",
-    "test": "node test-store.mjs && node test-binding.mjs && node test-handoff.mjs && node test-migrate.mjs && node test-rooms.mjs && node test-journal.mjs && node test-time.mjs && node test-recall.mjs && node test-transcripts.mjs && node test-embed.mjs && node test-host.mjs && node test-client.mjs && node test-package.mjs"
+    "test": "node test-store.mjs && node test-binding.mjs && node test-handoff.mjs && node test-migrate.mjs && node test-rooms.mjs && node test-journal.mjs && node test-time.mjs && node test-recall.mjs && node test-transcripts.mjs && node test-embed.mjs && node test-reveal.mjs && node test-host.mjs && node test-client.mjs && node test-package.mjs"
   },
   "license": "MIT",
   "optionalDependencies": {

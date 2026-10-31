@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.4 — 2026-10-31
+
+设置页新增「目录」卡片，三个目录一键在文件管理器里打开；顺手修掉「对话入索引」开关存不住的问题。宿主侧改了，需完全重启 DSH。
+
+- **目录卡片**（设置页）：记忆库目录、知识库目录、插件目录，各带一行路径和「打开」按钮。插件目录跟着安装位置走（现在是 `E:\Projects\dsh-plugins\dsh-agent-vault`），换了目录不用改代码。
+- **按钮走宿主，不走页面**：客户端只发 `fs.reveal {target}`，target 只能是 `root` / `knowledge` / `plugin`；路径由宿主映射（`reveal.js` → `explorer.exe` / `open` / `xdg-open`），页面拿不到「打开任意路径」的能力。未知 target 回 400，目录不存在回 404。
+- 修 bug：设置页的「对话入索引」开关调 `settings.save {transcripts}`，但宿主 op 只转发 `knowledgeDir` 和 `hideBoundSessions`——开关看着能点、刷新后又变回去。现在 `settings.save` 一并转发 `transcripts` / `sessionsRoot` / `transcriptExclude`。
+- 测试：新增 `test-reveal.mjs`（三个平台的命令、空/非法路径不 spawn、spawn 抛错返回 false）；`test-host.mjs` 补 `fs.reveal` 的三个目标、非法 target、以及 `transcripts` 开关是否真的落盘。现在 `npm test` 跑 14 个脚本。
+- 截图核对：320 / 360 / 1100px 三档，路径在窄屏换行、按钮不挤压。
+
 ## 2.0.3 — 2026-10-31
 
 手机/平板上的确认弹窗不再丢失。只动客户端，刷新页面即可。

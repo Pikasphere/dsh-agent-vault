@@ -83,6 +83,13 @@ window.__ModuleLoader__.load({
           '所有智能体共用这一个目录，条目直接放在目录下（不再按智能体分文件夹）。改完立即生效，旧的按智能体分文件夹的内容会自动合并进来。',
         dirPlaceholder: '例如 D:\\notes\\agent-knowledge',
         dirSave: '保存目录',
+        dirsTitle: '目录',
+        dirsHint: '在系统文件管理器里打开对应目录；按钮走宿主，页面上不会拿到任意路径。',
+        dirMemory: '记忆库目录',
+        dirPlugin: '插件目录',
+        openDir: '打开',
+        openFailed: '打不开这个目录（宿主拒绝了请求）',
+        noticeOpened: '已在文件管理器里打开',
         dirDefault: '默认目录',
         dirConfigured: '自定义目录',
         vaultMeta: '记忆 {m}/{limit} 字 · 贡献 {k} 条 · 用于 {u} 个对话',
@@ -346,6 +353,13 @@ window.__ModuleLoader__.load({
           'Every agent shares this one directory; entries sit directly in it instead of per-agent folders. Changes apply immediately, and any older per-agent folders are folded in automatically.',
         dirPlaceholder: 'e.g. D:\\notes\\agent-knowledge',
         dirSave: 'Save directory',
+        dirsTitle: 'Folders',
+        dirsHint: 'Open them in the system file manager. The button goes through the host, so the page never sees a free-form path.',
+        dirMemory: 'Memory folder',
+        dirPlugin: 'Plugin folder',
+        openDir: 'Open',
+        openFailed: 'Could not open that folder (the host refused)',
+        noticeOpened: 'Opened in the file manager',
         dirDefault: 'Default directory',
         dirConfigured: 'Custom directory',
         vaultMeta: 'memory {m}/{limit} · contributed {k} · used by {u}',
@@ -568,6 +582,11 @@ window.__ModuleLoader__.load({
 .am-side-foot{padding:10px 14px 14px;border-top:1px solid var(--dsw-alias-border-l1);display:flex;flex-direction:column;gap:4px}
 .am-side-label{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .am-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;word-break:break-all;color:var(--dsw-alias-label-secondary);line-height:1.45}
+.am-dir-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--dsw-alias-border-l1)}
+.am-dir-row:first-of-type{border-top:0;padding-top:2px}
+.am-dir-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.am-dir-name{font-size:12px;color:var(--dsw-alias-label-primary)}
+.am-dir-row .am-path{word-break:break-all}
 .am-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .am-head{display:flex;align-items:flex-start;gap:16px;padding:20px 26px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .am-head-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
@@ -1661,6 +1680,36 @@ window.__ModuleLoader__.load({
         await call('settings.save', { knowledgeDir: dirDraft })
         setNotice(t('noticeSaved'))
       }
+
+      const openDir = async target => {
+        const opened = await call('fs.reveal', { target })
+        if (opened === undefined) {
+          setNotice(t('openFailed'))
+          return
+        }
+        setNotice(t('noticeOpened'))
+      }
+
+      const dirRow = (name, value, target) =>
+        h(
+          'div',
+          { className: 'am-dir-row' },
+          h(
+            'div',
+            { className: 'am-dir-main' },
+            h('span', { className: 'am-dir-name' }, name),
+            h('span', { className: 'am-path' }, value || '—'),
+          ),
+          h(
+            'button',
+            {
+              className: 'am-btn am-btn-sm',
+              disabled: busy !== '' || !value,
+              onClick: () => void openDir(target),
+            },
+            t('openDir'),
+          ),
+        )
 
       if (failure !== '' && data === null) {
         return h(
@@ -2933,6 +2982,15 @@ window.__ModuleLoader__.load({
                 t('dirSave'),
               ),
             ),
+          ),
+          h(
+            'div',
+            { className: 'am-card' },
+            h('span', { className: 'am-label' }, t('dirsTitle')),
+            h('p', { className: 'am-note' }, t('dirsHint')),
+            dirRow(t('dirMemory'), data.root, 'root'),
+            dirRow(t('dirTitle'), data.knowledgeDir, 'knowledge'),
+            dirRow(t('dirPlugin'), data.pluginDir, 'plugin'),
           ),
           h(
             'div',

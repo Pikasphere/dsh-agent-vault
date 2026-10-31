@@ -215,6 +215,18 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 `test-client.mjs` 会拦住回退：`client.js` 里再出现 `window.confirm(` 就测试失败；同时校验每个 `t('key')` 都在中英两份字典里有定义。
 
+### 打开目录（2.0.4）
+
+设置页底部有一张「目录」卡片，列出三个位置，每个都能一键在系统文件管理器里打开：
+
+| 行 | 指向 |
+|---|---|
+| 记忆库目录 | `<memoryDir>`，例如 `%USERPROFILE%\.dsh\agent-memory` |
+| 知识库目录 | 实际的 `knowledge/`（设置里改过就跟着走） |
+| 插件目录 | 插件自己的安装位置，例如 `E:\Projects\dsh-plugins\dsh-agent-vault` |
+
+按钮不是让页面直接调 `explorer`：客户端只发 `fs.reveal {target}`，target 只能是 `root` / `knowledge` / `plugin`，路径由宿主映射（Windows `explorer.exe`、macOS `open`、Linux `xdg-open`）。所以页面永远没有「打开任意路径」的能力——未知 target 一律 400。
+
 ## 侧栏右键菜单
 
 侧栏「智能体对话」段（vault 自建的列表）支持右键：

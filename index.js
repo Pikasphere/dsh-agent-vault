@@ -20,6 +20,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
@@ -27,8 +28,10 @@ import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall } from './recall.js'
+import { createReveal, REVEAL_TARGETS } from './reveal.js'
 import { withTimeHint } from './time.js'
 
+const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const API_BASE = '/api/agent-memory'
 const MAX_BODY_BYTES = 1024 * 1024
 const SECTION_NAME = 'agent-memory'
@@ -55,13 +58,14 @@ export function apply(ctx, config = {}) {
   })
   const handoff = createHandoff({ rootDir: store.root })
   const archives = createArchives({ rootDir: store.root })
+  const reveal = typeof config.reveal === 'function' ? config.reveal : createReveal()
   const hints = new Map()
 
   try {
     registerPrompt(ctx, store)
     registerTools(ctx, store, rooms, journals, recall)
     registerHandoff(ctx, store, journals, handoff, archives, hints)
-    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall)
+    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -1177,7 +1181,7 @@ function rejectionFor(ctx, req) {
   return structuralRejection(req)
 }
 
-async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, op, args) {
+async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, op, args) {
   switch (op) {
     case 'state':
       return store.state()
@@ -1406,15 +1410,33 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       store.setBinding({ sessionId, agentId })
       return { agentId, sessionId, workspaceId: workspace?.id ?? '', workspaceTitle: workspace?.title ?? '' }
     }
+    case 'fs.reveal': {
+      const target = String(args.target ?? '')
+      if (!REVEAL_TARGETS.includes(target)) {
+        throw new MemoryError('bad-request', `unknown reveal target: ${target}`)
+      }
+      const dir = target === 'knowledge' ? store.state().knowledgeDir : target === 'plugin' ? PLUGIN_DIR : store.root
+      if (!fs.existsSync(dir)) throw new MemoryError('not-found', `directory is missing: ${dir}`)
+      if (!reveal(dir)) throw new MemoryError('reveal-failed', `cannot open ${dir}`)
+      return { ok: true, target, path: dir }
+    }
     case 'settings.save':
-      store.saveSettings({ knowledgeDir: args.knowledgeDir, hideBoundSessions: args.hideBoundSessions })
+      store.saveSettings({
+        knowledgeDir: args.knowledgeDir,
+        hideBoundSessions: args.hideBoundSessions,
+        // the panel's 对话入索引 switch sends this; dropping it made the
+        // toggle look saved and silently revert on the next poll
+        transcripts: args.transcripts,
+        sessionsRoot: args.sessionsRoot,
+        transcriptExclude: args.transcriptExclude,
+      })
       return store.state()
     default:
       throw new MemoryError('bad-op', `unknown operation: ${String(op)}`)
   }
 }
 
-function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall) {
+function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
@@ -1422,6 +1444,8 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
    */
   const publicState = () => ({
     ...store.state(),
+    // the panel prints these next to the "open" buttons
+    pluginDir: PLUGIN_DIR,
     capabilities: { sessions: true, bound: true, archive: true, arm: true, startPrompt: true },
   })
   // `webServer` is published after plugins load in the Web composition, so this
@@ -1447,7 +1471,7 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, op, args)
+          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, op, args)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })

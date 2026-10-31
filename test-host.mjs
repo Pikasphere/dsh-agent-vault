@@ -67,7 +67,13 @@ const ctx = {
   },
 }
 
-apply(ctx, { memoryDir: path.join(scratch, 'mem'), knowledgeDir: path.join(scratch, 'kb') })
+// the reveal op would otherwise pop a file manager on the developer's desktop
+const revealed = []
+apply(ctx, {
+  memoryDir: path.join(scratch, 'mem'),
+  knowledgeDir: path.join(scratch, 'kb'),
+  reveal: dir => (revealed.push(dir), true),
+})
 
 // ── registration ────────────────────────────────────────────────────────────
 const names = registered.tools.map(tool => tool.name).sort()
@@ -537,7 +543,35 @@ assert.equal(promptCalls.length, 1)
 assert.equal((await call('GET', '/state')).payload.state.hideBoundSessions, true)
 const hidden = await call('POST', '/op', { op: 'settings.save', args: { hideBoundSessions: false } })
 assert.equal(hidden.payload.state.hideBoundSessions, false)
+
+// the 对话入索引 switch used to be dropped on the floor by this op
+const noTranscripts = await call('POST', '/op', { op: 'settings.save', args: { transcripts: false } })
+assert.equal(noTranscripts.payload.state.transcripts, false)
+const withTranscripts = await call('POST', '/op', { op: 'settings.save', args: { transcripts: true } })
+assert.equal(withTranscripts.payload.state.transcripts, true)
 console.log('workspace + sessions ops ok')
+
+// ── folders ─────────────────────────────────────────────────────────────────
+const rootState = (await call('GET', '/state')).payload.state
+assert.equal(rootState.pluginDir, here)
+
+const revealedRoot = await call('POST', '/op', { op: 'fs.reveal', args: { target: 'root' } })
+assert.equal(revealedRoot.payload.value.ok, true)
+assert.equal(revealedRoot.payload.value.path, path.join(scratch, 'mem'))
+assert.equal(revealed.at(-1), path.join(scratch, 'mem'))
+
+const revealedKnowledge = await call('POST', '/op', { op: 'fs.reveal', args: { target: 'knowledge' } })
+assert.equal(revealedKnowledge.payload.value.path, path.join(scratch, 'kb'))
+
+const revealedPlugin = await call('POST', '/op', { op: 'fs.reveal', args: { target: 'plugin' } })
+assert.equal(revealedPlugin.payload.value.path, here)
+
+// a path from the page must never reach the spawner
+const nasty = await call('POST', '/op', { op: 'fs.reveal', args: { target: '../../Windows' } })
+assert.equal(nasty.status, 400)
+assert.equal(nasty.payload.error.code, 'bad-request')
+assert.equal(revealed.length, 3)
+console.log('fs.reveal ok')
 
 // ── errors ──────────────────────────────────────────────────────────────────
 const bad = await call('POST', '/op', { op: 'nope' })
