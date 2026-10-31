@@ -716,9 +716,12 @@ window.__ModuleLoader__.load({
 .am-toast-bar{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:90;padding:7px 14px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 96%,transparent);box-shadow:0 8px 26px rgba(0,0,0,.24);font-size:12px;color:var(--dsw-alias-label-secondary);pointer-events:none}
 .am-toast-bar.is-failed{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));border-color:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-border-l2)) 45%,transparent)}
 /* in-panel confirmation: window.confirm() is silently dropped by some mobile
-   webviews, so destructive buttons ask here instead of dying without feedback */
-.am-modal-mask{position:absolute;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.5)}
-.am-modal{width:100%;max-width:340px;box-sizing:border-box;padding:16px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 16px 40px rgba(0,0,0,.5)}
+   webviews, so destructive buttons ask here instead of dying without feedback.
+   The mask is fixed to the viewport on purpose: on phones the host lets this
+   panel grow taller than the screen, so an absolutely positioned mask gets
+   centred far below the visible area (the dialog never shows up). */
+.am-modal-mask{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;background:rgba(0,0,0,.5)}
+.am-modal{width:100%;max-width:340px;flex:none;margin:auto;box-sizing:border-box;padding:16px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);box-shadow:0 16px 40px rgba(0,0,0,.5)}
 .am-modal-text{margin:0 0 14px;font-size:13px;line-height:1.6;color:var(--dsw-alias-label-primary);word-break:break-word}
 .am-modal-actions{display:flex;gap:8px;justify-content:flex-end}
 /* narrow screens (phones): the panel is a two-column layout with a 264px rail,
