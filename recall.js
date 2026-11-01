@@ -894,12 +894,24 @@ export function createRecall(options = {}) {
     }
   }
 
+  /** The session's raw event ledger, read-only. */
+  function sessionLedger(sessionId) {
+    const reader = typeof transcripts.ledger === 'function' ? transcripts.ledger : null
+    if (reader === null) return { sessionId, available: false, records: 0, types: [], compactions: [] }
+    try {
+      return reader(sessionId)
+    } catch {
+      return { sessionId, available: false, records: 0, types: [], compactions: [] }
+    }
+  }
+
   return {
     search,
     open,
     sessions,
     sessionMap,
     sessionFind,
+    sessionLedger,
     messages: messagesOf,
     aliases: aliasTable,
     aliasSet,

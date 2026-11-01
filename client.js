@@ -4105,6 +4105,13 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      ctx.slots.inject('conversation.view', () =>
+        ctx.slots.register(
+          { name: 'conversation.view', id: 'vault-ledger', order: 6, label: () => (zhLocale(locale()) ? '账本' : 'Ledger') },
+          props => h(SessionLedger, { ...props, getLocale: locale }),
+        ),
+      )
+
       ctx.slots.inject('main', () =>
         ctx.slots.register({ name: 'main', key: 'agent-memory' }, props =>
           h(Panel, { ...props, t, getLocale: locale, uiWorkspace: () => ctx.get('uiWorkspace') }),
@@ -4315,6 +4322,113 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { style }, header, ...body)
+    }
+
+    /**
+     * Conversation body view: the read-only event ledger of this session. No
+     * compaction is intercepted yet — this shows what an accounting pass would
+     * have to read, so the takeover can be designed against real data.
+     */
+    function SessionLedger(props) {
+      const { sessionId, getLocale } = props
+      const zh = zhLocale(typeof getLocale === 'function' ? getLocale() : '')
+      const labels = zh
+        ? {
+            hint: '只读账本：本会话的事件构成与压缩记录。压缩记账尚未接入，这里不做任何拦截或改写。',
+            reading: '读取中…',
+            failed: '读取失败',
+            records: '条记录',
+            empty: '这个会话还没有可读的事件记录。',
+            types: '事件构成',
+            compactions: '压缩与摘要',
+            noCompactions: '这个会话还没有压缩/摘要事件。',
+          }
+        : {
+            hint: 'Read-only ledger: this session event mix and compaction records. Accounting is not wired yet — nothing is intercepted or rewritten.',
+            reading: 'Reading…',
+            failed: 'Failed to read',
+            records: 'records',
+            empty: 'This session has no readable events yet.',
+            types: 'Event mix',
+            compactions: 'Compaction & summary',
+            noCompactions: 'No compaction or summary event in this session yet.',
+          }
+      const [data, setData] = useState(null)
+      const [error, setError] = useState('')
+
+      useEffect(() => {
+        let alive = true
+        setData(null)
+        setError('')
+        callOp('session.context', { sessionId })
+          .then(value => {
+            if (alive) setData(value)
+          })
+          .catch(cause => {
+            if (alive) setError(String(cause?.message ?? cause))
+          })
+        return () => {
+          alive = false
+        }
+      }, [sessionId])
+
+      const style = {
+        height: '100%',
+        overflowY: 'auto',
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        boxSizing: 'border-box',
+      }
+      const body = [h('div', { className: 'am-note' }, labels.hint)]
+      if (error !== '') {
+        body.push(h('div', { className: 'am-note', style: { color: 'var(--am-danger, #e5484d)' } }, `${labels.failed}: ${error}`))
+      } else if (data === null) {
+        body.push(h('div', { className: 'am-note' }, labels.reading))
+      } else if (data.available !== true || data.records === 0) {
+        body.push(h('div', { className: 'am-note' }, labels.empty))
+      } else {
+        body.push(h('div', { className: 'am-note-dim' }, `${data.records} ${labels.records}`))
+        body.push(h('div', { className: 'am-item-title' }, labels.types))
+        const top = data.types.slice(0, 12)
+        const max = top.reduce((value, item) => Math.max(value, item.count), 1)
+        for (const item of top) {
+          body.push(
+            h(
+              'div',
+              { key: `type-${item.type}`, style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+              h('span', { style: { minWidth: '150px', fontSize: '12px', opacity: 0.85 } }, item.type),
+              h('span', {
+                style: {
+                  height: '8px',
+                  borderRadius: '4px',
+                  background: 'var(--am-accent, #4d6bfe)',
+                  width: `${Math.round((item.count / max) * 60)}%`,
+                  maxWidth: '60%',
+                },
+              }),
+              h('span', { className: 'am-note-dim', style: { fontSize: '12px' } }, String(item.count)),
+            ),
+          )
+        }
+        body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.compactions))
+        if (data.compactions.length === 0) {
+          body.push(h('div', { className: 'am-note' }, labels.noCompactions))
+        } else {
+          for (const item of data.compactions) {
+            body.push(
+              h(
+                'div',
+                { key: `compaction-${item.seq}-${item.type}`, className: 'am-item' },
+                h('div', { className: 'am-item-meta' }, `#${item.seq} · ${item.type} · ${item.at}`),
+                h('div', { className: 'am-item-snippet' }, item.preview),
+              ),
+            )
+          }
+        }
+      }
+      return h('div', { style }, body)
     }
 
     // `uiWorkspace` is a client service: cordis only resolves a service from a

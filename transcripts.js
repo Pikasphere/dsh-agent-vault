@@ -334,5 +334,39 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
     return messages
   }
 
-  return { root: dir, known, owners, entries, list, messagesOf, all, get, read: entryOf }
+  /**
+   * Read-only event ledger of one session: the record-type histogram plus any
+   * compaction/summary records. Nothing is intercepted or rewritten — this is
+   * what "accounting before takeover" needs to look at.
+   */
+  function ledger(sessionId) {
+    const file = locate(sessionId)
+    if (file === '') return { sessionId, available: false, records: 0, types: [], compactions: [] }
+    let records = []
+    try {
+      records = readRecords(file)
+    } catch {
+      return { sessionId, available: false, records: 0, types: [], compactions: [] }
+    }
+    const counts = new Map()
+    const compactions = []
+    for (const record of records) {
+      const type = typeof record.type === 'string' && record.type !== '' ? record.type : 'unknown'
+      counts.set(type, (counts.get(type) ?? 0) + 1)
+      if (type.includes('compact') || type.includes('summar')) {
+        compactions.push({
+          seq: typeof record.seq === 'number' ? record.seq : 0,
+          at: typeof record.time === 'number' ? new Date(record.time).toISOString() : '',
+          type,
+          preview: JSON.stringify(record.data ?? {}).slice(0, 400),
+        })
+      }
+    }
+    const types = [...counts.entries()]
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count)
+    return { sessionId, available: true, records: records.length, types, compactions }
+  }
+
+  return { root: dir, known, owners, entries, list, messagesOf, all, ledger, get, read: entryOf }
 }
