@@ -4098,11 +4098,223 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      ctx.slots.inject('conversation.view', () =>
+        ctx.slots.register(
+          { name: 'conversation.view', id: 'vault-search', order: 5, label: () => (zhLocale(locale()) ? '检索' : 'Search') },
+          props => h(SessionSearch, { ...props, t, getLocale: locale }),
+        ),
+      )
+
       ctx.slots.inject('main', () =>
         ctx.slots.register({ name: 'main', key: 'agent-memory' }, props =>
           h(Panel, { ...props, t, getLocale: locale, uiWorkspace: () => ctx.get('uiWorkspace') }),
         ),
       )
+    }
+
+    /** Small helper so the view can POST ops without the Panel's state plumbing. */
+    async function callOp(op, args) {
+      const payload = await request('/op', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op, args: args ?? {} }),
+      })
+      return payload?.value
+    }
+
+    function zhLocale(value) {
+      return String(value ?? '').toLowerCase().startsWith('zh')
+    }
+
+    /**
+     * Conversation body view: search one session's whole transcript and read its
+     * turn map. The rail on the right edge is drawn by the shell and owns no
+     * slot, so this is the closest a plugin can get to "find that turn".
+     */
+    function SessionSearch(props) {
+      const { sessionId, getLocale } = props
+      const zh = zhLocale(typeof getLocale === 'function' ? getLocale() : '')
+      const labels = zh
+        ? {
+            hint: '在这个会话的全部消息里查找，不受上下文裁剪影响。',
+            placeholder: '输入关键词…',
+            search: '查找',
+            clear: '清空',
+            empty: '没有命中。换个词，或者看下面的轮次地图。',
+            reading: '读取中…',
+            failed: '读取失败',
+            round: '第 ',
+            roundTail: ' 轮',
+            copy: '复制',
+            copied: '已复制',
+            map: '轮次地图',
+            noMap: '这个会话还没有用户消息。',
+            stat: (turns, messages) => `${turns} 轮 · ${messages} 条消息`,
+          }
+        : {
+            hint: 'Search every message of this session, past the context cutoff.',
+            placeholder: 'Type keywords…',
+            search: 'Find',
+            clear: 'Clear',
+            empty: 'No hit. Try another word, or scan the turn map below.',
+            reading: 'Reading…',
+            failed: 'Failed to read',
+            round: 'Turn ',
+            roundTail: '',
+            copy: 'Copy',
+            copied: 'Copied',
+            map: 'Turn map',
+            noMap: 'This session has no user message yet.',
+            stat: (turns, messages) => `${turns} turns · ${messages} messages`,
+          }
+      const [query, setQuery] = useState('')
+      const [busy, setBusy] = useState(false)
+      const [map, setMap] = useState(null)
+      const [hits, setHits] = useState(null)
+      const [opened, setOpened] = useState(-1)
+      const [notice, setNotice] = useState('')
+      const [error, setError] = useState('')
+
+      useEffect(() => {
+        let alive = true
+        setMap(null)
+        setHits(null)
+        setError('')
+        setOpened(-1)
+        callOp('session.map', { sessionId })
+          .then(value => {
+            if (alive) setMap(value)
+          })
+          .catch(cause => {
+            if (alive) setError(String(cause?.message ?? cause))
+          })
+        return () => {
+          alive = false
+        }
+      }, [sessionId])
+
+      const run = async () => {
+        const value = String(query).trim()
+        if (value === '') {
+          setHits(null)
+          return
+        }
+        setBusy(true)
+        setError('')
+        try {
+          const result = await callOp('session.search', { sessionId, query: value, limit: 40 })
+          setHits(result)
+          setOpened(-1)
+        } catch (cause) {
+          setHits(null)
+          setError(String(cause?.message ?? cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const copy = async value => {
+        try {
+          await navigator.clipboard.writeText(value)
+        } catch {
+          // clipboard unavailable (insecure context) — the text stays selectable
+        }
+        setNotice(labels.copied)
+        window.setTimeout(() => setNotice(''), 1600)
+      }
+
+      const onKey = event => {
+        if (event.key === 'Enter') void run()
+      }
+
+      const style = {
+        height: '100%',
+        overflowY: 'auto',
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        boxSizing: 'border-box',
+      }
+
+      const header = h(
+        'div',
+        { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('input', {
+          className: 'am-input',
+          style: { flex: '1 1 220px', minWidth: '0' },
+          value: query,
+          placeholder: labels.placeholder,
+          onChange: event => setQuery(event.target.value),
+          onKeyDown: onKey,
+        }),
+        h(
+          'button',
+          { className: 'am-btn', type: 'button', onClick: () => void run(), disabled: busy },
+          busy ? labels.reading : labels.search,
+        ),
+        h(
+          'button',
+          {
+            className: 'am-btn',
+            type: 'button',
+            onClick: () => {
+              setQuery('')
+              setHits(null)
+            },
+          },
+          labels.clear,
+        ),
+        notice !== '' ? h('span', { className: 'am-note' }, notice) : null,
+      )
+
+      const body = []
+      body.push(h('div', { className: 'am-note' }, labels.hint))
+      if (error !== '') body.push(h('div', { className: 'am-note', style: { color: 'var(--am-danger, #e5484d)' } }, `${labels.failed}: ${error}`))
+      if (map !== null && hits === null) body.push(h('div', { className: 'am-note-dim' }, labels.stat(map.turns.length, map.messages)))
+
+      if (hits !== null) {
+        if (hits.results.length === 0) body.push(h('div', { className: 'am-note' }, labels.empty))
+        for (const hit of hits.results) {
+          const open = opened === hit.seq
+          body.push(
+            h(
+              'div',
+              { key: `hit-${hit.seq}`, className: 'am-item' },
+              h(
+                'div',
+                { className: 'am-item-title', style: { cursor: 'pointer' }, onClick: () => setOpened(open ? -1 : hit.seq) },
+                `${labels.round}${hit.round}${labels.roundTail} · ${hit.role === 'user' ? (zh ? '用户' : 'user') : zh ? '助手' : 'assistant'}`,
+              ),
+              h('div', { className: open ? 'am-item-snippet' : 'am-item-snippet' }, open ? hit.text : hit.text.slice(0, 180)),
+              open
+                ? h(
+                    'div',
+                    { style: { display: 'flex', gap: '8px', marginTop: '6px' } },
+                    h('button', { className: 'am-btn', type: 'button', onClick: () => void copy(hit.text) }, labels.copy),
+                  )
+                : null,
+            ),
+          )
+        }
+      } else if (map !== null) {
+        body.push(h('div', { className: 'am-item-title', style: { marginTop: '4px' } }, labels.map))
+        if (map.turns.length === 0) body.push(h('div', { className: 'am-note' }, labels.noMap))
+        for (const turn of map.turns) {
+          body.push(
+            h(
+              'div',
+              { key: `turn-${turn.round}`, className: 'am-item' },
+              h('div', { className: 'am-item-meta' }, `${labels.round}${turn.round}${labels.roundTail}`),
+              h('div', { className: 'am-item-snippet' }, turn.text),
+            ),
+          )
+        }
+      } else if (error === '') {
+        body.push(h('div', { className: 'am-note' }, labels.reading))
+      }
+
+      return h('div', { style }, header, ...body)
     }
 
     // `uiWorkspace` is a client service: cordis only resolves a service from a

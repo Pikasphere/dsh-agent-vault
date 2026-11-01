@@ -1250,6 +1250,17 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       store.saveSettings({ transcriptExclude: next })
       return { sessionId, included: include, exclude: next }
     }
+    case 'session.map':
+    case 'session.search': {
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+      if (sessionId === '') throw new MemoryError('bad-request', 'missing sessionId')
+      const agentId = store.bindingOf(sessionId)
+      if (agentId === '') throw new MemoryError('no-agent', 'this session is not bound to an agent')
+      const readable = recall.sessions(agentId).some(item => item.sessionId === sessionId)
+      if (!readable) throw new MemoryError('not-found', `session ${sessionId} is not readable by this agent`)
+      if (op === 'session.map') return recall.sessionMap(sessionId)
+      return recall.sessionFind({ sessionId, query: args.query, limit: args.limit })
+    }
     case 'memory.reindex':
       return recall.reindex()
     case 'memory.index':

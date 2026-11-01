@@ -246,6 +246,7 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   const stub = {
     entries: () => [{ id: 'session-x', sessionId: 'session-x', at: '2026-10-20T10:01:00.000Z', title: '会话 X', text: messages.map(item => item.text).join(' ') }],
     messagesOf: sessionId => (sessionId === 'session-x' ? messages : []),
+    all: sessionId => (sessionId === 'session-x' ? messages : []),
     list: () => [],
     root: '',
   }
@@ -258,6 +259,20 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   const missed = await scoped.search({ id: 'demo-agent', query: '完全不存在的词', source: 'session' })
   assert.equal(missed.results.length, 0)
   assert.deepEqual(scoped.messages('session-x').map(item => item.seq), [1, 2, 3])
+
+  const map = scoped.sessionMap('session-x')
+  assert.equal(map.turns.length, 2, 'one row per user turn')
+  assert.equal(map.messages, 3)
+  assert.equal(map.turns[1].round, 2)
+  assert.ok(map.turns[1].text.startsWith('好'))
+
+  const hits = scoped.sessionFind({ sessionId: 'session-x', query: 'zstd 解析器', limit: 10 })
+  assert.equal(hits.total, 1)
+  assert.equal(hits.results[0].seq, 2)
+  assert.equal(hits.results[0].round, 1)
+  assert.equal(hits.results[0].role, 'assistant')
+  assert.equal(scoped.sessionFind({ sessionId: 'session-x', query: '   ' }).total, 0)
+  assert.equal(scoped.sessionMap('session-unknown').turns.length, 0)
 }
 
 // ── ranking mode: settings are the default, an explicit argument wins ───────

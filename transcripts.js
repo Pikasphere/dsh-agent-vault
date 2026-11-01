@@ -296,5 +296,43 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
     return null
   }
 
-  return { root: dir, known, owners, entries, list, messagesOf, get, read: entryOf }
+  /**
+   * Every user/assistant message of one session, untrimmed. The reader view
+   * searches the whole conversation, so it cannot reuse the 12k recall excerpt.
+   */
+  function all(sessionId) {
+    const file = locate(sessionId)
+    if (file === '') return []
+    let records = []
+    try {
+      records = readRecords(file)
+    } catch {
+      return []
+    }
+    const messages = []
+    for (const record of records) {
+      let role = ''
+      let text = ''
+      if (record.type === 'user/message') {
+        role = 'user'
+        text = messageText(record.data?.content)
+      } else if (record.type === 'assistant/message') {
+        role = 'assistant'
+        text = messageText(record.data?.message?.content)
+      } else {
+        continue
+      }
+      if (text === '') continue
+      const time = typeof record.time === 'number' ? record.time : 0
+      messages.push({
+        seq: typeof record.seq === 'number' ? record.seq : 0,
+        role,
+        at: time ? new Date(time).toISOString() : '',
+        text: redact(text),
+      })
+    }
+    return messages
+  }
+
+  return { root: dir, known, owners, entries, list, messagesOf, all, get, read: entryOf }
 }

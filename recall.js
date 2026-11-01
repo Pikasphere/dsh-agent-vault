@@ -829,10 +829,77 @@ export function createRecall(options = {}) {
     }
   }
 
+  /** The session's messages, or none when the parse fails. */
+  function allMessagesOf(sessionId) {
+    const reader = typeof transcripts.all === 'function' ? transcripts.all : null
+    if (reader === null) return []
+    try {
+      return reader(sessionId)
+    } catch {
+      return []
+    }
+  }
+
+  /** One readable line per user turn: a 2000-step session still scans as ~70 rows. */
+  function sessionMap(sessionId) {
+    const messages = allMessagesOf(sessionId)
+    const turns = []
+    let round = 0
+    for (const message of messages) {
+      if (message.role !== 'user') continue
+      round += 1
+      turns.push({
+        round,
+        seq: message.seq,
+        at: message.at,
+        text: String(message.text).slice(0, 160),
+      })
+    }
+    const chars = messages.reduce((sum, message) => sum + String(message.text).length, 0)
+    return { sessionId, turns, messages: messages.length, chars }
+  }
+
+  /** Full-text hits over the whole session, scored by matched terms. */
+  function sessionFind(input) {
+    const sessionId = String(input.sessionId ?? '')
+    const query = String(input.query ?? '').trim()
+    const limit = Math.max(1, Math.min(50, Number.isFinite(input.limit) ? Math.trunc(input.limit) : 40))
+    if (query === '') return { sessionId, query, total: 0, turns: 0, results: [] }
+    const tokens = tokenize(query)
+    const messages = allMessagesOf(sessionId)
+    const results = []
+    let round = 0
+    for (const message of messages) {
+      if (message.role === 'user') round += 1
+      const body = String(message.text).toLowerCase()
+      let score = 0
+      for (const token of tokens) if (token !== '' && body.includes(token)) score += 1
+      if (score === 0) continue
+      results.push({
+        seq: message.seq,
+        round,
+        role: message.role,
+        at: message.at,
+        score,
+        text: String(message.text).slice(0, 800),
+      })
+    }
+    results.sort((a, b) => b.score - a.score || b.seq - a.seq)
+    return {
+      sessionId,
+      query,
+      total: results.length,
+      turns: round,
+      results: results.slice(0, limit),
+    }
+  }
+
   return {
     search,
     open,
     sessions,
+    sessionMap,
+    sessionFind,
     messages: messagesOf,
     aliases: aliasTable,
     aliasSet,
