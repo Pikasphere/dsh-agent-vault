@@ -146,5 +146,70 @@ assert.ok(elapsed < 1000, `single-session rebuild ${elapsed}ms`)
   assert.equal(open.entries('demo-agent').length, 1)
 }
 
+// Ledger: pairing start/end/summary by compactionId, prunes and the peak request.
+{
+  const ledgerRoot = path.join(scratch, 'ledger-memory')
+  const ledgerSessions = path.join(scratch, 'ledger-sessions')
+  const ledgerId = 'session-99999999-8888-7777-6666-555555555555'
+  const ledgerDir = path.join(ledgerSessions, '--E-Projects--', ledgerId)
+  fs.mkdirSync(path.join(ledgerRoot, 'journal'), { recursive: true })
+  fs.mkdirSync(path.join(ledgerRoot, 'checkpoints'), { recursive: true })
+  fs.mkdirSync(ledgerDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(ledgerRoot, 'checkpoints', 'demo-agent.jsonl'),
+    `${JSON.stringify({ id: 'j-bbbb2222', kind: 'checkpoint', at: '2026-11-01T10:00:00.000Z', title: 'cp', text: 'x', meta: { sessionId: ledgerId } })}
+`,
+  )
+  fs.writeFileSync(path.join(ledgerRoot, 'journal', 'demo-agent.jsonl'), '')
+  const rows = [
+    { type: 'session', version: 4, id: ledgerId, createdAt: 1790000000000 },
+    { type: 'compaction/start', seq: 1, time: 1790000001000, data: { compactionId: 'a', turn: 81 } },
+    {
+      type: 'compaction/end',
+      seq: 2,
+      time: 1790000004000,
+      data: { compactionId: 'a', turn: 81, error: 'maximum context length is 1048576 tokens. However, you requested 1928160 tokens' },
+    },
+    { type: 'compaction/start', seq: 3, time: 1790000005000, data: { compactionId: 'b', turn: 82 } },
+    { type: 'compaction/end', seq: 4, time: 1790000006000, data: { compactionId: 'b', turn: 82, error: 'dsh native compaction call refused by billion-context: bili owns compression' } },
+    { type: 'compaction/start', seq: 5, time: 1790000007000, data: { compactionId: 'c', turn: 83 } },
+    { type: 'compaction/summary', seq: 6, time: 1790000007500, data: { compactionId: 'c', summary: [{ type: 'text', text: 'x'.repeat(1200) }] } },
+    { type: 'compaction/end', seq: 7, time: 1790000008000, data: { compactionId: 'c', turn: 83 } },
+    { type: 'compaction/prune', seq: 8, time: 1790000008100, data: { shadowedRange: { start: 147, end: 147 }, shadowedSeqs: [147], shadowedTokenCount: 7386 } },
+    { type: 'compaction/prune', seq: 9, time: 1790000008200, data: { shadowedRange: { start: 159, end: 159 }, shadowedSeqs: [159], shadowedTokenCount: 2285 } },
+    { type: 'user/message', seq: 10, time: 1790000009000, data: { content: [{ type: 'text', text: '继续' }] } },
+  ]
+  const ledgerFile = path.join(ledgerDir, SESSION_FILE)
+  fs.writeFileSync(ledgerFile, Buffer.concat(rows.map(record => zstdCompressSync(Buffer.from(`${JSON.stringify(record)}
+`, 'utf8')))))
+  const reads = createTranscripts({ rootDir: ledgerRoot, sessionsRoot: ledgerSessions, store: { listBindings: () => [] } })
+  const ledger = reads.ledger(ledgerId)
+  assert.equal(ledger.available, true)
+  assert.equal(ledger.records, rows.length)
+  assert.deepEqual(
+    ledger.runs.map(run => [run.compactionId, run.turn, run.ok]),
+    [
+      ['a', 81, false],
+      ['b', 82, false],
+      ['c', 83, true],
+    ],
+  )
+  assert.equal(ledger.runs[1].reason, 'refused-by-proxy')
+  assert.equal(ledger.stats.attempts, 3)
+  assert.equal(ledger.stats.ok, 1)
+  assert.equal(ledger.stats.failed, 2)
+  assert.equal(ledger.stats.refused, 1)
+  assert.equal(ledger.stats.prunedCount, 2)
+  assert.equal(ledger.stats.prunedTokens, 9671)
+  assert.equal(ledger.stats.prunedMax, 7386)
+  assert.equal(ledger.stats.summaryChars, 1200)
+  assert.equal(ledger.stats.peakRequestTokens, 1928160)
+  assert.equal(ledger.runs[0].durationMs, 3000)
+  assert.equal(ledger.runs[2].durationMs, 1000)
+  const missing = reads.ledger('session-none')
+  assert.equal(missing.available, false)
+  assert.equal(missing.stats.attempts, 0)
+}
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL TRANSCRIPT TESTS PASSED')

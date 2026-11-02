@@ -340,32 +340,91 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
    * what "accounting before takeover" needs to look at.
    */
   function ledger(sessionId) {
+    const empty = {
+      sessionId,
+      available: false,
+      records: 0,
+      types: [],
+      compactions: [],
+      runs: [],
+      stats: { attempts: 0, ok: 0, failed: 0, refused: 0, prunedCount: 0, prunedTokens: 0, prunedMax: 0, summaryChars: 0, peakRequestTokens: 0 },
+    }
     const file = locate(sessionId)
-    if (file === '') return { sessionId, available: false, records: 0, types: [], compactions: [] }
+    if (file === '') return empty
     let records = []
     try {
       records = readRecords(file)
     } catch {
-      return { sessionId, available: false, records: 0, types: [], compactions: [] }
+      return empty
     }
     const counts = new Map()
     const compactions = []
+    const runs = new Map()
+    let prunedCount = 0
+    let prunedTokens = 0
+    let prunedMax = 0
+    let peakRequestTokens = 0
     for (const record of records) {
       const type = typeof record.type === 'string' && record.type !== '' ? record.type : 'unknown'
       counts.set(type, (counts.get(type) ?? 0) + 1)
-      if (type.includes('compact') || type.includes('summar')) {
-        compactions.push({
-          seq: typeof record.seq === 'number' ? record.seq : 0,
-          at: typeof record.time === 'number' ? new Date(record.time).toISOString() : '',
-          type,
-          preview: JSON.stringify(record.data ?? {}).slice(0, 400),
-        })
+      if (!type.includes('compact') && !type.includes('summar')) continue
+      const at = typeof record.time === 'number' ? new Date(record.time).toISOString() : ''
+      const data = record.data ?? {}
+      compactions.push({
+        seq: typeof record.seq === 'number' ? record.seq : 0,
+        at,
+        type,
+        preview: JSON.stringify(data).slice(0, 400),
+      })
+      if (type === 'compaction/prune') {
+        const tokens = typeof data.shadowedTokenCount === 'number' ? data.shadowedTokenCount : 0
+        prunedCount += 1
+        prunedTokens += tokens
+        prunedMax = Math.max(prunedMax, tokens)
+        continue
       }
+      const id = typeof data.compactionId === 'string' ? data.compactionId : ''
+      if (id === '') continue
+      if (!runs.has(id)) runs.set(id, { compactionId: id, turn: 0, startedAt: '', endedAt: '', durationMs: 0, ok: null, reason: '', summaryChars: 0 })
+      const run = runs.get(id)
+      if (type === 'compaction/start') {
+        run.startedAt = at
+        if (typeof data.turn === 'number') run.turn = data.turn
+      } else if (type === 'compaction/end') {
+        run.endedAt = at
+        run.ok = typeof data.error === 'string' && data.error !== '' ? false : true
+        if (run.ok === false) {
+          const message = data.error
+          run.reason = message.includes('refused by billion-context') ? 'refused-by-proxy' : message.slice(0, 200)
+          for (const match of message.matchAll(/(\d{5,})/g)) {
+            const tokens = Number(match[1])
+            if (tokens > peakRequestTokens) peakRequestTokens = tokens
+          }
+        }
+      } else if (type === 'compaction/summary') {
+        const parts = Array.isArray(data.summary) ? data.summary : []
+        run.summaryChars = parts.reduce((sum, part) => sum + (typeof part?.text === 'string' ? part.text.length : 0), 0)
+      }
+    }
+    const ordered = [...runs.values()].sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))
+    for (const run of ordered) {
+      if (run.startedAt !== '' && run.endedAt !== '') run.durationMs = Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt))
+    }
+    const stats = {
+      attempts: ordered.length,
+      ok: ordered.filter(run => run.ok === true).length,
+      failed: ordered.filter(run => run.ok === false).length,
+      refused: ordered.filter(run => run.reason === 'refused-by-proxy').length,
+      prunedCount,
+      prunedTokens,
+      prunedMax,
+      summaryChars: ordered.reduce((sum, run) => sum + run.summaryChars, 0),
+      peakRequestTokens,
     }
     const types = [...counts.entries()]
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count)
-    return { sessionId, available: true, records: records.length, types, compactions }
+    return { sessionId, available: true, records: records.length, types, compactions, runs: ordered, stats }
   }
 
   return { root: dir, known, owners, entries, list, messagesOf, all, ledger, get, read: entryOf }

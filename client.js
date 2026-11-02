@@ -4324,6 +4324,43 @@ window.__ModuleLoader__.load({
       return h('div', { style }, header, ...body)
     }
 
+    /** Two-column stat card: the numbers that answer "did compaction help?". */
+    function summaryCard(stats, labels) {
+      const rows = [
+        [labels.attempts, stats.attempts],
+        [labels.ok, stats.ok],
+        [labels.failedRun, stats.failed],
+        [labels.refused, stats.refused],
+        [labels.pruned, stats.prunedCount],
+        [labels.prunedTokens, stats.prunedTokens],
+        [labels.summaryTotal, stats.summaryChars],
+        [labels.peakRequest, stats.peakRequestTokens],
+      ]
+      return h(
+        'div',
+        {
+          style: {
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+            gap: '8px',
+            margin: '4px 0',
+          },
+        },
+        ...rows.map(([label, value], index) =>
+          h(
+            'div',
+            {
+              key: `stat-${index}`,
+              className: 'am-item',
+              style: { padding: '8px 10px' },
+            },
+            h('div', { className: 'am-note-dim', style: { fontSize: '11px' } }, label),
+            h('div', { style: { fontSize: '16px', fontWeight: 600 } }, String(value)),
+          ),
+        ),
+      )
+    }
+
     /**
      * Conversation body view: the read-only event ledger of this session. No
      * compaction is intercepted yet — this shows what an accounting pass would
@@ -4341,7 +4378,17 @@ window.__ModuleLoader__.load({
             empty: '这个会话还没有可读的事件记录。',
             types: '事件构成',
             compactions: '压缩与摘要',
+            runs: '压缩与摘要',
             noCompactions: '这个会话还没有压缩/摘要事件。',
+            ok: '成功',
+            refused: '被代理拒绝',
+            failedRun: '失败',
+            summaryChars: '摘要字符',
+            attempts: '压缩尝试',
+            pruned: '工具结果剪枝',
+            prunedTokens: '剪枝折叠 token',
+            peakRequest: '峰值请求 token',
+            summaryTotal: '摘要总字符',
           }
         : {
             hint: 'Read-only ledger: this session event mix and compaction records. Accounting is not wired yet — nothing is intercepted or rewritten.',
@@ -4351,7 +4398,17 @@ window.__ModuleLoader__.load({
             empty: 'This session has no readable events yet.',
             types: 'Event mix',
             compactions: 'Compaction & summary',
+            runs: 'Compaction & summary',
             noCompactions: 'No compaction or summary event in this session yet.',
+            ok: 'ok',
+            refused: 'refused by proxy',
+            failedRun: 'failed',
+            summaryChars: 'summary chars',
+            attempts: 'compaction runs',
+            pruned: 'tool-result prunes',
+            prunedTokens: 'pruned tokens',
+            peakRequest: 'peak request tokens',
+            summaryTotal: 'summary chars',
           }
       const [data, setData] = useState(null)
       const [error, setError] = useState('')
@@ -4390,7 +4447,8 @@ window.__ModuleLoader__.load({
         body.push(h('div', { className: 'am-note' }, labels.empty))
       } else {
         body.push(h('div', { className: 'am-note-dim' }, `${data.records} ${labels.records}`))
-        body.push(h('div', { className: 'am-item-title' }, labels.types))
+        if (data.stats !== undefined) body.push(summaryCard(data.stats, labels))
+        body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.types))
         const top = data.types.slice(0, 12)
         const max = top.reduce((value, item) => Math.max(value, item.count), 1)
         for (const item of top) {
@@ -4412,17 +4470,20 @@ window.__ModuleLoader__.load({
             ),
           )
         }
-        body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.compactions))
-        if (data.compactions.length === 0) {
+        body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.runs))
+        if (data.runs.length === 0) {
           body.push(h('div', { className: 'am-note' }, labels.noCompactions))
         } else {
-          for (const item of data.compactions) {
+          for (const run of data.runs) {
+            const verdict = run.ok === true ? labels.ok : run.reason === 'refused-by-proxy' ? labels.refused : labels.failedRun
             body.push(
               h(
                 'div',
-                { key: `compaction-${item.seq}-${item.type}`, className: 'am-item' },
-                h('div', { className: 'am-item-meta' }, `#${item.seq} · ${item.type} · ${item.at}`),
-                h('div', { className: 'am-item-snippet' }, item.preview),
+                { key: `run-${run.compactionId}`, className: 'am-item' },
+                h('div', { className: 'am-item-meta' }, `turn ${run.turn} · ${run.startedAt} · ${run.durationMs}ms · ${verdict}`),
+                run.summaryChars > 0
+                  ? h('div', { className: 'am-item-snippet' }, `${labels.summaryChars}: ${run.summaryChars}`)
+                  : h('div', { className: 'am-item-snippet am-note-dim' }, run.reason.slice(0, 220)),
               ),
             )
           }
