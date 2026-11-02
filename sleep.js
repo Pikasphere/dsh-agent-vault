@@ -358,7 +358,41 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
         'agent-memory: sleep turn-end',
       ),
     )
+    // Polling is the fallback that cannot be scope-filtered away: the store's
+    // `list()` hands us every live session, so the check does not depend on
+    // receiving an event at all.
+    const sweep = async () => {
+      const sessions = ctx.get('sessions')
+      if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') {
+        probe('', { seen: 'tick', skipped: 'no-sessions-service' })
+        return
+      }
+      let live = []
+      try {
+        live = sessions.list()
+      } catch {
+        live = []
+      }
+      probe('', { seen: 'tick', sessions: live.length })
+      for (const session of live) {
+        const id = String(session?.id ?? '')
+        if (id === '') continue
+        try {
+          await maybeCompact({ id })
+        } catch {
+          // one bad session must not stop the sweep
+        }
+      }
+    }
+    const first = setTimeout(() => void sweep(), 5000)
+    if (typeof first.unref === 'function') first.unref()
+    const timer = setInterval(() => void sweep(), 60000)
+    if (typeof timer.unref === 'function') timer.unref()
+    record({ at: new Date().toISOString(), kind: 'attached', hooks: disposers.length })
+
     return () => {
+      clearTimeout(first)
+      clearInterval(timer)
       for (const dispose of disposers) {
         try {
           if (typeof dispose === 'function') dispose()

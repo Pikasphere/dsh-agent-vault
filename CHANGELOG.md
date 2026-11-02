@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0-alpha.9 — 2026-11-02
+
+睡眠机制改用**轮询**作为主触发：`ctx.get('sessions').list()` 拿到所有活跃会话，启动 5 秒后扫一次、之后每 60 秒一次。
+
+为什么放弃事件：`agent/status`、`session/event`、`agent/pre-step` 三个钩子在真实 profile 里都没有到达根作用域的插件（boot 标记证明代码已加载、记忆根正确、无异常），继续猜作用域只会多耗几轮重启。轮询不依赖事件派发，一定跑得到。
+
+- 每 tick 记一条 `{seen: "tick", sessions: N}`，首个 tick 在启动后 5 秒；
+- 每条会话照旧走 `maybeCompact`（阈值、冷却、水印、区间选择都在）；
+- 事件钩子保留但降级为可选路径，`attached` 一行记录注册了几个。
+
 ## 2.1.0-alpha.8 — 2026-11-02
 
 睡眠机制加「活性探针」与第三个触发口。前两版挂的 `agent/status`、`session/event` 在真实 profile 里一条 probe 都没到，说明根作用域收不到这两个事件；而 `agent/pre-step` 是确定能收到的（handoff 的归档闸门就跑在上面）。
