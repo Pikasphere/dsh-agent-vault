@@ -25,6 +25,10 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // Below this a fold costs more (one summary call + a cache re-pay) than it
   // saves, so small slices wait for the next idle.
   minFoldTokens: 5000,
+  // 'host' asks the compaction service (unreachable from a profile plugin);
+  // 'shelve' archives the slice into the agent's journal and replaces it with
+  // a pointer stub, which needs no service and cannot fail on size.
+  mode: 'host',
   cooldownMs: 10 * 60 * 1000,
 })
 
@@ -32,7 +36,7 @@ export const SLEEP_DEFAULTS = Object.freeze({
  *  request a useful balanced reduction below the implementation's own threshold. */
 export const SLEEP_TRIGGER = 'context-overflow'
 
-export function createSleep({ ctx, store, measureTokens, recordError = () => {} }) {
+export function createSleep({ ctx, store, journals, measureTokens, recordError = () => {} }) {
   const logFile = path.join(store.root, 'index', 'compaction.jsonl')
   const inFlight = new Set()
   const lastAttempt = new Map()
@@ -60,6 +64,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : SLEEP_DEFAULTS.chunkTokens,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : SLEEP_DEFAULTS.keepRecent,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
+      mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : SLEEP_DEFAULTS.cooldownMs,
     }
   }
@@ -248,6 +253,111 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     return { service: undefined, source: tried, tried }
   }
 
+  /**
+   * Memory-backed compaction: archive the slice into the agent's journal first,
+   * then replace it in the session with a pointer stub.
+   *
+   * This is the answer to "压不住": the replacement is a few hundred characters
+   * of text that we already have — no summarizer call, no token ceiling, so it
+   * cannot fail because the payload is too large (the failure that killed the
+   * 1.9M-token session). The archive is written before the surface changes, so
+   * an interrupted run leaves the history untouched rather than half-lost.
+   */
+  function shelveMessages(session, span, agentId, sessionId) {
+    const parts = []
+    for (const seq of nodesBetween(session, span.start, span.end)) {
+      const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
+      const text = eventText(event)
+      if (text !== '') parts.push(`[#${seq}] ${text}`)
+    }
+    const body = parts.join(String.fromCharCode(10) + String.fromCharCode(10))
+    if (body === '') return null
+    const CHUNK = 15000
+    const written = []
+    for (let offset = 0; offset < body.length; offset += CHUNK) {
+      const slice = body.slice(offset, offset + CHUNK)
+      const part = Math.floor(offset / CHUNK) + 1
+      const total = Math.ceil(body.length / CHUNK)
+      written.push(
+        journals.write({
+          id: agentId,
+          kind: 'note',
+          title: `${total > 1 ? `归档(${part}/${total}) ` : '归档 '}${sessionId.slice(0, 12)} seq ${span.start}-${span.end}`,
+          text: slice,
+          meta: { sessionId, span: { start: span.start, end: span.end }, part, total },
+        }),
+      )
+    }
+    return written
+  }
+
+  function nodesBetween(session, start, end) {
+    const nodes = Array.isArray(session?.surface?.nodes) ? session.surface.nodes : []
+    return nodes.filter(seq => seq >= start && seq <= end)
+  }
+
+  function eventText(event) {
+    const data = event?.data ?? {}
+    if (event?.type === 'user/message') return blocksText(data.content)
+    if (event?.type === 'assistant/message') return blocksText(data?.message?.content)
+    if (event?.type === 'tool/result') return blocksText(data?.message?.content)
+    return ''
+  }
+
+  function blocksText(content) {
+    if (!Array.isArray(content)) return ''
+    const parts = []
+    for (const block of content) {
+      if (block === null || typeof block !== 'object') continue
+      if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+      else if (block.type === 'tool-call') parts.push(`(call ${block.name ?? ''} ${String(block.arguments ?? '').slice(0, 400)})`)
+    }
+    return parts.join(String.fromCharCode(10)).trim()
+  }
+
+  async function shelve(sessionId, agent, config) {
+    const agentId = store.bindingOf(sessionId) || ''
+    if (agentId === '') return { attempted: false, why: 'no-agent' }
+    const session = sessionOf(sessionId)
+    if (session === null) return { attempted: false, why: 'no-session' }
+    const span = selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
+    if (span === null) return { attempted: false, why: 'no-span' }
+    const startedAt = Date.now()
+    let written = null
+    try {
+      written = shelveMessages(session, span, agentId, sessionId)
+    } catch (error) {
+      record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'journal', error: String(error?.message ?? error).slice(0, 300) })
+      return { attempted: true, ok: false }
+    }
+    if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
+    const ids = written.map(item => item.id)
+    const stub = `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。`
+    try {
+      session.append(
+        'user/message',
+        { role: 'user', content: [{ type: 'text', text: stub }] },
+        { surfaceOp: { op: 'replace', startSeq: span.start, endSeq: span.end } },
+      )
+    } catch (error) {
+      record({
+        at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'append',
+        archived: ids, span: { start: span.start, end: span.end, nodes: span.nodes },
+        error: String(error?.message ?? error).slice(0, 400), durationMs: Date.now() - startedAt,
+      })
+      return { attempted: true, ok: false, error }
+    }
+    setFoldStart(sessionId, span.start)
+    record({
+      at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
+      span: { start: span.start, end: span.end, nodes: span.nodes },
+      archived: ids, stubChars: stub.length,
+      shadowedTokenCount: Math.round((span.chars ?? 0) / 3),
+      durationMs: Date.now() - startedAt,
+    })
+    return { attempted: true, ok: true, archived: ids }
+  }
+
   async function maybeCompact(agent) {
     // `measureTokens` is injected as a ONE-argument function (sessionId).
     const sessionId = String(agent?.id ?? '')
@@ -266,6 +376,18 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     if (Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'cooldown', tokens })
       return null
+    }
+    if (config.mode === 'shelve') {
+      inFlight.add(sessionId)
+      lastAttempt.set(sessionId, Date.now())
+      try {
+        return await shelve(sessionId, agent, config)
+      } catch (error) {
+        record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, error: String(error?.message ?? error).slice(0, 300) })
+        return { attempted: true, ok: false, error }
+      } finally {
+        inFlight.delete(sessionId)
+      }
     }
     const { service: compaction, source } = resolveCompaction(agent)
     if (compaction === undefined || compaction === null) {

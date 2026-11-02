@@ -214,6 +214,7 @@ export function createStore(options = {}) {
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : 20000,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : 8,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : 5000,
+      mode: value.mode === 'shelve' ? 'shelve' : 'host',
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : 600000,
     }
   }
@@ -567,6 +568,7 @@ export function createStore(options = {}) {
       if (Number.isFinite(keep) && keep >= 2) merged.keepRecent = Math.trunc(keep)
       const minFold = Number(patch.sleep.minFoldTokens)
       if (Number.isFinite(minFold) && minFold > 0) merged.minFoldTokens = Math.trunc(minFold)
+      if (patch.sleep.mode === 'host' || patch.sleep.mode === 'shelve') merged.mode = patch.sleep.mode
       const cooldown = Number(patch.sleep.cooldownMs)
       if (Number.isFinite(cooldown) && cooldown >= 0) merged.cooldownMs = Math.trunc(cooldown)
       next.sleep = merged

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0-alpha.20 — 2026-11-02
+
+**记忆化压缩（shelve）**：同会话、不换窗口，但压缩走记忆层——这正是 bili 做不到的那件事。
+
+- 触发后先**把区间原文写进该智能体的 journal**（每 15000 字一条 `j-xxxx`，带 `meta.sessionId/span`）；
+- 写盘成功后，才把这段表面替换成一条**指针桩**（几百字）：`【已归档】第 a–b 段已存入记忆：j-1、j-2。要细节请用 agent_recall，不要凭印象补写。`
+- 关键点：桩是**我们自己已生成好的文本**，不需要任何摘要模型。所以不存在「压不住」——不会因为 payload 太大而失败（正是 1.9M 那次 session 的死因），也不会因为模型瞎写而失真。
+- 顺序保证：先归档、后改写。中途失败则 session 原样不动。
+- 用 `sleep.mode` 开关：`host`（走 compaction 服务，默认）| `shelve`（记忆化压缩）。未绑定智能体时拒绝执行（没有记忆可写）。
+
 ## 2.1.0-alpha.19 — 2026-11-02
 
 修完计量后暴露的下一层：`skip: no-compaction-service`——`compaction` 服务活在**agent 预设的 isolate 作用域**里，profile 级插件用 `ctx.get('compaction')` 看不见。

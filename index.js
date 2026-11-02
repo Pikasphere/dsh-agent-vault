@@ -53,7 +53,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.19', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.20', root: store.root })}
 `,
     )
   } catch {
@@ -75,6 +75,7 @@ export function apply(ctx, config = {}) {
   const sleep = createSleep({
     ctx,
     store,
+    journals,
     measureTokens: sessionId => measureTokens(ctx, sessionId),
     recordError,
   })

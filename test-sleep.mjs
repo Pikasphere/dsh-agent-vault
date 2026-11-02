@@ -17,6 +17,7 @@ function harness(options = {}) {
     enabled: true,
     triggerTokens: 1000,
     cooldownMs: 0,
+    mode: 'host',
     ...(options.settings ?? {}),
   }
   const calls = []
@@ -28,11 +29,22 @@ function harness(options = {}) {
     const seq = index
     nodes.push(seq)
     const isToolResult = index % 5 === 0
-    events.set(seq, { type: isToolResult ? 'tool/result' : 'user/message', data: { text: 'x'.repeat(200) } })
+    const body = [{ type: 'text', text: 'x'.repeat(200) }]
+    events.set(
+      seq,
+      isToolResult
+        ? { type: 'tool/result', data: { message: { content: body } } }
+        : { type: 'user/message', data: { content: body } },
+    )
   }
+  const appended = []
   const session = {
     surface: { nodes },
     eventAt: seq => events.get(seq),
+    append: (type, data, opts) => {
+      appended.push({ type, data, opts })
+      return { type, seq: 999, time: Date.now(), data }
+    },
     requestHeader: () => ({ config: { provider: 'p', model: 'm' } }),
   }
   const services = {
@@ -66,9 +78,17 @@ function harness(options = {}) {
     bindingOf: () => 'agent-a',
   }
   let tokens = options.tokens ?? 0
+  const writes = []
+  const journals = {
+    write: input => {
+      writes.push(input)
+      return { id: `j-${writes.length}`, at: '2026-11-02T00:00:00.000Z', kind: 'note', title: input.title, chars: input.text.length }
+    },
+  }
   const sleep = createSleep({
     ctx,
     store,
+    journals,
     measureTokens: () => tokens,
     recordError: (target, scope, error) => {
       throw new Error(`unexpected recordError ${scope}: ${error?.message ?? error}`)
@@ -76,8 +96,11 @@ function harness(options = {}) {
   })
   return {
     sleep,
+    store,
     calls,
     surfaceCalls,
+    writes,
+    appended,
     nodes,
     events,
     settings,
@@ -244,10 +267,46 @@ function harness(options = {}) {
   assert.ok(row.span.start >= first.start)
 }
 
+// shelve mode: archive into the journal first, then replace the span with a stub
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(result.ok, true)
+  assert.equal(h.calls.length, 0, 'the compaction service is never touched')
+  assert.ok(h.writes.length >= 1, 'history is archived before the surface changes')
+  const archived = h.writes[0]
+  assert.equal(archived.kind, 'note')
+  assert.equal(archived.meta.sessionId, 'session-a')
+  assert.ok(archived.text.includes('[#'))
+  assert.equal(h.appended.length, 1)
+  const [append] = h.appended
+  assert.equal(append.type, 'user/message')
+  assert.equal(append.opts.surfaceOp.op, 'replace')
+  assert.ok(append.opts.surfaceOp.startSeq < append.opts.surfaceOp.endSeq)
+  assert.ok(append.data.content[0].text.includes('【已归档】'))
+  assert.ok(append.data.content[0].text.includes('j-1'))
+  assert.equal(h.sleep.state().foldStartSeq['session-a'], append.opts.surfaceOp.startSeq)
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.kind, 'shelve')
+  assert.equal(row.ok, true)
+  assert.ok(row.archived.length >= 1)
+}
+
+// shelve refuses when the session is not bound (no memory to write into)
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, minFoldTokens: 100 } })
+  h.store.bindingOf = () => ''
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, false)
+  assert.equal(result.why, 'no-agent')
+  assert.equal(h.appended.length, 0)
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })
