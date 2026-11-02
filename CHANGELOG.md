@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0-alpha.19 — 2026-11-02
+
+修完计量后暴露的下一层：`skip: no-compaction-service`——`compaction` 服务活在**agent 预设的 isolate 作用域**里，profile 级插件用 `ctx.get('compaction')` 看不见。
+
+现在按顺序尝试四路解析：
+
+1. `agent.ctx.get('compaction')`（scoped 事件给到的 agent 自带上下文）；
+2. `agentPresets.serviceFor(agent, 'compaction')`；
+3. `ctx.get('compaction')`；
+4. `ctx.root.get('compaction')`。
+
+成功时会记一条 `{"kind":"acquired","source":"agent.ctx"|"agentPresets"|"root"}`；全部失败则记 `skip.no-compaction-service` 并带上试过的路径。
+
 ## 2.1.0-alpha.18 — 2026-11-02
 
 **真正的根因**：`sleep.js` 把注入的 `measureTokens` 当成两参数函数调用，而 `index.js` 传进来的是单参数闭包。

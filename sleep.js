@@ -201,6 +201,53 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
    * attempted, or `{ attempted, kind, result }` so callers can tell "below
    * threshold" from "the service declined".
    */
+  /**
+   * The compaction service lives inside the agent preset's isolate scope, so a
+   * profile-level plugin cannot see it through `ctx.get('compaction')`. The
+   * agent object handed to us by a scoped event carries its own context, and
+   * `agentPresets.serviceFor` resolves a service for that agent — try those
+   * before concluding the service is unreachable.
+   */
+  function resolveCompaction(agent) {
+    const tried = []
+    const pick = (candidate, name) => {
+      tried.push(name)
+      try {
+        if (candidate !== undefined && candidate !== null && typeof candidate === 'object' && typeof candidate.get === 'function') {
+          const service = candidate.get('compaction')
+          if (service !== undefined && service !== null) return service
+        }
+      } catch {
+        /* not visible from this scope */
+      }
+      return undefined
+    }
+    const direct = pick(agent?.ctx, 'agent.ctx')
+    if (direct !== undefined) return { service: direct, source: 'agent.ctx', tried }
+    try {
+      const presets = ctx.get('agentPresets')
+      if (presets !== undefined && presets !== null && typeof presets.serviceFor === 'function' && agent !== undefined && agent !== null) {
+        tried.push('agentPresets.serviceFor')
+        const resolved = presets.serviceFor(agent, 'compaction')
+        if (resolved !== undefined && resolved !== null) return { service: resolved, source: 'agentPresets', tried }
+      }
+    } catch {
+      /* keep trying */
+    }
+    const scoped = pick(ctx, 'ctx')
+    if (scoped !== undefined) return { service: scoped, source: 'root', tried }
+    try {
+      const root = ctx.root ?? ctx.scope ?? null
+      if (root !== null) {
+        const fromRoot = pick(root, 'ctx.root')
+        if (fromRoot !== undefined) return { service: fromRoot, source: 'ctx.root', tried }
+      }
+    } catch {
+      /* keep trying */
+    }
+    return { service: undefined, source: tried, tried }
+  }
+
   async function maybeCompact(agent) {
     // `measureTokens` is injected as a ONE-argument function (sessionId).
     const sessionId = String(agent?.id ?? '')
@@ -220,11 +267,12 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'cooldown', tokens })
       return null
     }
-    const compaction = ctx.get('compaction')
+    const { service: compaction, source } = resolveCompaction(agent)
     if (compaction === undefined || compaction === null) {
-      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-compaction-service', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-compaction-service', tokens, tried: source })
       return null
     }
+    if (source !== 'root') record({ at: new Date().toISOString(), kind: 'acquired', sessionId, source })
     if (big && typeof compaction.compactIfNeeded !== 'function') {
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'compactIfNeeded-missing', tokens })
       return null
