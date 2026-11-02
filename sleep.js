@@ -205,43 +205,43 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     const sessionId = String(agent?.id ?? '')
     if (sessionId === '') return null
     const config = settings()
+    if (config.debug) record({ at: new Date().toISOString(), kind: 'enter-maybe', sessionId, enabled: config.enabled })
     if (!config.enabled) return null
     if (inFlight.has(sessionId)) return null
     const tokens = measureTokens(ctx, sessionId)
     const big = tokens >= config.triggerTokens
     const small = !big && tokens >= config.softTokens
     if (!big && !small) {
-      probe(sessionId, { skipped: 'below-threshold', tokens, soft: config.softTokens, trigger: config.triggerTokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'below-threshold', tokens, soft: config.softTokens, trigger: config.triggerTokens })
       return null
     }
     if (Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
-      probe(sessionId, { skipped: 'cooldown', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'cooldown', tokens })
       return null
     }
     const compaction = ctx.get('compaction')
     if (compaction === undefined || compaction === null) {
-      probe(sessionId, { skipped: 'no-compaction-service', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-compaction-service', tokens })
       return null
     }
     if (big && typeof compaction.compactIfNeeded !== 'function') {
-      probe(sessionId, { skipped: 'compactIfNeeded-missing', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'compactIfNeeded-missing', tokens })
       return null
     }
     if (small && typeof compaction.compactRegion !== 'function') {
-      probe(sessionId, { skipped: 'compactRegion-missing', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'compactRegion-missing', tokens })
       return null
     }
     const session = sessionOf(sessionId)
     if (session === null) {
-      probe(sessionId, { skipped: 'no-session', tokens })
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-session', tokens })
       return null
     }
     const span = big
       ? null
       : selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
     if (!big && span === null) {
-      probe(sessionId, {
-        skipped: 'no-span',
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-span',
         tokens,
         nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : 0,
         watermark: foldStartOf(sessionId),
@@ -456,7 +456,9 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
             nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : -1,
             derived: typeof session?.deriveMessages === 'function' ? (() => { try { return session.deriveMessages().length } catch { return -2 } })() : -1,
           })
-          await maybeCompact({ id })
+          mark({ step: 'pre-call', sessionId: id })
+          const outcome = await maybeCompact({ id })
+          mark({ step: 'post-call', sessionId: id, attempted: outcome?.attempted === true, kind: outcome?.kind ?? '' })
         } catch (error) {
           mark({ step: 'session-threw', sessionId: id, error: String(error?.message ?? error).slice(0, 300) })
         }

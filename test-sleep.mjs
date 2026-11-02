@@ -93,7 +93,7 @@ function harness(options = {}) {
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result, null)
   assert.equal(h.calls.length, 0)
-  assert.equal(fs.existsSync(logFile), false)
+  assert.equal(h.surfaceCalls.length, 0)
 }
 
 // below threshold: no call
