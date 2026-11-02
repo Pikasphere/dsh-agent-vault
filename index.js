@@ -26,6 +26,7 @@ import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
+import { createSleep } from './sleep.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall } from './recall.js'
 import { createReveal, REVEAL_TARGETS } from './reveal.js'
@@ -58,6 +59,12 @@ export function apply(ctx, config = {}) {
   })
   const handoff = createHandoff({ rootDir: store.root })
   const archives = createArchives({ rootDir: store.root })
+  const sleep = createSleep({
+    ctx,
+    store,
+    measureTokens: sessionId => measureTokens(ctx, sessionId),
+    recordError,
+  })
   const reveal = typeof config.reveal === 'function' ? config.reveal : createReveal()
   const hints = new Map()
 
@@ -65,7 +72,8 @@ export function apply(ctx, config = {}) {
     registerPrompt(ctx, store)
     registerTools(ctx, store, rooms, journals, recall)
     registerHandoff(ctx, store, journals, handoff, archives, hints)
-    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal)
+    sleep.attach()
+    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal, sleep)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -1442,6 +1450,8 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
         transcripts: args.transcripts,
         sessionsRoot: args.sessionsRoot,
         transcriptExclude: args.transcriptExclude,
+        // early compaction ("sleep") — off unless the user turns it on
+        sleep: args.sleep,
       })
       return store.state()
     default:
@@ -1449,7 +1459,7 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
   }
 }
 
-function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal) {
+function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal, sleep) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
@@ -1459,6 +1469,7 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
     ...store.state(),
     // the panel prints these next to the "open" buttons
     pluginDir: PLUGIN_DIR,
+    sleep: sleep !== undefined && sleep !== null ? sleep.state() : null,
     capabilities: { sessions: true, bound: true, archive: true, arm: true, startPrompt: true },
   })
   // `webServer` is published after plugins load in the Web composition, so this

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0-alpha.2 — 2026-11-02
+
+「提前压缩」：不再等宿主把上下文压到窗口边缘才动手，而是在**回合结束、会话空闲**的那一刻，按我们自己的阈值请宿主压一次。
+
+- 新模块 `sleep.js`：监听 `agent/status`（`idle` 时），读 `tokenMeter` 的当前总量，超过 `sleep.triggerTokens`（默认 **400k**）且过了冷却窗口（默认 10 分钟）就调公开的 `compaction.compactIfNeeded({session, options}, 'context-overflow', signal)`。**不接管实现**，不碰请求，不改写历史——只是把「该压了」说得更早。
+- 用 `context-overflow` 这个触发值，是因为它的契约写明「可以低于实现自己的阈值强制做一次平衡缩减」，这正是阈值前移需要的语义。
+- 记账：每次尝试追加一行到 `<memoryDir>/index/compaction.jsonl`（时间、会话、智能体、原因、压缩前 token、是否成功、折叠 token、摘要字符、耗时、错误）。设置页的「提前压缩（睡眠）」卡片会显示「已尝试 / 累计折叠」。
+- 设置：`sleep.enabled`（**默认关**）、`sleep.triggerTokens`、`sleep.cooldownMs`，都走 `settings.save`，面板开关即时生效（阈值在同一张卡片里改）。
+- 防重：同一会话有在飞任务时跳过；超时 120s 自动 abort。
+- 测试：新增 `test-sleep.mjs`（关闭不触发、低于阈值不触发、正常触发并记账、冷却生效、服务返回 null 仍记账、失败被吞并记账、会话/服务缺失不抛、`state()` 聚合）。
+
 ## 2.1.0-alpha.1 — 2026-11-02
 
 账本视图从「事件列表」升级成「汇总卡」：现在能回答「这个会话压过几次、成了几次、省了多少」。

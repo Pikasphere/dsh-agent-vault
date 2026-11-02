@@ -198,6 +198,18 @@ export function createStore(options = {}) {
 
   const migrated = new Set()
 
+  /** Early-compaction settings; disabled until the user opts in. */
+  function sleepSettings(raw) {
+    const value = raw !== null && typeof raw === 'object' ? raw : {}
+    const trigger = Number(value.triggerTokens)
+    const cooldown = Number(value.cooldownMs)
+    return {
+      enabled: value.enabled === true,
+      triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : 400000,
+      cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : 600000,
+    }
+  }
+
   function settings() {
     const raw = readJson(files.settings, {})
     const recallRaw = raw.recall && typeof raw.recall === 'object' ? raw.recall : {}
@@ -227,6 +239,7 @@ export function createStore(options = {}) {
       transcriptExclude: Array.isArray(raw.transcriptExclude)
         ? raw.transcriptExclude.filter(item => typeof item === 'string' && item !== '')
         : [],
+      sleep: sleepSettings(raw.sleep),
       recall,
     }
   }
@@ -444,6 +457,7 @@ export function createStore(options = {}) {
       transcripts: current.transcripts,
       sessionsRoot: current.sessionsRoot,
       transcriptExclude: current.transcriptExclude,
+      sleep: current.sleep,
       recall: current.recall,
       bindings: listBindings(),
       vaults: vaults,
@@ -532,6 +546,15 @@ export function createStore(options = {}) {
       next.transcriptExclude = [...new Set(patch.transcriptExclude.filter(item => typeof item === 'string' && item !== ''))].slice(0, 500)
     }
     if (typeof patch.sessionsRoot === 'string') next.sessionsRoot = patch.sessionsRoot.trim()
+    if (patch.sleep !== null && typeof patch.sleep === 'object') {
+      const merged = { ...next.sleep }
+      if (typeof patch.sleep.enabled === 'boolean') merged.enabled = patch.sleep.enabled
+      const trigger = Number(patch.sleep.triggerTokens)
+      if (Number.isFinite(trigger) && trigger > 0) merged.triggerTokens = Math.trunc(trigger)
+      const cooldown = Number(patch.sleep.cooldownMs)
+      if (Number.isFinite(cooldown) && cooldown >= 0) merged.cooldownMs = Math.trunc(cooldown)
+      next.sleep = merged
+    }
     if (patch.recall && typeof patch.recall === 'object') {
       const merged = { ...next.recall }
       if (patch.recall.mode === 'hybrid' || patch.recall.mode === 'lexical') merged.mode = patch.recall.mode

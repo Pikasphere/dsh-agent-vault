@@ -260,6 +260,11 @@ window.__ModuleLoader__.load({
         recallSrcKnowledge: '知识库',
         transcripts: '对话入索引',
         transcriptsHint: '把本智能体交接过的会话（以及绑定到它的会话）里的用户与助手文本编进索引，供「回忆」检索；工具输出与推理过程不入库，密钥会被打码，每个会话最多 12000 字。改动需重启宿主才彻底生效。',
+        sleepTitle: '提前压缩（睡眠）',
+        sleepHint: '上下文超过阈值时，在回合结束、会话空闲的那一刻主动请宿主压一次，而不是等它接近窗口才压。压缩质量由宿主决定；只加一条记账，不改写任何压缩逻辑。',
+        sleepThreshold: '触发阈值（tokens）',
+        sleepThresholdHint: '按整个上下文的 token 数计。10 万窗口的模型建议 4 万；1M 窗口按需调高。',
+        sleepStats: '已尝试 / 累计折叠',
         recallSrcSession: '对话',
         recallSessions: '对话来源',
         recallSessionsHint: '以下是本智能体有权读取的会话。取消勾选后，该会话不再进入索引（检索不到），但「回到对话」仍可用。',
@@ -530,6 +535,11 @@ window.__ModuleLoader__.load({
         recallSrcKnowledge: 'knowledge',
         transcripts: 'Index conversations',
         transcriptsHint: 'Index the user and assistant text of sessions this agent handed off or is bound to, so recall can search them. Tool results and reasoning stay out, secrets are masked, and each session is capped at 12000 characters. Changes need a host restart to fully apply.',
+        sleepTitle: 'Compress early (sleep)',
+        sleepHint: 'When the context crosses the threshold, ask the host for one compaction at the end of a turn while the session is idle, instead of waiting until it is close to the window. Summary quality stays with the host; this only adds an accounting line.',
+        sleepThreshold: 'Trigger (tokens)',
+        sleepThresholdHint: 'Counted over the whole context. Roughly 40k for a 100k window; raise it for a 1M window.',
+        sleepStats: 'attempts / folded',
         recallSrcSession: 'conversation',
         recallSessions: 'Conversations',
         recallSessionsHint: 'Sessions this agent may read. Uncheck one to keep it out of the index (it will not be searchable), while "Go to conversation" still works.',
@@ -908,6 +918,8 @@ window.__ModuleLoader__.load({
       const [semanticData, setSemanticData] = useState(null)
       const [semanticBusy, setSemanticBusy] = useState(false)
       const [indexVersion, setIndexVersion] = useState(0)
+      // Edited threshold draft; empty means "show the stored value".
+      const [sleepDraft, setSleepDraft] = useState('')
       // null until the user touches a field: the card shows the persisted values
       // straight from memory.index, so a stale panel can never "save" old numbers.
       const [tuningDraft, setTuningDraft] = useState(null)
@@ -1414,6 +1426,10 @@ window.__ModuleLoader__.load({
       const saveTranscripts = async checked => {
         await call('settings.save', { transcripts: checked })
         setIndexVersion(current => current + 1)
+      }
+
+      const saveSleep = async patch => {
+        await call('settings.save', { sleep: patch })
       }
 
       const unbindBoundSession = async sessionId => {
@@ -3013,6 +3029,46 @@ window.__ModuleLoader__.load({
               disabled: busy !== '',
               onChange: checked => void saveTranscripts(checked),
             }),
+          ),
+          h(
+            'div',
+            { className: 'am-card' },
+            h(Switch, {
+              checked: data.sleep?.enabled === true,
+              label: t('sleepTitle'),
+              hint: t('sleepHint'),
+              disabled: busy !== '',
+              onChange: checked => void saveSleep({ enabled: checked }),
+            }),
+            h('div', { style: { height: 12 } }),
+            h(
+              Field,
+              { label: t('sleepThreshold') },
+              h('input', {
+                className: 'am-input',
+                type: 'number',
+                min: '1000',
+                step: '10000',
+                value: sleepDraft === '' ? String(data.sleep?.triggerTokens ?? 400000) : sleepDraft,
+                disabled: busy !== '',
+                onChange: event => setSleepDraft(event.target.value),
+                onBlur: () => {
+                  if (sleepDraft !== '' && Number(sleepDraft) > 0) void saveSleep({ triggerTokens: Number(sleepDraft) })
+                  setSleepDraft('')
+                },
+                onKeyDown: event => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                },
+              }),
+            ),
+            h('p', { className: 'am-note-dim' }, t('sleepThresholdHint')),
+            data.sleep
+              ? h(
+                  'p',
+                  { className: 'am-note-dim' },
+                  `${t('sleepStats')}: ${Number(data.sleep?.attempts ?? 0)} / ${Number(data.sleep?.savedTokens ?? 0)}`,
+                )
+              : null,
           ),
           h(
             'div',
