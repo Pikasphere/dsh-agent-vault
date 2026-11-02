@@ -53,6 +53,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     const minFold = Number(raw.minFoldTokens)
     return {
       enabled: raw.enabled === true,
+      debug: raw.debug === true,
       triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : SLEEP_DEFAULTS.triggerTokens,
       softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : SLEEP_DEFAULTS.softTokens,
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : SLEEP_DEFAULTS.chunkTokens,
@@ -107,6 +108,17 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     } catch (error) {
       recordError(store, 'sleep/watermark', error)
     }
+  }
+
+  /** One line per idle when `sleep.debug` is on: where the decision stopped. */
+  function probe(sessionId, detail) {
+    if (!settings().debug) return
+    record({
+      at: new Date().toISOString(),
+      sessionId,
+      kind: 'probe',
+      ...detail,
+    })
   }
 
   function sessionOf(sessionId) {
@@ -197,18 +209,44 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     const tokens = measureTokens(ctx, sessionId)
     const big = tokens >= config.triggerTokens
     const small = !big && tokens >= config.softTokens
-    if (!big && !small) return null
-    if (Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) return null
+    if (!big && !small) {
+      probe(sessionId, { skipped: 'below-threshold', tokens, soft: config.softTokens, trigger: config.triggerTokens })
+      return null
+    }
+    if (Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
+      probe(sessionId, { skipped: 'cooldown', tokens })
+      return null
+    }
     const compaction = ctx.get('compaction')
-    if (compaction === undefined || compaction === null) return null
-    if (big && typeof compaction.compactIfNeeded !== 'function') return null
-    if (small && typeof compaction.compactRegion !== 'function') return null
+    if (compaction === undefined || compaction === null) {
+      probe(sessionId, { skipped: 'no-compaction-service', tokens })
+      return null
+    }
+    if (big && typeof compaction.compactIfNeeded !== 'function') {
+      probe(sessionId, { skipped: 'compactIfNeeded-missing', tokens })
+      return null
+    }
+    if (small && typeof compaction.compactRegion !== 'function') {
+      probe(sessionId, { skipped: 'compactRegion-missing', tokens })
+      return null
+    }
     const session = sessionOf(sessionId)
-    if (session === null) return null
+    if (session === null) {
+      probe(sessionId, { skipped: 'no-session', tokens })
+      return null
+    }
     const span = big
       ? null
       : selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
-    if (!big && span === null) return null
+    if (!big && span === null) {
+      probe(sessionId, {
+        skipped: 'no-span',
+        tokens,
+        nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : 0,
+        watermark: foldStartOf(sessionId),
+      })
+      return null
+    }
 
     inFlight.add(sessionId)
     const startedAt = Date.now()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0-alpha.6 — 2026-11-02
+
+给小折叠加诊断：`sleep.debug` 打开后，每次空闲都往 `index/compaction.jsonl` 记一条 `kind: "probe"`，写明决策停在哪一步（`below-threshold` / `cooldown` / `no-compaction-service` / `compactIfNeeded-missing` / `compactRegion-missing` / `no-session` / `no-span`），并带上量到的 token 数、surface 节点数、当前水印。
+
+理由：开启 toggle 后没有任何记账，仅凭外部观察分不清是「上下文没到阈值」「拿不到 compaction 服务」还是「区间选不出来」——这三个原因需要完全不同的修法。
+
 ## 2.1.0-alpha.5 — 2026-11-02
 
 按 billion-context 的结论补两处：折叠水印与最小折叠量。
