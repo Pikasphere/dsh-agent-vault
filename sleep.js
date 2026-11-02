@@ -36,6 +36,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
   const logFile = path.join(store.root, 'index', 'compaction.jsonl')
   const inFlight = new Set()
   const lastAttempt = new Map()
+  const lastProbe = new Map()
 
   function settings() {
     let raw = {}
@@ -304,6 +305,31 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     // schedules a check just after the turn settles. Both are cheap and
     // idempotent: inFlight + cooldown absorb the duplicate.
     const disposers = []
+    // `agent/pre-step` is the hook we know works in this profile (handoff's
+    // archived-session gate runs there), so it doubles as a liveness probe: if
+    // neither scoped event arrives, this one still tells us the plugin is
+    // receiving anything at all.
+    disposers.push(
+      ctx.effect(
+        () =>
+          ctx.on('agent/pre-step', (payload, next) => {
+            const sessionId = String(payload?.agent?.id ?? '')
+            if (sessionId !== '') {
+              const seenAt = lastProbe.get(sessionId) ?? 0
+              if (Date.now() - seenAt > 60000) {
+                lastProbe.set(sessionId, Date.now())
+                probe(sessionId, { seen: 'pre-step', tokens: measureTokens(ctx, sessionId) })
+              }
+              const timer = setTimeout(() => {
+                void maybeCompact({ id: sessionId })
+              }, 2000)
+              if (typeof timer.unref === 'function') timer.unref()
+            }
+            return next()
+          }),
+        'agent-memory: sleep pre-step',
+      ),
+    )
     disposers.push(
       ctx.effect(
         () =>

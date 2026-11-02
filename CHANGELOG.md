@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0-alpha.8 — 2026-11-02
+
+睡眠机制加「活性探针」与第三个触发口。前两版挂的 `agent/status`、`session/event` 在真实 profile 里一条 probe 都没到，说明根作用域收不到这两个事件；而 `agent/pre-step` 是确定能收到的（handoff 的归档闸门就跑在上面）。
+
+- 新增 `agent/pre-step` 监听：每分钟最多写一条 `{seen: "pre-step", tokens}` probe，并在 2 秒后调一次检查（那时通常已 idle；若还在跑，`compactRegion` 会自己拒绝，只会计账）。
+- 新增启动标记 `index/boot.jsonl`：`apply()` 入口写一行 `{at, version, root}`，用来一次区分「代码没加载到」「记忆根不一致」「钩子没收到事件」三种情况。
+
 ## 2.1.0-alpha.7 — 2026-11-02
 
 睡眠机制加第二个触发口：`session/event` 的 `turn/end`。

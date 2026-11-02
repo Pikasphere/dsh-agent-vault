@@ -47,6 +47,19 @@ export function apply(ctx, config = {}) {
     resolveTitle: sessionId => sessionTitleOf(ctx, sessionId),
   })
 
+  // Boot marker: proves which code path and which memory root this process
+  // actually loaded. Cheap, one line per start.
+  try {
+    fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
+    fs.appendFileSync(
+      path.join(store.root, 'index', 'boot.jsonl'),
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.8', root: store.root })}
+`,
+    )
+  } catch {
+    /* best effort */
+  }
+
   const rooms = createRooms({ rootDir: store.root })
   const journals = createJournals({ rootDir: store.root })
   const recallSettings = store.settings()
