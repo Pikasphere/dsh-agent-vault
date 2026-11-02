@@ -401,6 +401,47 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
               return null
             }
           })()
+          if (tokens === 0 && session !== null) {
+            // Why is a 674-message session priced at zero? Walk the same steps
+            // and record what each one actually answered.
+            let meterOk = false
+            let meterValue = null
+            let meterError = ''
+            try {
+              const meter = ctx.get('tokenMeter')
+              meterOk = meter !== undefined && meter !== null && typeof meter.measure === 'function'
+              if (meterOk) {
+                const measuredValue = meter.measure(session)
+                meterValue = measuredValue?.totalTokens ?? null
+              }
+            } catch (error) {
+              meterError = String(error?.message ?? error).slice(0, 200)
+            }
+            let chars = 0
+            let jsonError = ''
+            try {
+              const messages = typeof session.deriveMessages === 'function' ? session.deriveMessages() : []
+              for (const message of messages) {
+                try {
+                  chars += JSON.stringify(message).length
+                } catch (error) {
+                  jsonError = jsonError === '' ? String(error?.message ?? error).slice(0, 200) : jsonError
+                }
+              }
+            } catch (error) {
+              jsonError = String(error?.message ?? error).slice(0, 200)
+            }
+            mark({
+              step: 'measure-debug',
+              sessionId: id,
+              meterOk,
+              meterValue,
+              meterError,
+              chars,
+              jsonError,
+              estimate: Math.round(chars / 3),
+            })
+          }
           mark({
             step: 'measured',
             sessionId: id,
