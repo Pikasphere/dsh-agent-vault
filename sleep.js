@@ -362,6 +362,10 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     // `list()` hands us every live session, so the check does not depend on
     // receiving an event at all.
     const sweep = async () => {
+      // Unconditional marker: everything below can be gated by settings, and a
+      // gated probe made "the sweep never ran" indistinguishable from "it ran
+      // and said nothing".
+      record({ at: new Date().toISOString(), kind: 'tick-enter' })
       // ctx.get() throws when the service is not visible from this context, so
       // the whole body is guarded: an unhandled rejection here would silently
       // kill the sweep and look exactly like "the timer never fired".
@@ -388,6 +392,8 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
         }
       }
     }
+    const selfTest = setTimeout(() => record({ at: new Date().toISOString(), kind: 'timer-fired' }), 6000)
+    if (typeof selfTest.unref === 'function') selfTest.unref()
     const first = setTimeout(() => void sweep(), 5000)
     if (typeof first.unref === 'function') first.unref()
     const timer = setInterval(() => void sweep(), 60000)
@@ -395,6 +401,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     record({ at: new Date().toISOString(), kind: 'attached', hooks: disposers.length })
 
     return () => {
+      clearTimeout(selfTest)
       clearTimeout(first)
       clearInterval(timer)
       for (const dispose of disposers) {
