@@ -219,17 +219,31 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // material and stays foldable even when the budget reaches further back.
     let startSeq = start
     let startAt = startIndex
-    if (watermark !== null && startSeq <= watermark) {
-      let index = startIndex
-      while (index <= endIndex && nodes[index] <= watermark) index += 1
-      if (index > endIndex) return null
-      startAt = index
-      startSeq = nodes[index]
+    if (watermark !== null) {
+      const markAt = nodes.indexOf(watermark)
+      if (markAt >= 0) {
+        if (startAt <= markAt) startAt = markAt + 1
+      } else {
+        while (startAt <= endIndex && nodes[startAt] <= watermark) startAt += 1
+      }
+      if (startAt > endIndex) return null
     }
-    let spanStart = startSeq
-    let spanStartAt = startAt
     if (cost < Math.max(2000, Math.trunc(minFoldTokens) * 3)) return null
-    return { start: spanStart, end: nodes[endIndex], nodes: endIndex - spanStartAt + 1, chars: cost }
+    // Surface POSITION is the unit the host uses: after a replacement the visible
+    // seqs stop being monotonic, so a span is an index slice and its
+    // sourceEventSeqs are exactly those nodes in surface order. Filtering by
+    // numeric seq (the first implementation) dropped nodes the host still
+    // considered "inside" the span and got the replacement refused.
+    const startIndexFinal = startAt
+    const seqs = nodes.slice(startIndexFinal, endIndex + 1)
+    if (seqs.length < 2) return null
+    return {
+      start: seqs[0],
+      end: seqs[seqs.length - 1],
+      nodes: seqs.length,
+      chars: cost,
+      seqs,
+    }
   }
 
   /**
@@ -355,7 +369,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const span = selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
-    const seqs = nodesBetween(session, span.start, span.end)
+    const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
     let written = null
     try {
       written = shelveMessages(session, span, agentId, sessionId, seqs)
@@ -581,10 +595,18 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // `list()` hands us every live session, so the check does not depend on
     // receiving an event at all.
     const sweep = async () => {
-      // Every step below writes unconditionally: the gated `probe()` helper
-      // hides "settings threw" behind "debug is off", which is exactly the
-      // ambiguity this sweep is supposed to resolve.
-      const mark = detail => record({ at: new Date().toISOString(), kind: 'tick', ...detail })
+      // Diagnostics are verbose on purpose, so they belong behind the debug
+      // switch now that the pipeline works; real outcomes (`shelve`, `skip`)
+      // are recorded unconditionally below.
+      let verbose = false
+      try {
+        verbose = settings().debug
+      } catch {
+        verbose = false
+      }
+      const mark = detail => {
+        if (verbose) record({ at: new Date().toISOString(), kind: 'tick', ...detail })
+      }
       mark({ step: 'enter' })
       let sessions
       try {

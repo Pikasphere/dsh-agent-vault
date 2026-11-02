@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0-alpha.26 — 2026-11-02
+
+修第二次折叠被拒的根因：**表面顺序不等于 seq 顺序**。
+
+第一次替换之后，surface 里出现了一个 seq 很大的桩节点，可见 seq 从此非单调。契约原话是「start/end 按表面位置取，不是数值 seq 顺序」。第一版用 `seq >= start && seq <= end` 过滤节点，于是漏掉了宿主认为「在区间内」的节点，被拒：
+
+```
+surface replace: sourceEventSeqs must include every shadowed surface node;
+missing 16582, 16584, 16588, 16590
+```
+
+现在区间一律按**索引切片**：`nodes.slice(startIndex, endIndex + 1)`，`sourceEventSeqs` 就是这片节点本身（表面序）。水印比较也改成按索引定位。
+
 ## 2.1.0-alpha.24 — 2026-11-02
 
 水电后第一个真实问题：**折叠水印把自己的路堵死了**。
