@@ -12,6 +12,7 @@ const logFile = path.join(root, 'index', 'compaction.jsonl')
 
 function harness(options = {}) {
   fs.rmSync(logFile, { force: true })
+  fs.rmSync(path.join(root, 'index', 'sleep.json'), { force: true })
   const settings = {
     enabled: true,
     triggerTokens: 1000,
@@ -184,7 +185,7 @@ function harness(options = {}) {
 
 // small sweep: between soft and hard thresholds, fold a tail span instead
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0 } })
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.kind, 'small')
@@ -212,7 +213,7 @@ function harness(options = {}) {
 
 // a refused region is accounted, not thrown
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000 }, regionThrows: true })
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, minFoldTokens: 100 }, regionThrows: true })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.error instanceof Error, true)
@@ -221,10 +222,32 @@ function harness(options = {}) {
   assert.equal(row.kind, 'small')
 }
 
+// a slice below minFoldTokens waits for the next idle
+{
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100000 } })
+  assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
+  assert.equal(h.surfaceCalls.length, 0)
+}
+
+// the fold watermark moves forward and blocks rewriting the same prefix
+{
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  assert.equal((await h.sleep.maybeCompact({ id: 'session-a' }))?.attempted, true)
+  const first = h.surfaceCalls[0]
+  const mark = h.sleep.state().foldStartSeq['session-a']
+  assert.equal(mark, first.start, 'watermark records where the fold started')
+  const second = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(second, null, 'the same tail is not folded twice')
+  assert.equal(h.surfaceCalls.length, 1)
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.kind, 'small')
+  assert.ok(row.span.start >= first.start)
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

@@ -22,6 +22,9 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // Target size of one tail slice, and how much recent work never to touch.
   chunkTokens: 20000,
   keepRecent: 8,
+  // Below this a fold costs more (one summary call + a cache re-pay) than it
+  // saves, so small slices wait for the next idle.
+  minFoldTokens: 5000,
   cooldownMs: 10 * 60 * 1000,
 })
 
@@ -47,12 +50,14 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     const soft = Number(raw.softTokens)
     const chunk = Number(raw.chunkTokens)
     const keep = Number(raw.keepRecent)
+    const minFold = Number(raw.minFoldTokens)
     return {
       enabled: raw.enabled === true,
       triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : SLEEP_DEFAULTS.triggerTokens,
       softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : SLEEP_DEFAULTS.softTokens,
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : SLEEP_DEFAULTS.chunkTokens,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : SLEEP_DEFAULTS.keepRecent,
+      minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : SLEEP_DEFAULTS.cooldownMs,
     }
   }
@@ -65,6 +70,42 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     } catch (error) {
       recordError(store, 'sleep/record', error)
       return false
+    }
+  }
+
+  /**
+   * Where the last fold started, per session. bili sweeps orphans only at or
+   * after this mark ("cache-neutrally") because rewriting anything before it
+   * re-bills the still-cached prefix; we use the same rule to pick slices.
+   */
+  function watermarkFile() {
+    return path.join(store.root, 'index', 'sleep.json')
+  }
+
+  function watermarks() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(watermarkFile(), 'utf8'))
+      return parsed !== null && typeof parsed === 'object' && typeof parsed.foldStartSeq === 'object' ? parsed.foldStartSeq : {}
+    } catch {
+      return {}
+    }
+  }
+
+  function foldStartOf(sessionId) {
+    const value = watermarks()[sessionId]
+    return Number.isFinite(value) ? value : null
+  }
+
+  function setFoldStart(sessionId, seq) {
+    if (!Number.isFinite(seq)) return
+    try {
+      const table = { ...watermarks(), [sessionId]: seq }
+      fs.mkdirSync(path.dirname(watermarkFile()), { recursive: true })
+      const tmp = `${watermarkFile()}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, foldStartSeq: table }, null, 2))
+      fs.renameSync(tmp, watermarkFile())
+    } catch (error) {
+      recordError(store, 'sleep/watermark', error)
     }
   }
 
@@ -117,7 +158,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
    * folding the oldest span (what the host does on pressure) re-bills almost
    * the whole conversation.
    */
-  function selectSpan(session, chunkTokens, keepRecent) {
+  function selectSpan(session, chunkTokens, keepRecent, minFoldTokens, watermark) {
     const nodes = Array.isArray(session?.surface?.nodes) ? session.surface.nodes : []
     if (nodes.length <= keepRecent + 2) return null
     const budgetChars = Math.max(2000, Math.trunc(chunkTokens) * 3)
@@ -133,7 +174,12 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     while (startIndex <= endIndex && nodeType(session, nodes[startIndex]) === 'tool/result') startIndex += 1
     while (endIndex > startIndex && nodeType(session, nodes[endIndex]) === 'tool/call') endIndex -= 1
     if (endIndex - startIndex < 1) return null
-    return { start: nodes[startIndex], end: nodes[endIndex], nodes: endIndex - startIndex + 1 }
+    const start = nodes[startIndex]
+    // Never rewrite at or before the last fold: that prefix is still cached and
+    // replacing it would re-bill everything after it for no gain.
+    if (watermark !== null && start <= watermark) return null
+    if (cost < Math.max(2000, Math.trunc(minFoldTokens) * 3)) return null
+    return { start, end: nodes[endIndex], nodes: endIndex - startIndex + 1, chars: cost }
   }
 
   /**
@@ -159,7 +205,9 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     if (small && typeof compaction.compactRegion !== 'function') return null
     const session = sessionOf(sessionId)
     if (session === null) return null
-    const span = big ? null : selectSpan(session, config.chunkTokens, config.keepRecent)
+    const span = big
+      ? null
+      : selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
     if (!big && span === null) return null
 
     inFlight.add(sessionId)
@@ -181,6 +229,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
         ? await compaction.compactIfNeeded(context, SLEEP_TRIGGER, controller.signal)
         : await compaction.compactRegion(span.start, span.end, context, controller.signal)
       const summary = Array.isArray(result?.summary) ? result.summary : []
+      if (!big && span !== null) setFoldStart(sessionId, Number.isFinite(result?.startSeq) ? result.startSeq : span.start)
       record({
         ...base,
         ok: true,
@@ -243,6 +292,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     return {
       ...settings(),
       logFile,
+      foldStartSeq: watermarks(),
       attempts: rows.length,
       last: rows.length === 0 ? null : rows[rows.length - 1],
       savedTokens: rows.reduce((sum, row) => sum + (Number(row.shadowedTokenCount) || 0), 0),

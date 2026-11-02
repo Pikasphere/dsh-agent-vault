@@ -201,6 +201,10 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 ### 小压缩（尾部折叠，2.1.0-alpha.4）
 
+折叠点会一直往后推：每次折叠的起点写进 `index/sleep.json`，下一次不允许在水印或之前再折（那会重写仍在缓存里的前缀）；区间不到 `minFoldTokens`（默认 5000）就攒着。这两条都是从 billion-context 的 `pendingOrphanSweepMinRef` 与 `minCompressRange` 学来的。
+
+
+
 超过软阈值（默认 300k）时，先不等宿主的平衡缩减，自己挑**最近已消费**的一段（目标 20k tokens、避开最近 8 条、端点保持工具配对）交给 `compaction.compactRegion` 折成摘要。
 
 为什么专挑尾部：KV 缓存是前缀链，在位置 P 替换内容会让 P 之后全部失效。折最老的一段等于重付整段历史；折尾部只重付尾巴。宿主的大压缩走的是前者，所以它贵——小折叠的价值就是尽量晚地触发它。
