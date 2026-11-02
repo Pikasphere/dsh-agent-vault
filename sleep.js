@@ -362,33 +362,42 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     // `list()` hands us every live session, so the check does not depend on
     // receiving an event at all.
     const sweep = async () => {
-      // Unconditional marker: everything below can be gated by settings, and a
-      // gated probe made "the sweep never ran" indistinguishable from "it ran
-      // and said nothing".
-      record({ at: new Date().toISOString(), kind: 'tick-enter' })
-      // ctx.get() throws when the service is not visible from this context, so
-      // the whole body is guarded: an unhandled rejection here would silently
-      // kill the sweep and look exactly like "the timer never fired".
-      let live = []
+      // Every step below writes unconditionally: the gated `probe()` helper
+      // hides "settings threw" behind "debug is off", which is exactly the
+      // ambiguity this sweep is supposed to resolve.
+      const mark = detail => record({ at: new Date().toISOString(), kind: 'tick', ...detail })
+      mark({ step: 'enter' })
+      let sessions
       try {
-        const sessions = ctx.get('sessions')
-        if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') {
-          probe('', { seen: 'tick', skipped: 'no-sessions-service' })
-          return
-        }
-        live = sessions.list()
+        sessions = ctx.get('sessions')
       } catch (error) {
-        probe('', { seen: 'tick', skipped: 'sessions-error', error: String(error?.message ?? error).slice(0, 300) })
+        mark({ step: 'get-threw', error: String(error?.message ?? error).slice(0, 300) })
         return
       }
-      probe('', { seen: 'tick', sessions: live.length })
+      mark({ step: 'got', hasSessions: sessions !== undefined && sessions !== null, canList: typeof sessions?.list === 'function' })
+      if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') return
+      let live = []
+      try {
+        live = sessions.list()
+      } catch (error) {
+        mark({ step: 'list-threw', error: String(error?.message ?? error).slice(0, 300) })
+        return
+      }
+      mark({ step: 'listed', sessions: live.length })
       for (const session of live) {
         const id = String(session?.id ?? '')
         if (id === '') continue
         try {
+          const config = settings()
+          if (!config.enabled) {
+            mark({ step: 'disabled', sessionId: id, tokens: measureTokens(ctx, id) })
+            continue
+          }
+          const tokens = measureTokens(ctx, id)
+          mark({ step: 'measured', sessionId: id, tokens, soft: config.softTokens, trigger: config.triggerTokens })
           await maybeCompact({ id })
-        } catch {
-          // one bad session must not stop the sweep
+        } catch (error) {
+          mark({ step: 'session-threw', sessionId: id, error: String(error?.message ?? error).slice(0, 300) })
         }
       }
     }

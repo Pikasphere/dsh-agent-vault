@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0-alpha.12 — 2026-11-02
+
+sweep 每一步都无条件记账（`step: enter/got/listed/disabled/measured/session-threw/...`）。上一版的 tick 探针仍走 `probe()`，而 `probe()` 被 `sleep.debug` 门控——如果 `store.settings()` 在定时器上下文里抛异常，`debug` 会被静默当成 false，于是「跑了但什么都没写」和「没跑」长得一模一样。
+
 ## 2.1.0-alpha.11 — 2026-11-02
 
 诊断加固：`attached` 之后仍然没有 tick，而 tick 的唯一探针被 `sleep.debug` 门控——分不清「没跑」和「跑了不说话」。
