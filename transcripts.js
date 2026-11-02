@@ -12,6 +12,7 @@ import { decompressFrames } from './zstd-frames.mjs'
 export const SESSION_FILE = 'session.v4.jsonl.zstd'
 export const MAX_CHARS = 12000
 const HEAD_CHARS = 2000
+const CHUNK_CHARS = 6000
 
 const SECRETS = [
   [/\bsk-[A-Za-z0-9]{16,}\b/g, '[redacted-key]'],
@@ -217,6 +218,25 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
     return ''
   }
 
+  /** Full message list, cached on the same stamp the trimmed entry uses. */
+  const allCache = new Map()
+  function allOf(sessionId) {
+    const file = locate(sessionId)
+    if (file === '') return []
+    let stamp = ''
+    try {
+      const stat = fs.statSync(file)
+      stamp = `${stat.size}:${stat.mtimeMs}`
+    } catch {
+      return []
+    }
+    const cached = allCache.get(sessionId)
+    if (cached !== undefined && cached.stamp === stamp) return cached.messages
+    const messages = all(sessionId)
+    allCache.set(sessionId, { stamp, messages })
+    return messages
+  }
+
   function entryOf(sessionId) {
     const file = locate(sessionId)
     if (file === '') return null
@@ -262,6 +282,66 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
     return out.sort((a, b) => String(b.at).localeCompare(String(a.at)))
   }
 
+  /**
+   * One session becomes several entries, one per ~6k characters of messages.
+   * A single trimmed entry per session made the middle of a long conversation
+   * invisible to recall (this session: 203k chars, only 5% indexed), and the
+   * whole point of keeping the log is being able to search it later.
+   */
+  function chunkEntries(entry, messages) {
+    if (messages.length === 0) {
+      return [{
+        id: entry.sessionId,
+        src: 'session',
+        at: entry.at,
+        title: entry.title,
+        tags: [],
+        text: entry.text,
+        sessionId: entry.sessionId,
+        cwd: entry.cwd,
+        round: 0,
+        span: messageSpan(entry.sessionId),
+      }]
+    }
+    const chunks = []
+    let bucket = []
+    let chars = 0
+    let round = 0
+    const flush = () => {
+      if (bucket.length === 0) return
+      const first = bucket[0]
+      const last = bucket[bucket.length - 1]
+      chunks.push({
+        id: `${entry.sessionId}#${first.seq}`,
+        src: 'session',
+        at: last.at,
+        title: entry.title,
+        tags: [],
+        text: bucket.map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.text}`).join(String.fromCharCode(10)),
+        sessionId: entry.sessionId,
+        cwd: entry.cwd,
+        round: first.round,
+        span: [first.seq, last.seq],
+      })
+      bucket = []
+      chars = 0
+    }
+    for (const message of messages) {
+      if (message.role === 'user') round += 1
+      bucket.push({ seq: message.seq, role: message.role, at: message.at, text: message.text, round })
+      chars += message.text.length + 6
+      if (chars >= CHUNK_CHARS) flush()
+    }
+    flush()
+    return chunks
+  }
+
+  function messageSpan(sessionId) {
+    const messages = allOf(sessionId)
+    if (messages.length === 0) return []
+    return [messages[0].seq, messages[messages.length - 1].seq]
+  }
+
   /** Recall entries for the sessions this agent owns (`''` = every agent, for reindex). */
   function entries(agentId = '') {
     const skip = excluded()
@@ -271,29 +351,30 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
       if (skip.has(sessionId)) continue
       const entry = entryOf(sessionId)
       if (entry === null) continue
-      out.push({
-        id: entry.sessionId,
-        src: 'session',
-        at: entry.at,
-        title: entry.title,
-        tags: [],
-        text: entry.text,
-        sessionId: entry.sessionId,
-        cwd: entry.cwd,
-      })
+      out.push(...chunkEntries(entry, allOf(sessionId)))
     }
     return out
   }
 
-  /** The indexed messages of one session, for pointing a hit at a single message. */
+  /** Every message of one session, so a chunk hit can point at any of them. */
   function messagesOf(sessionId) {
-    const entry = entryOf(sessionId)
-    return entry === null ? [] : entry.messages
+    return allOf(sessionId)
   }
 
+  /** One session as a single trimmed entry (panel detail, not recall). */
   function get(sessionId) {
-    for (const entry of entries()) if (entry.sessionId === sessionId) return entry
-    return null
+    const entry = entryOf(sessionId)
+    if (entry === null) return null
+    return {
+      id: entry.sessionId,
+      src: 'session',
+      at: entry.at,
+      title: entry.title,
+      tags: [],
+      text: entry.text,
+      sessionId: entry.sessionId,
+      cwd: entry.cwd,
+    }
   }
 
   /**
