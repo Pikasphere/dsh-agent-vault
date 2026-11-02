@@ -393,7 +393,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
             mark({ step: 'disabled', sessionId: id, tokens: measureTokens(ctx, id) })
             continue
           }
-          const tokens = measureTokens(ctx, id)
+          let tokens = measureTokens(ctx, id)
           const session = (() => {
             try {
               return ctx.get('sessions')?.get?.(id) ?? null
@@ -430,6 +430,10 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
               }
             } catch (error) {
               jsonError = String(error?.message ?? error).slice(0, 200)
+            }
+            if (tokens === 0 && (meterValue > 0 || chars > 0)) {
+              tokens = meterValue > 0 ? Number(meterValue) : Math.round(chars / 3)
+              mark({ step: 'measure-recovered', sessionId: id, tokens })
             }
             mark({
               step: 'measure-debug',

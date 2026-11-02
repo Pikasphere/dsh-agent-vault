@@ -53,7 +53,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.15', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.16', root: store.root })}
 `,
     )
   } catch {
@@ -587,12 +587,25 @@ function registerJournalTools(register, store, journals) {
 
 // ── handoff: pressure → checkpoint ──────────────────────────────────────────
 
+function measureTrace(step, extra) {
+  try {
+    const target = path.join(process.env.TEMP ?? process.env.TMP ?? '.', 'vault-measure.log')
+    fs.appendFileSync(target, `${new Date().toISOString()} ${step} ${JSON.stringify(extra)}
+`)
+  } catch {
+    /* tracing must never break the caller */
+  }
+}
+
 function measureTokens(ctx, sessionId) {
   try {
     const sessions = ctx.get('sessions')
     if (sessions === undefined || sessions === null || typeof sessions.get !== 'function') return 0
     const session = sessions.get(sessionId)
-    if (session === undefined || session === null) return 0
+    if (session === undefined || session === null) {
+      measureTrace('no-session', { sessionId })
+      return 0
+    }
     // The meter is optional in a plugin context (it may simply not be visible
     // here), and it can also legitimately answer 0 before the first request.
     // Falling back to pricing the model-visible messages keeps every caller
@@ -603,6 +616,7 @@ function measureTokens(ctx, sessionId) {
       if (meter !== undefined && meter !== null && typeof meter.measure === 'function') {
         const measurement = meter.measure(session)
         const measured = Number(measurement?.totalTokens) || 0
+        measureTrace('meter', { sessionId, measured, raw: typeof measurement?.totalTokens })
         if (measured > 0) return measured
       }
     } catch {
@@ -642,8 +656,10 @@ function measureTokens(ctx, sessionId) {
         /* skip */
       }
     }
+    measureTrace('estimate', { sessionId, chars, tokens: Math.round(chars / 3) })
     return Math.round(chars / 3)
-  } catch {
+  } catch (error) {
+    measureTrace('threw', { sessionId, error: String(error?.message ?? error).slice(0, 300) })
     return 0
   }
 }
