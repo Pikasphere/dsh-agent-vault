@@ -203,9 +203,15 @@ export function createStore(options = {}) {
     const value = raw !== null && typeof raw === 'object' ? raw : {}
     const trigger = Number(value.triggerTokens)
     const cooldown = Number(value.cooldownMs)
+    const soft = Number(value.softTokens)
+    const chunk = Number(value.chunkTokens)
+    const keep = Number(value.keepRecent)
     return {
       enabled: value.enabled === true,
       triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : 400000,
+      softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : 300000,
+      chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : 20000,
+      keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : 8,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : 600000,
     }
   }
@@ -551,6 +557,12 @@ export function createStore(options = {}) {
       if (typeof patch.sleep.enabled === 'boolean') merged.enabled = patch.sleep.enabled
       const trigger = Number(patch.sleep.triggerTokens)
       if (Number.isFinite(trigger) && trigger > 0) merged.triggerTokens = Math.trunc(trigger)
+      const soft = Number(patch.sleep.softTokens)
+      if (Number.isFinite(soft) && soft > 0) merged.softTokens = Math.trunc(soft)
+      const chunk = Number(patch.sleep.chunkTokens)
+      if (Number.isFinite(chunk) && chunk >= 2000) merged.chunkTokens = Math.trunc(chunk)
+      const keep = Number(patch.sleep.keepRecent)
+      if (Number.isFinite(keep) && keep >= 2) merged.keepRecent = Math.trunc(keep)
       const cooldown = Number(patch.sleep.cooldownMs)
       if (Number.isFinite(cooldown) && cooldown >= 0) merged.cooldownMs = Math.trunc(cooldown)
       next.sleep = merged

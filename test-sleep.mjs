@@ -19,10 +19,29 @@ function harness(options = {}) {
     ...(options.settings ?? {}),
   }
   const calls = []
-  const session = { requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) }
+  const surfaceCalls = []
+  const nodes = []
+  const events = new Map()
+  const totalNodes = options.nodes ?? 40
+  for (let index = 1; index <= totalNodes; index += 1) {
+    const seq = index
+    nodes.push(seq)
+    const isToolResult = index % 5 === 0
+    events.set(seq, { type: isToolResult ? 'tool/result' : 'user/message', data: { text: 'x'.repeat(200) } })
+  }
+  const session = {
+    surface: { nodes },
+    eventAt: seq => events.get(seq),
+    requestHeader: () => ({ config: { provider: 'p', model: 'm' } }),
+  }
   const services = {
     sessions: { get: id => (id === 'session-a' ? session : undefined) },
     compaction: {
+      compactRegion: async (start, end, context) => {
+        surfaceCalls.push({ start, end })
+        if (options.regionThrows === true) throw new Error('region refused')
+        return { compactionId: 'r1', summary: [{ type: 'text', text: 'y'.repeat(40) }], shadowedTokenCount: 2000 }
+      },
       compactIfNeeded: async (context, trigger, signal) => {
         calls.push({ context, trigger, aborted: signal.aborted })
         if (options.throws === true) throw new Error('summary failed')
@@ -57,6 +76,9 @@ function harness(options = {}) {
   return {
     sleep,
     calls,
+    surfaceCalls,
+    nodes,
+    events,
     settings,
     setTokens: value => {
       tokens = value
@@ -160,8 +182,50 @@ function harness(options = {}) {
   assert.equal(state.last.shadowedTokenCount, 5000)
 }
 
+// small sweep: between soft and hard thresholds, fold a tail span instead
+{
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0 } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(result.kind, 'small')
+  assert.equal(h.calls.length, 0, 'the hard path is not used')
+  assert.equal(h.surfaceCalls.length, 1)
+  const { start, end } = h.surfaceCalls[0]
+  assert.ok(start < end, 'span is ordered')
+  assert.ok(end < h.nodes.at(-1), 'the recent working set is left alone')
+  assert.notEqual(h.events.get(start).type, 'tool/result', 'never starts on a tool result')
+  assert.notEqual(h.events.get(end).type, 'tool/call', 'never ends on a tool call')
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.kind, 'small')
+  assert.equal(row.reason, 'sweep')
+  assert.equal(row.ok, true)
+  assert.equal(row.shadowedTokenCount, 2000)
+  assert.ok(row.span !== null && row.span.nodes > 1)
+}
+
+// below the soft threshold nothing happens at all
+{
+  const h = harness({ tokens: 400, settings: { softTokens: 500, triggerTokens: 1000 } })
+  assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
+  assert.equal(h.surfaceCalls.length, 0)
+}
+
+// a refused region is accounted, not thrown
+{
+  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000 }, regionThrows: true })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(result.error instanceof Error, true)
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.ok, false)
+  assert.equal(row.kind, 'small')
+}
+
 // defaults stay conservative
-assert.deepEqual({ ...SLEEP_DEFAULTS }, { enabled: false, triggerTokens: 400000, cooldownMs: 600000 })
+assert.deepEqual(
+  { ...SLEEP_DEFAULTS },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, cooldownMs: 600000 },
+)
 
 fs.rmSync(root, { recursive: true, force: true })
 console.log('ALL SLEEP TESTS PASSED')
