@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-alpha.23 — 2026-11-02
+
+会话修好后继续对话，第一轮就失败：`DeepSeek Messages tool result has no matching call`。
+
+- **根因在折叠本身**：`selectSpan` 判断「不切断工具调用」时查的是 `nodeType(...) === 'tool/call'`，可 `tool/call` 根本不是表面节点（它只是日志事件），工具调用实际藏在 `assistant/message` 的 `tool-call` block 里。于是尾端落在 `16582`——一条带调用的 assistant 消息上：桩把调用折走，结果 `16584` 却留在表面，模型请求里就出现「没有对应调用的 tool result」，provider 直接拒绝整轮。
+- 这类损坏**加载时不报错**（格式完全合法），只在下一轮真正发请求时才炸，所以和 alpha.22 的「打开即崩」是两个不同层次的坑。
+- **修法**：`selectSpan` 尾端规则改为「不得落在 `tool/result`，也不得落在仍带 `tool-call` 的 `assistant/message` 上」——不满足就向后回退；新增 `toolCallIds()` 辅助函数和回归测试（构造一条尾端带调用的表面，断言折叠点落在它之前）。
+- 受损会话 `196a4c81` 已就地重平衡：fold 区间从 `16558–16582` 收到 `16558–16579`（7 个节点），把 `16582/16584` 这对调用/结果留在表面；catalog 校验与工具配对审计均通过。
+
 ## 2.1.0-alpha.22 — 2026-11-02
 
 shelve 的指针桩把会话写坏了：打开时 `stored session ... is corrupt: format v4 message requires a producer-owned source kind`。

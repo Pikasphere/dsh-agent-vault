@@ -170,6 +170,21 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
   }
 
+  /** Tool-call ids carried by one surface node (only assistant messages carry them). */
+  function toolCallIds(session, seq) {
+    try {
+      const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
+      if (event?.type !== 'assistant/message') return []
+      const content = event?.data?.message?.content
+      if (!Array.isArray(content)) return []
+      return content
+        .filter(block => block !== null && typeof block === 'object' && block.type === 'tool-call' && typeof block.id === 'string' && block.id !== '')
+        .map(block => block.id)
+    } catch {
+      return []
+    }
+  }
+
   /**
    * Pick a slice near the tail, leaving the recent working set alone. Position
    * matters more than size: replacing a span at P invalidates every cached
@@ -188,10 +203,14 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       startIndex -= 1
       cost += nodeCost(session, nodes[startIndex])
     }
-    // Never split a tool call from its result: a span may not start on a result
-    // nor end on a call, or compactRegion rejects it as unbalanced.
+    // Never split a tool call from its results. A span may not start on a
+    // result, and it may not end on a node that still owes results — a
+    // tool/result, or an assistant message carrying tool calls. Cutting such a
+    // pair replaces the call but leaves its result in the surface; the log then
+    // loads fine and only the *next* model request dies, far away from here:
+    // "DeepSeek Messages tool result has no matching call".
     while (startIndex <= endIndex && nodeType(session, nodes[startIndex]) === 'tool/result') startIndex += 1
-    while (endIndex > startIndex && nodeType(session, nodes[endIndex]) === 'tool/call') endIndex -= 1
+    while (endIndex >= startIndex && (nodeType(session, nodes[endIndex]) === 'tool/result' || toolCallIds(session, nodes[endIndex]).length > 0)) endIndex -= 1
     if (endIndex - startIndex < 1) return null
     const start = nodes[startIndex]
     // Never rewrite at or before the last fold: that prefix is still cached and

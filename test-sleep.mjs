@@ -311,6 +311,22 @@ function harness(options = {}) {
   assert.equal(h.appended.length, 0)
 }
 
+// a span may not end on an assistant message that still carries tool calls:
+// the call would be folded while its result stays in the surface, and the next
+// model request dies with "tool result has no matching call"
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const pending = h.nodes[h.nodes.length - 1 - 8]
+  h.events.set(pending, {
+    type: 'assistant/message',
+    data: { message: { role: 'assistant', content: [{ type: 'tool-call', id: 'call-pending', name: 'ops_bash', arguments: '{}' }] } },
+  })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  const [append] = h.appended
+  assert.ok(append.opts.surfaceOp.endSeq < pending, 'the fold stops before the pending call')
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
