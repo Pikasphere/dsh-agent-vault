@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0-alpha.18 — 2026-11-02
+
+**真正的根因**：`sleep.js` 把注入的 `measureTokens` 当成两参数函数调用，而 `index.js` 传进来的是单参数闭包。
+
+```js
+createSleep({ measureTokens: sessionId => measureTokens(ctx, sessionId) })  // 注入侧：一个参数
+const tokens = measureTokens(ctx, sessionId)                                // 调用侧：两个参数 → 第一个参数是 ctx 对象
+```
+
+于是 `sessions.get(ctx对象)` 恒为 undefined，计量恒为 0，`below-threshold` 静默跳过——这解释了此前所有“探针有了、数字是 0”的现象。
+
+修法：四处调用改成单参数。同时保留 `measure-recovered` 兜底（meter/字符估算），作为以后任何计量失败的保险。
+
 ## 2.1.0-alpha.14 — 2026-11-02
 
 兜底之后 tokens 仍是 0，说明 `deriveMessages()` 这条路也拿不到内容。这版补两件事：

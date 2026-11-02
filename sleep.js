@@ -202,13 +202,14 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
    * threshold" from "the service declined".
    */
   async function maybeCompact(agent) {
+    // `measureTokens` is injected as a ONE-argument function (sessionId).
     const sessionId = String(agent?.id ?? '')
     if (sessionId === '') return null
     const config = settings()
     if (config.debug) record({ at: new Date().toISOString(), kind: 'enter-maybe', sessionId, enabled: config.enabled })
     if (!config.enabled) return null
     if (inFlight.has(sessionId)) return null
-    const tokens = measureTokens(ctx, sessionId)
+    const tokens = measureTokens(sessionId)
     const big = tokens >= config.triggerTokens
     const small = !big && tokens >= config.softTokens
     if (!big && !small) {
@@ -318,7 +319,7 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
               const seenAt = lastProbe.get(sessionId) ?? 0
               if (Date.now() - seenAt > 60000) {
                 lastProbe.set(sessionId, Date.now())
-                probe(sessionId, { seen: 'pre-step', tokens: measureTokens(ctx, sessionId) })
+                probe(sessionId, { seen: 'pre-step', tokens: measureTokens(sessionId) })
               }
               const timer = setTimeout(() => {
                 void maybeCompact({ id: sessionId })
@@ -390,10 +391,10 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
         try {
           const config = settings()
           if (!config.enabled) {
-            mark({ step: 'disabled', sessionId: id, tokens: measureTokens(ctx, id) })
+            mark({ step: 'disabled', sessionId: id, tokens: measureTokens(id) })
             continue
           }
-          let tokens = measureTokens(ctx, id)
+          let tokens = measureTokens(id)
           const session = (() => {
             try {
               return ctx.get('sessions')?.get?.(id) ?? null
