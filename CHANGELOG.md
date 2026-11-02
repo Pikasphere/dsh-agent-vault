@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-alpha.22 — 2026-11-02
+
+shelve 的指针桩把会话写坏了：打开时 `stored session ... is corrupt: format v4 message requires a producer-owned source kind`。
+
+- **根因**：桩用 `session.append('user/message', { role, content })` 落盘，缺了 v4 当场要求的两个字段——`id`（已识别消息）和 `source.kind`（生产者归属，且不能是 `plugin`）。写入端只做物理行准入，不校验消息身份，所以写的时候一切正常，**直到下次打开会话才整体崩掉**（接着还会报 `lacks an identified message`）。
+- **修法**：桩改为 `{ id: randomUUID(), role: 'user', source: { kind: 'user' }, content }`。`kind: 'user'` 与宿主自己 `createUserMessage` 的产物一致，任何读取端都认得。
+- 已原位修复被它写坏的 3 个会话（`196a4c81`、`b6a436d8`、`cf046ef3`）：补 `id` + `source`，zstd 按原帧边界重打包（未受影响的帧字节不变），并用宿主自己的 format catalog（`validation: 'current'` + installed Session）验证通过；原件备份在 `E:\Projects\.tmp-session-repair\backup\`。
+- `test-sleep.mjs` 增加桩消息 id/source 的断言。
+
 ## 2.1.0-alpha.21 — 2026-11-02
 
 记忆化压缩只差最后一步：宿主拒绝了表面替换，并给出了确切契约——

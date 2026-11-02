@@ -11,6 +11,7 @@
 // index/compaction.jsonl so the threshold can be tuned against real data.
 
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 export const SLEEP_DEFAULTS = Object.freeze({
@@ -337,7 +338,19 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     try {
       session.append(
         'user/message',
-        { role: 'user', content: [{ type: 'text', text: stub }] },
+        // Session format v4 admits one identified message with a
+        // producer-owned source in every durable message slot. The host's
+        // append path does not fill these in: without them the write succeeds
+        // and the log only fails later, at load ("format v4 message requires a
+        // producer-owned source kind" / "lacks an identified message").
+        {
+          id: randomUUID(),
+          role: 'user',
+          // `user` is the same producer kind the host uses for a real prompt; a
+          // stub that stands in for a prompt must look like one to every reader.
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: stub }],
+        },
         // The host requires every shadowed surface node to be accounted for;
         // without this it refuses the replacement (and tells us which seqs are
         // missing, which is how this contract was discovered).

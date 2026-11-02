@@ -284,6 +284,12 @@ function harness(options = {}) {
   assert.equal(append.type, 'user/message')
   assert.equal(append.opts.surfaceOp.op, 'replace')
   assert.ok(append.opts.surfaceOp.startSeq < append.opts.surfaceOp.endSeq)
+  // v4 admits one identified message with a producer-owned source; a row without
+  // either is written happily and then poisons the log at load time.
+  assert.equal(append.data.role, 'user')
+  assert.equal(typeof append.data.id, 'string')
+  assert.ok(append.data.id.length > 0)
+  assert.deepEqual(append.data.source, { kind: 'user' })
   // every shadowed node must be listed: the host refuses the replace otherwise
   assert.ok(Array.isArray(append.opts.sourceEventSeqs) && append.opts.sourceEventSeqs.length >= 2)
   assert.ok(append.data.content[0].text.includes('【已归档】'))
