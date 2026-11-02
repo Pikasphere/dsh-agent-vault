@@ -53,7 +53,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.13', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.14', root: store.root })}
 `,
     )
   } catch {
@@ -608,18 +608,41 @@ function measureTokens(ctx, sessionId) {
     } catch {
       /* fall through to the local estimate */
     }
+    let chars = 0
     if (typeof session.deriveMessages === 'function') {
-      let chars = 0
-      for (const message of session.deriveMessages()) {
-        try {
-          chars += JSON.stringify(message).length
-        } catch {
-          /* an unserializable block is not worth failing the measurement */
+      try {
+        for (const message of session.deriveMessages()) {
+          try {
+            chars += JSON.stringify(message).length
+          } catch {
+            /* an unserializable block is not worth failing the measurement */
+          }
         }
+      } catch {
+        chars = 0
       }
-      return Math.round(chars / 3)
     }
-    return 0
+    // The log-based estimate doubles as a cross-check: deriveMessages can be
+    // empty on a session restored without projections while the surface still
+    // carries nodes.
+    if (chars === 0) {
+      try {
+        const nodes = session?.surface?.nodes
+        if (Array.isArray(nodes)) {
+          for (const seq of nodes) {
+            const event = typeof session.eventAt === 'function' ? session.eventAt(seq) : undefined
+            try {
+              chars += JSON.stringify(event?.data ?? '').length
+            } catch {
+              /* skip */
+            }
+          }
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    return Math.round(chars / 3)
   } catch {
     return 0
   }

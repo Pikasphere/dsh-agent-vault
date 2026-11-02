@@ -394,7 +394,23 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
             continue
           }
           const tokens = measureTokens(ctx, id)
-          mark({ step: 'measured', sessionId: id, tokens, soft: config.softTokens, trigger: config.triggerTokens })
+          const session = (() => {
+            try {
+              return ctx.get('sessions')?.get?.(id) ?? null
+            } catch {
+              return null
+            }
+          })()
+          mark({
+            step: 'measured',
+            sessionId: id,
+            tokens,
+            soft: config.softTokens,
+            trigger: config.triggerTokens,
+            hasSession: session !== null,
+            nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : -1,
+            derived: typeof session?.deriveMessages === 'function' ? (() => { try { return session.deriveMessages().length } catch { return -2 } })() : -1,
+          })
           await maybeCompact({ id })
         } catch (error) {
           mark({ step: 'session-threw', sessionId: id, error: String(error?.message ?? error).slice(0, 300) })

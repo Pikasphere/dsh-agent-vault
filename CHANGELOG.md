@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0-alpha.14 — 2026-11-02
+
+兜底之后 tokens 仍是 0，说明 `deriveMessages()` 这条路也拿不到内容。这版补两件事：
+
+- `measureTokens` 的第二层兜底：当 `deriveMessages()` 为空或抛错时，改按 `session.surface.nodes` + `eventAt(seq)` 序列化事件体积估算（这份数据在账本里已经被证明可读）。
+- tick 的 `measured` 行加上 `hasSession` / `nodes` / `derived` 三个字段，一次看清「会话对象拿没拿到、surface 有几个节点、deriveMessages 返回几条」。
+
 ## 2.1.0-alpha.13 — 2026-11-02
 
 **找到休眠机制一直不动作的真正原因**：`measureTokens` 恒为 0。
