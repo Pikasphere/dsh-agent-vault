@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0-alpha.10 — 2026-11-02
+
+修轮询没跑起来的两处：
+
+- `sweep()` 里 `ctx.get('sessions')` 在服务不可见时会**抛异常**（不是返回 undefined），而它当时在 try 之外——异步回调的 rejection 被吞掉，表现成「定时器没触发」。现在整段包在 try/catch 里，失败也写一条 `{seen:"tick", skipped:"sessions-error"}`。
+- `boot.jsonl` 的版本号是写死的字符串，改版本时忘了同步；现在跟着发布号走，避免再用它判断「加载的是不是最新代码」时被误导。
+
 ## 2.1.0-alpha.9 — 2026-11-02
 
 睡眠机制改用**轮询**作为主触发：`ctx.get('sessions').list()` 拿到所有活跃会话，启动 5 秒后扫一次、之后每 60 秒一次。

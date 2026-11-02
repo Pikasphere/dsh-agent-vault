@@ -53,7 +53,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.8', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.10', root: store.root })}
 `,
     )
   } catch {

@@ -362,16 +362,20 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
     // `list()` hands us every live session, so the check does not depend on
     // receiving an event at all.
     const sweep = async () => {
-      const sessions = ctx.get('sessions')
-      if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') {
-        probe('', { seen: 'tick', skipped: 'no-sessions-service' })
-        return
-      }
+      // ctx.get() throws when the service is not visible from this context, so
+      // the whole body is guarded: an unhandled rejection here would silently
+      // kill the sweep and look exactly like "the timer never fired".
       let live = []
       try {
+        const sessions = ctx.get('sessions')
+        if (sessions === undefined || sessions === null || typeof sessions.list !== 'function') {
+          probe('', { seen: 'tick', skipped: 'no-sessions-service' })
+          return
+        }
         live = sessions.list()
-      } catch {
-        live = []
+      } catch (error) {
+        probe('', { seen: 'tick', skipped: 'sessions-error', error: String(error?.message ?? error).slice(0, 300) })
+        return
       }
       probe('', { seen: 'tick', sessions: live.length })
       for (const session of live) {
