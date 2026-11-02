@@ -263,9 +263,9 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
    * 1.9M-token session). The archive is written before the surface changes, so
    * an interrupted run leaves the history untouched rather than half-lost.
    */
-  function shelveMessages(session, span, agentId, sessionId) {
+  function shelveMessages(session, span, agentId, sessionId, seqs) {
     const parts = []
-    for (const seq of nodesBetween(session, span.start, span.end)) {
+    for (const seq of seqs) {
       const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
       const text = eventText(event)
       if (text !== '') parts.push(`[#${seq}] ${text}`)
@@ -323,9 +323,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const span = selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
+    const seqs = nodesBetween(session, span.start, span.end)
     let written = null
     try {
-      written = shelveMessages(session, span, agentId, sessionId)
+      written = shelveMessages(session, span, agentId, sessionId, seqs)
     } catch (error) {
       record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'journal', error: String(error?.message ?? error).slice(0, 300) })
       return { attempted: true, ok: false }
@@ -337,7 +338,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       session.append(
         'user/message',
         { role: 'user', content: [{ type: 'text', text: stub }] },
-        { surfaceOp: { op: 'replace', startSeq: span.start, endSeq: span.end } },
+        // The host requires every shadowed surface node to be accounted for;
+        // without this it refuses the replacement (and tells us which seqs are
+        // missing, which is how this contract was discovered).
+        { surfaceOp: { op: 'replace', startSeq: span.start, endSeq: span.end }, sourceEventSeqs: seqs },
       )
     } catch (error) {
       record({

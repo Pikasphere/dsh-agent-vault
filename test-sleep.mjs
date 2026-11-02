@@ -284,6 +284,8 @@ function harness(options = {}) {
   assert.equal(append.type, 'user/message')
   assert.equal(append.opts.surfaceOp.op, 'replace')
   assert.ok(append.opts.surfaceOp.startSeq < append.opts.surfaceOp.endSeq)
+  // every shadowed node must be listed: the host refuses the replace otherwise
+  assert.ok(Array.isArray(append.opts.sourceEventSeqs) && append.opts.sourceEventSeqs.length >= 2)
   assert.ok(append.data.content[0].text.includes('【已归档】'))
   assert.ok(append.data.content[0].text.includes('j-1'))
   assert.equal(h.sleep.state().foldStartSeq['session-a'], append.opts.surfaceOp.startSeq)

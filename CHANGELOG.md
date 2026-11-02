@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0-alpha.21 — 2026-11-02
+
+记忆化压缩只差最后一步：宿主拒绝了表面替换，并给出了确切契约——
+
+```
+surface replace: sourceEventSeqs must include every shadowed surface node;
+missing 16537, 16544, 16546, 16548, 16552
+```
+
+即：替换一个区间时，`sourceEventSeqs` 必须逐条列出被遮蔽的每一个表面节点。补上即可（顺带确认了整条链路是通的：选中区间 → 写 journal（`j-mvzeji3lku` 已落盘）→ 走到 append 才被拦下）。
+
 ## 2.1.0-alpha.20 — 2026-11-02
 
 **记忆化压缩（shelve）**：同会话、不换窗口，但压缩走记忆层——这正是 bili 做不到的那件事。
