@@ -214,10 +214,22 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (endIndex - startIndex < 1) return null
     const start = nodes[startIndex]
     // Never rewrite at or before the last fold: that prefix is still cached and
-    // replacing it would re-bill everything after it for no gain.
-    if (watermark !== null && start <= watermark) return null
+    // replacing it would re-bill everything after it for no gain. Clamp the
+    // start forward instead of giving up — the tail past the watermark is new
+    // material and stays foldable even when the budget reaches further back.
+    let startSeq = start
+    let startAt = startIndex
+    if (watermark !== null && startSeq <= watermark) {
+      let index = startIndex
+      while (index <= endIndex && nodes[index] <= watermark) index += 1
+      if (index > endIndex) return null
+      startAt = index
+      startSeq = nodes[index]
+    }
+    let spanStart = startSeq
+    let spanStartAt = startAt
     if (cost < Math.max(2000, Math.trunc(minFoldTokens) * 3)) return null
-    return { start, end: nodes[endIndex], nodes: endIndex - startIndex + 1, chars: cost }
+    return { start: spanStart, end: nodes[endIndex], nodes: endIndex - spanStartAt + 1, chars: cost }
   }
 
   /**

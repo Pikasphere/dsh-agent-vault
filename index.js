@@ -38,6 +38,16 @@ const MAX_BODY_BYTES = 1024 * 1024
 const SECTION_NAME = 'agent-memory'
 const SECTION_ORDER = 120
 
+/** Read straight from package.json: a hand-maintained string drifted once and
+ *  made "is the running code current?" unanswerable. */
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
+  } catch {
+    return ''
+  }
+})()
+
 export function apply(ctx, config = {}) {
   const store = createStore({
     rootDir: typeof config.memoryDir === 'string' && config.memoryDir.trim() !== '' ? config.memoryDir : defaultRoot(),
@@ -53,7 +63,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.21', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: PLUGIN_VERSION, root: store.root })}
 `,
     )
   } catch {
