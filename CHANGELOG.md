@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0-alpha.13 — 2026-11-02
+
+**找到休眠机制一直不动作的真正原因**：`measureTokens` 恒为 0。
+
+诊断输出：`{"step":"measured","sessionId":"session-196a4c81…","tokens":0}` —— 会话在列表里、服务都拿得到，唯独 token 数是 0。原有实现对 `ctx.get('tokenMeter')` 缺失、`measure()` 抛错、返回 0 三种情况一律 `return 0`，而 0 永远低于阈值，于是每一轮都安静地什么都不做。
+
+修法：`measureTokens` 加本地兜底——meter 不可用或答 0 时，按 `session.deriveMessages()` 的序列化字符数估算（≈ 3 字符/token），与账本里手工估算的口径一致。
+
+**副作用提示**：交接（handoff）用的是同一个 `measureTokens`，所以自动交接其实也一直是“token 永远 0、永不触发”。这次一起修好了。
+
 ## 2.1.0-alpha.12 — 2026-11-02
 
 sweep 每一步都无条件记账（`step: enter/got/listed/disabled/measured/session-threw/...`）。上一版的 tick 探针仍走 `probe()`，而 `probe()` 被 `sleep.debug` 门控——如果 `store.settings()` 在定时器上下文里抛异常，`debug` 会被静默当成 false，于是「跑了但什么都没写」和「没跑」长得一模一样。

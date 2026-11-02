@@ -53,7 +53,7 @@ export function apply(ctx, config = {}) {
     fs.mkdirSync(path.join(store.root, 'index'), { recursive: true })
     fs.appendFileSync(
       path.join(store.root, 'index', 'boot.jsonl'),
-      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.12', root: store.root })}
+      `${JSON.stringify({ at: new Date().toISOString(), version: '2.1.0-alpha.13', root: store.root })}
 `,
     )
   } catch {
@@ -590,12 +590,36 @@ function registerJournalTools(register, store, journals) {
 function measureTokens(ctx, sessionId) {
   try {
     const sessions = ctx.get('sessions')
-    const meter = ctx.get('tokenMeter')
-    if (sessions === undefined || meter === undefined) return 0
-    const session = typeof sessions.get === 'function' ? sessions.get(sessionId) : undefined
-    if (session === undefined) return 0
-    const measurement = meter.measure(session)
-    return Number(measurement?.totalTokens) || 0
+    if (sessions === undefined || sessions === null || typeof sessions.get !== 'function') return 0
+    const session = sessions.get(sessionId)
+    if (session === undefined || session === null) return 0
+    // The meter is optional in a plugin context (it may simply not be visible
+    // here), and it can also legitimately answer 0 before the first request.
+    // Falling back to pricing the model-visible messages keeps every caller
+    // (handoff thresholds, the sleep sweep) working instead of silently
+    // reading "context is empty forever".
+    try {
+      const meter = ctx.get('tokenMeter')
+      if (meter !== undefined && meter !== null && typeof meter.measure === 'function') {
+        const measurement = meter.measure(session)
+        const measured = Number(measurement?.totalTokens) || 0
+        if (measured > 0) return measured
+      }
+    } catch {
+      /* fall through to the local estimate */
+    }
+    if (typeof session.deriveMessages === 'function') {
+      let chars = 0
+      for (const message of session.deriveMessages()) {
+        try {
+          chars += JSON.stringify(message).length
+        } catch {
+          /* an unserializable block is not worth failing the measurement */
+        }
+      }
+      return Math.round(chars / 3)
+    }
+    return 0
   } catch {
     return 0
   }
