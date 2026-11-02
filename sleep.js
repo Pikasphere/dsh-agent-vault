@@ -297,15 +297,50 @@ export function createSleep({ ctx, store, measureTokens, recordError = () => {} 
   /** Turn boundaries only: `compactNow` needs an idle agent, and idle is the one
    *  moment where spending a few seconds on a summary costs the user nothing. */
   function attach() {
-    return ctx.effect(
-      () =>
-        ctx.on('agent/status', payload => {
-          const status = payload?.status
-          if (status !== 'idle') return
-          void maybeCompact(payload?.agent)
-        }),
-      'agent-memory: sleep status',
+    // Two entry points on purpose. `agent/status` is the precise one (idle is
+    // when compactNow wants the agent), but it is a scoped event and may not
+    // reach a root-level listener on every host build. `session/event` is the
+    // post-commit feed and always reaches us, so a committed `turn/end` also
+    // schedules a check just after the turn settles. Both are cheap and
+    // idempotent: inFlight + cooldown absorb the duplicate.
+    const disposers = []
+    disposers.push(
+      ctx.effect(
+        () =>
+          ctx.on('agent/status', payload => {
+            const status = payload?.status
+            if (status !== 'idle') return
+            probe(String(payload?.agent?.id ?? ''), { seen: 'status-idle' })
+            void maybeCompact(payload?.agent)
+          }),
+        'agent-memory: sleep status',
+      ),
     )
+    disposers.push(
+      ctx.effect(
+        () =>
+          ctx.on('session/event', (session, event) => {
+            if (event?.type !== 'turn/end') return
+            const sessionId = String(session?.id ?? '')
+            if (sessionId === '') return
+            probe(sessionId, { seen: 'turn-end' })
+            const timer = setTimeout(() => {
+              void maybeCompact({ id: sessionId })
+            }, 800)
+            if (typeof timer.unref === 'function') timer.unref()
+          }),
+        'agent-memory: sleep turn-end',
+      ),
+    )
+    return () => {
+      for (const dispose of disposers) {
+        try {
+          if (typeof dispose === 'function') dispose()
+        } catch {
+          // best effort
+        }
+      }
+    }
   }
 
   function history(limit = 50) {

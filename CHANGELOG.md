@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0-alpha.7 — 2026-11-02
+
+睡眠机制加第二个触发口：`session/event` 的 `turn/end`。
+
+`agent/status` 是 scope-filtered 事件，根作用域的监听在部分组合里收不到——实测开关打开、阈值已过，却一条 probe 都没有，说明钩子压根没被调用。所以同时监听 post-commit 的 `session/event`：提交了 `turn/end` 之后 800ms 再调一次检查（那时 agent 已脱离运行态）。两条路都便宜且幂等，`inFlight` + 冷却吸收重复。
+
+probe 现在会写 `seen: "status-idle"` / `seen: "turn-end"`，下一个版本就能看出到底是哪条路在生效。
+
 ## 2.1.0-alpha.6 — 2026-11-02
 
 给小折叠加诊断：`sleep.debug` 打开后，每次空闲都往 `index/compaction.jsonl` 记一条 `kind: "probe"`，写明决策停在哪一步（`below-threshold` / `cooldown` / `no-compaction-service` / `compactIfNeeded-missing` / `compactRegion-missing` / `no-session` / `no-span`），并带上量到的 token 数、surface 节点数、当前水印。
