@@ -1,5 +1,6 @@
 /** Local embedding: tokenizer, vector store freshness, and hybrid ranking. */
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -205,7 +206,18 @@ assert.equal(missingDir.state().semantic.available, false, 'a missing model dire
 
 // ── the real model, when it happens to be installed ───────────────────────
 const realDir = path.join(os.homedir(), '.dsh', 'agent-memory', 'models', 'bge-small-zh-v1.5')
-if (fs.existsSync(path.join(realDir, 'onnx', 'model_quantized.onnx'))) {
+/** The model files alone are not enough: the ONNX runtime is a native dependency
+ *  that may be absent on a fresh checkout (Linux CI, a profile without optional
+ *  deps). Skip the native check instead of failing the suite. */
+function hasOnnxRuntime() {
+  try {
+    createRequire(import.meta.url).resolve('onnxruntime-node')
+    return true
+  } catch {
+    return false
+  }
+}
+if (fs.existsSync(path.join(realDir, 'onnx', 'model_quantized.onnx')) && hasOnnxRuntime()) {
   const real = createEmbedder({ modelDir: realDir })
   await real.load()
   const [a, b, c] = await real.embed(['右键把会话归档', '可以从右键菜单归档会话', '小鲸鱼的泡泡'])
@@ -213,7 +225,7 @@ if (fs.existsSync(path.join(realDir, 'onnx', 'model_quantized.onnx'))) {
   assert.ok(cosine(a, b) > cosine(a, c) + 0.05, `same topic embeds closer (${cosine(a, b).toFixed(3)} vs ${cosine(a, c).toFixed(3)})`)
   console.log('  real model: dim 512, related', cosine(a, b).toFixed(3), 'unrelated', cosine(a, c).toFixed(3))
 } else {
-  console.log('  real model not installed, skipped the native check')
+  console.log('  real model or onnxruntime-node not available, skipped the native check')
 }
 
 // ── chunking: a long note spans several rows, and its score is the best one ─

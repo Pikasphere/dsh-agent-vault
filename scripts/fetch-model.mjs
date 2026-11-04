@@ -27,7 +27,7 @@ const FILES = [
   ['onnx/model_quantized.onnx', 24010842, '15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc'],
 ]
 
-const argv = process.argv.slice(2)
+export const argv = process.argv.slice(2)
 const flag = name => {
   const at = argv.indexOf(`--${name}`)
   return at === -1 ? '' : String(argv[at + 1] ?? '')
@@ -46,13 +46,14 @@ function ok(file, size, sha) {
   return sha256(file) === sha
 }
 
-async function download(name, size, sha) {
-  const target = path.join(dir, name)
+async function downloadOne(baseDir, name, size, sha, force, onProgress) {
+  const target = path.join(baseDir, name)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   if (!force && ok(target, size, sha)) {
-    console.log(`  ${name} — already present`)
+    onProgress({ name, state: 'present', bytes: size })
     return
   }
+  onProgress({ name, state: 'fetching', bytes: 0 })
   let lastError = null
   for (const mirror of MIRRORS) {
     const url = `${mirror}/${REPO}/resolve/main/${name}`
@@ -66,16 +67,45 @@ async function download(name, size, sha) {
       fs.mkdirSync(path.dirname(target), { recursive: true })
       fs.writeFileSync(`${target}.part`, bytes)
       fs.renameSync(`${target}.part`, target)
-      console.log(`  ${name} — ${(size / 1048576).toFixed(1)} MB from ${mirror}`)
+      onProgress({ name, state: 'done', bytes: size, mirror })
       return
     } catch (error) {
       lastError = error
-      console.log(`  ${name} — ${mirror} failed: ${String(error?.message ?? error)}`)
+      onProgress({ name, state: 'retry', mirror, error: String(error?.message ?? error) })
     }
   }
   throw new Error(`${name}: ${String(lastError?.message ?? lastError)}`)
 }
 
-console.log(`model ${REPO} → ${dir}`)
-for (const [name, size, sha] of FILES) await download(name, size, sha)
-console.log('done. `memory.model {action:"prepare"}` (or a plugin restart) builds the vectors.')
+/**
+ * Download every model file into `<dir>`, resuming what is already correct.
+ * Shared by the CLI and the panel's button (`memory.model {action:"download"}`).
+ */
+export async function fetchModel({ dir: baseDir = dir, force: forceFlag = false, onProgress = () => {} } = {}) {
+  const total = FILES.length
+  let index = 0
+  for (const [name, size, sha] of FILES) {
+    index += 1
+    onProgress({ name, state: 'start', index, total })
+    await downloadOne(baseDir, name, size, sha, forceFlag, event => onProgress({ ...event, index, total }))
+  }
+  onProgress({ state: 'complete', total })
+  return { dir: baseDir, files: total }
+}
+
+export async function main() {
+  console.log(`model ${REPO} → ${dir}`)
+  await fetchModel({
+    dir,
+    force,
+    onProgress: event => {
+      if (event.state === 'done') console.log(`  ${event.name} — ${(event.bytes / 1048576).toFixed(1)} MB from ${event.mirror}`)
+      if (event.state === 'present') console.log(`  ${event.name} — already present`)
+      if (event.state === 'retry') console.log(`  ${event.name} — ${event.mirror} failed: ${event.error}`)
+    },
+  })
+  console.log('done. `memory.model {action:"prepare"}` (or a plugin restart) builds the vectors.')
+}
+
+const invokedDirectly = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`
+if (invokedDirectly) await main()

@@ -27,8 +27,9 @@ import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createSleep } from './sleep.js'
+import { fetchModel } from './scripts/fetch-model.mjs'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
-import { createRecall } from './recall.js'
+import { createRecall, DEFAULT_MODEL } from './recall.js'
 import { createReveal, REVEAL_TARGETS } from './reveal.js'
 import { withTimeHint } from './time.js'
 
@@ -47,6 +48,60 @@ const PLUGIN_VERSION = (() => {
     return ''
   }
 })()
+
+/** One download at a time, shared by every panel session in this process. */
+const modelJob = {
+  state: 'idle', // idle | running | done | error
+  startedAt: '',
+  finishedAt: '',
+  files: [],
+  error: '',
+  current: '',
+}
+
+function modelJobStatus() {
+  return {
+    state: modelJob.state,
+    startedAt: modelJob.startedAt,
+    finishedAt: modelJob.finishedAt,
+    current: modelJob.current,
+    files: modelJob.files.slice(-6),
+    error: modelJob.error,
+  }
+}
+
+async function startModelDownload(modelsDir, onDone) {
+  if (modelJob.state === 'running') return { started: false, ...modelJobStatus() }
+  modelJob.state = 'running'
+  modelJob.startedAt = new Date().toISOString()
+  modelJob.finishedAt = ''
+  modelJob.error = ''
+  modelJob.files = []
+  modelJob.current = ''
+  try {
+    await fetchModel({
+      dir: modelsDir,
+      onProgress: event => {
+        if (typeof event.name === 'string') modelJob.current = event.name
+        modelJob.files.push({ at: new Date().toISOString(), ...event })
+        if (modelJob.files.length > 40) modelJob.files.shift()
+      },
+    })
+    modelJob.state = 'done'
+    modelJob.finishedAt = new Date().toISOString()
+    modelJob.current = ''
+    try {
+      onDone()
+    } catch {
+      /* reloading the embedder is best effort */
+    }
+  } catch (error) {
+    modelJob.state = 'error'
+    modelJob.finishedAt = new Date().toISOString()
+    modelJob.error = String(error?.message ?? error).slice(0, 400)
+  }
+  return { started: true, ...modelJobStatus() }
+}
 
 export function apply(ctx, config = {}) {
   const store = createStore({
@@ -1365,7 +1420,20 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
     case 'memory.model': {
       const action = typeof args.action === 'string' ? args.action : 'status'
       if (action === 'prepare') return recall.prepare()
-      return recall.state().semantic
+      if (action === 'download') {
+        // The model directory lives under the memory root, next to the vectors.
+        const modelsDir = path.join(store.root, 'models', DEFAULT_MODEL)
+        return startModelDownload(modelsDir, () => {
+          // Make the freshly downloaded model usable without a restart.
+          try {
+            recall.reloadModel()
+            recall.prepare().catch(error => recordError(store, 'model/prepare', error))
+          } catch (error) {
+            recordError(store, 'model/reload', error)
+          }
+        })
+      }
+      return { ...recall.state().semantic, download: modelJobStatus() }
     }
     case 'recall.save': {
       // The recall tab persists its mode switch here; weights stay in settings.json

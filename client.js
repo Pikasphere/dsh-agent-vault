@@ -292,6 +292,9 @@ window.__ModuleLoader__.load({
         recallSemanticBusy: '处理中…',
         recallSemanticEmpty: '还没有向量，先点「准备向量」',
         recallMode: '排序',
+        recallModelDownload: '下载模型',
+        recallModelDownloading: '下载中…',
+        recallModelProgress: '已处理文件',
         recallModeHybrid: '混合',
         recallModeLexical: '仅关键词',
         recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
@@ -571,6 +574,9 @@ window.__ModuleLoader__.load({
         recallSemanticBusy: 'working…',
         recallSemanticEmpty: 'No vectors yet — click "Prepare vectors"',
         recallMode: 'Ranking',
+        recallModelDownload: 'Download model',
+        recallModelDownloading: 'Downloading…',
+        recallModelProgress: 'files processed',
         recallModeHybrid: 'Hybrid',
         recallModeLexical: 'Keywords only',
         recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
@@ -925,6 +931,7 @@ window.__ModuleLoader__.load({
       const [indexData, setIndexData] = useState(null)
       const [semanticData, setSemanticData] = useState(null)
       const [semanticBusy, setSemanticBusy] = useState(false)
+      const [modelJob, setModelJob] = useState(null)
       const [indexVersion, setIndexVersion] = useState(0)
       // Edited threshold draft; empty means "show the stored value".
       const [sleepDraft, setSleepDraft] = useState('')
@@ -1642,6 +1649,33 @@ window.__ModuleLoader__.load({
           setIndexVersion(current => current + 1)
           const refreshed = await call('memory.model', { action: 'status' })
           if (refreshed) setSemanticData(refreshed)
+        } finally {
+          setSemanticBusy(false)
+        }
+      }
+
+      const downloadModel = async () => {
+        setSemanticBusy(true)
+        setFailure('')
+        try {
+          const started = await call('memory.model', { action: 'download' })
+          if (started && started.state === 'error') {
+            setFailure(String(started.error ?? 'download-failed'))
+            return
+          }
+          setModelJob(started ?? null)
+          // Poll until the download settles, then rebuild the semantic state.
+          for (let tick = 0; tick < 900; tick += 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000))
+            const status = await call('memory.model', { action: 'status' })
+            setModelJob(status?.download ?? null)
+            if (status?.download?.state === 'done' || status?.download?.state === 'error') {
+              if (status.download.state === 'error') setFailure(String(status.download.error ?? 'download-failed'))
+              if (status) setSemanticData(status)
+              setIndexVersion(current => current + 1)
+              break
+            }
+          }
         } finally {
           setSemanticBusy(false)
         }
@@ -2590,6 +2624,27 @@ window.__ModuleLoader__.load({
                   'div',
                   { className: 'am-note' },
                   `${t('recallSemanticHint')}: ${semanticData.error || semanticData.embedderError || 'model-missing'}`,
+                )
+              : null,
+            semanticData && semanticData.available === false
+              ? h(
+                  'div',
+                  { className: 'am-row' },
+                  h(
+                    'button',
+                    {
+                      className: 'am-btn am-btn-sm am-btn-primary',
+                      disabled: busy !== '' || semanticBusy,
+                      onClick: () => void downloadModel(),
+                    },
+                    semanticBusy ? t('recallModelDownloading') : t('recallModelDownload'),
+                  ),
+                  modelJob && modelJob.current !== ''
+                    ? h('span', { className: 'am-note-dim' }, `${modelJob.current} · ${t('recallModelProgress')} ${modelJob.files.length}`)
+                    : null,
+                  modelJob && modelJob.state === 'error'
+                    ? h('span', { className: 'am-note-dim' }, modelJob.error)
+                    : null,
                 )
               : null,
             semanticData && semanticData.available && semanticData.present === false

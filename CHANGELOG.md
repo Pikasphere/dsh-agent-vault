@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-beta.1 — 2026-11-04
+
+进入 beta。这一版补上面板里一直空着的那一半：**语义模型不存在时，可以在界面上直接下载**。
+
+- `scripts/fetch-model.mjs` 拆成可复用函数 `fetchModel({dir, force, onProgress})`，CLI 行为不变（`node scripts/fetch-model.mjs` 仍可单独跑）；下载仍是「逐文件校验 size + sha256、镜像回退、`.part` 临时文件 + rename」。
+- `memory.model {action:"download"}`：宿主侧启动一次后台下载（进程内单例，重复点击只返回当前状态），逐文件回报进度；完成后自动 `recall.reloadModel()` + `prepare()`，**不需要重启**就能用上语义检索。
+- `memory.model {action:"status"}` 现在附带 `download: {state, current, files, error}`；面板据此显示按钮 / 「下载中… · 已处理文件 N」/ 错误文本。
+- 回忆页的语义卡在 `available === false` 时出现「下载模型」按钮，点击后每 2 秒轮询一次直到 done / error。
+
 ## 2.1.0-alpha.27 — 2026-11-04
 
 一次空闲抽多片：`maxSlices`（默认 6）。
