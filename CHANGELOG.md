@@ -1,19 +1,46 @@
 # Changelog
 
+## 2.1.0-beta.6 — 2026-11-04
+
+折叠记账同时记两套数字：`shadowedTokenCount` 是这次归档掉的内容量（内容侧），`tokensBefore` / `tokensAfter` / `savedTokens` 是重建表面后 token 计量器给出的实际值。两者不一致，调阈值看 meter，判断归档效果看 shadow。
+
+## 2.1.0-beta.5 — 2026-11-04
+
+深折每轮只做一次。beta.4 实测：一次空闲在 9 毫秒内连做三次深折，区间彼此重叠（`17237–18068`、`16411–18106`、`16091–18107`）——第二次会把第一次刚写的指针节点又归档一遍。原因是分片循环用的是外层 `config.maxSlices`(3)，忽略了 `sliceConfig.maxSlices`(1)。现在硬阈值以上把循环上限压到 1。
+
+## 2.1.0-beta.4 — 2026-11-04
+
+补上「大压缩」：硬阈值以上做一次**跨水印的深折**，而不是继续在尾巴上切 30k。
+
+- 之前的逻辑是越线后用 `bigChunkTokens`(200k)，但仍受水印约束——水印之后的材料往往只剩十几个节点，于是每次只能切出 20–30k，上下文在 470k 上反复横跳。
+- 现在硬阈值以上把 `deep: true` 传给 `shelve`，区间选择忽略水印，切片大小取 `min(当前token - 软阈值, bigChunkTokens)`：一次折回软阈值以下。只有这一次会牺牲前缀缓存，符合「rare but deep」的定位。
+- 每次折叠的记账里带 `deep` 标记，便于区分小折与大折。
+
+## 2.1.0-beta.3 — 2026-11-04
+
+**超阈值时一次折一大片**（`bigChunkTokens`，默认 200k）：上下文一旦越过 `triggerTokens`，小折叠（每次约 3 万）已经追不上增长，而且这一层本来就要重写前缀、缓存必失——干脆一次折掉 20 万 token。
+
+- 选择逻辑：`tokens >= triggerTokens` → 单片大折叠（`maxSlices` 强制为 1）；否则仍按 `chunkTokens` 小片补齐。
+- 这是不依赖宿主 `compaction` 服务的「大压缩」：走的是同一条记忆化路径（先写 journal，再替换成指针桩）。
+
+## 2.1.0-beta.2 — 2026-11-04
+
+三处修正，都来自实际运行数据。
+
+- **一次空闲多片抽干**（`maxSlices`，默认 3）：原先每个 idle 只折一片（约 3 万 token），而会话每轮增长更快，结果 token 一路涨到 47 万仍压不下去（最近 400 条记录里：15 次成功折叠、287 次 `cooldown` 跳过）。
+- **冷却只在真实折叠后计入**：以前「没有合适区间」也会重置 60 秒冷却，导致后续有机会时全被冷却挡住。
+- **host 模式拿不到 compaction 服务时回退到记忆化折叠**（`fallbackShelve`，默认开）：服务活在预设 isolate 里，profile 级插件看不到；什么都不做是最差结果。
+
+同步：profile 实际加载的是 `/home/pikasphere/dsh-plugins/dsh-agent-vault`（与 `~/Projects/...` 是两份拷贝），这版已同步过去。
+
 ## 2.1.0-beta.1 — 2026-11-04
 
-进入 beta。这一版补上面板里一直空着的那一半：**语义模型不存在时，可以在界面上直接下载**。
+进入 beta。这版补上面板里一直空着的一半：语义模型缺失时可以直接在界面上补。
 
-- `scripts/fetch-model.mjs` 拆成可复用函数 `fetchModel({dir, force, onProgress})`，CLI 行为不变（`node scripts/fetch-model.mjs` 仍可单独跑）；下载仍是「逐文件校验 size + sha256、镜像回退、`.part` 临时文件 + rename」。
-- `memory.model {action:"download"}`：宿主侧启动一次后台下载（进程内单例，重复点击只返回当前状态），逐文件回报进度；完成后自动 `recall.reloadModel()` + `prepare()`，**不需要重启**就能用上语义检索。
-- `memory.model {action:"status"}` 现在附带 `download: {state, current, files, error}`；面板据此显示按钮 / 「下载中… · 已处理文件 N」/ 错误文本。
-- 回忆页的语义卡在 `available === false` 时出现「下载模型」按钮，点击后每 2 秒轮询一次直到 done / error。
-
-## 2.1.0-alpha.27 — 2026-11-04
-
-一次空闲抽多片：`maxSlices`（默认 6）。
-
-之前每个冷却窗口只折一片（约 30–35k token），而会话增长比这快，于是 40 万 token 的上下文一直停在 40 万上下——折叠生效但追不上。现在同一个空闲回合里反复折，直到低于软阈值、抽不出新内容（`attempted:false`）或表面没变小为止，每片单独记账（`kind:"slice"` 带 `slice/remaining/nodes`）。
+- `scripts/fetch-model.mjs` 拆出可复用 `fetchModel({dir, force, onProgress})`，CLI 行为不变；下载仍逐文件校验 size + sha256、镜像回退、`.part` + rename。
+- `memory.model {action:"download"}`：后台单例下载，**立即返回**（早先的实现会把整个下载 await 在请求里，面板因此长时间处于 busy，看起来像白屏）；完成后自动 `recall.reloadModel()` + `prepare()`，不重启即可用语义检索。
+- 语义卡在不可用时区分两种原因：模型文件缺失显示「下载模型」按钮；**缺少本地推理运行时**（`onnxruntime-node`，来自 npm 依赖）显示专门提示，不再把两者混为一谈。
+- 修复点击下载导致页面空白：`memory.model` 的返回值是任务对象而不是 store 快照，客户端改为走不触碰面板状态的原始请求。
 
 ## 2.1.0-alpha.26 — 2026-11-02
 

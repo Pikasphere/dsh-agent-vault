@@ -207,8 +207,7 @@ assert.equal(missingDir.state().semantic.available, false, 'a missing model dire
 // ── the real model, when it happens to be installed ───────────────────────
 const realDir = path.join(os.homedir(), '.dsh', 'agent-memory', 'models', 'bge-small-zh-v1.5')
 /** The model files alone are not enough: the ONNX runtime is a native dependency
- *  that may be absent on a fresh checkout (Linux CI, a profile without optional
- *  deps). Skip the native check instead of failing the suite. */
+ *  that may be absent on a fresh checkout, so the native check is optional. */
 function hasOnnxRuntime() {
   try {
     createRequire(import.meta.url).resolve('onnxruntime-node')

@@ -287,14 +287,15 @@ window.__ModuleLoader__.load({
         recallSemanticCount: '条向量',
         recallSemanticNone: '未建立',
         recallSemanticHint: '本地模型未加载',
+        recallRuntimeMissing: '缺少本地推理运行时 onnxruntime-node（由 npm 依赖提供），先安装依赖再下载模型',
+        recallModelDownload: '下载模型',
+        recallModelDownloading: '下载中…',
+        recallModelProgress: '已处理文件',
         recallSemanticPrepare: '准备向量',
         recallSemanticSync: '同步向量',
         recallSemanticBusy: '处理中…',
         recallSemanticEmpty: '还没有向量，先点「准备向量」',
         recallMode: '排序',
-        recallModelDownload: '下载模型',
-        recallModelDownloading: '下载中…',
-        recallModelProgress: '已处理文件',
         recallModeHybrid: '混合',
         recallModeLexical: '仅关键词',
         recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
@@ -569,14 +570,15 @@ window.__ModuleLoader__.load({
         recallSemanticCount: 'vectors',
         recallSemanticNone: 'not built',
         recallSemanticHint: 'local model not loaded',
+        recallRuntimeMissing: 'The native runtime onnxruntime-node is missing (it comes from the npm dependency); install dependencies before downloading the model.',
+        recallModelDownload: 'Download model',
+        recallModelDownloading: 'Downloading…',
+        recallModelProgress: 'files processed',
         recallSemanticPrepare: 'Prepare vectors',
         recallSemanticSync: 'Sync vectors',
         recallSemanticBusy: 'working…',
         recallSemanticEmpty: 'No vectors yet — click "Prepare vectors"',
         recallMode: 'Ranking',
-        recallModelDownload: 'Download model',
-        recallModelDownloading: 'Downloading…',
-        recallModelProgress: 'files processed',
         recallModeHybrid: 'Hybrid',
         recallModeLexical: 'Keywords only',
         recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
@@ -1641,6 +1643,42 @@ window.__ModuleLoader__.load({
        * 24 MB of local weights, and a panel that only reports "ready" without a way
        * to build the vector file leaves the first search paying the embedding cost.
        */
+      /** Panel-state-free op call: `memory.model` answers with a job object,
+       *  not a store snapshot, so it must bypass `call()` (which applies state). */
+      const modelOp = async args => {
+        try {
+          const payload = await request('/op', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ op: 'memory.model', args: args ?? {} }),
+          })
+          return payload?.value
+        } catch (error) {
+          setFailure(String(error?.message ?? error))
+          return undefined
+        }
+      }
+
+      const downloadModel = async () => {
+        setFailure('')
+        setModelJob({ state: 'running', current: '', files: [], error: '' })
+        const started = await modelOp({ action: 'download' })
+        if (started) setModelJob(started)
+        for (let tick = 0; tick < 900; tick += 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          const status = await modelOp({ action: 'status' })
+          if (status === undefined) break
+          setSemanticData(status)
+          setModelJob(status.download ?? null)
+          const state = status.download?.state
+          if (state === 'done' || state === 'error') {
+            if (state === 'error') setFailure(String(status.download?.error ?? 'download-failed'))
+            setIndexVersion(current => current + 1)
+            break
+          }
+        }
+      }
+
       const prepareSemantic = async () => {
         setSemanticBusy(true)
         try {
@@ -1649,33 +1687,6 @@ window.__ModuleLoader__.load({
           setIndexVersion(current => current + 1)
           const refreshed = await call('memory.model', { action: 'status' })
           if (refreshed) setSemanticData(refreshed)
-        } finally {
-          setSemanticBusy(false)
-        }
-      }
-
-      const downloadModel = async () => {
-        setSemanticBusy(true)
-        setFailure('')
-        try {
-          const started = await call('memory.model', { action: 'download' })
-          if (started && started.state === 'error') {
-            setFailure(String(started.error ?? 'download-failed'))
-            return
-          }
-          setModelJob(started ?? null)
-          // Poll until the download settles, then rebuild the semantic state.
-          for (let tick = 0; tick < 900; tick += 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-            const status = await call('memory.model', { action: 'status' })
-            setModelJob(status?.download ?? null)
-            if (status?.download?.state === 'done' || status?.download?.state === 'error') {
-              if (status.download.state === 'error') setFailure(String(status.download.error ?? 'download-failed'))
-              if (status) setSemanticData(status)
-              setIndexVersion(current => current + 1)
-              break
-            }
-          }
         } finally {
           setSemanticBusy(false)
         }
@@ -2623,7 +2634,16 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { className: 'am-note' },
-                  `${t('recallSemanticHint')}: ${semanticData.error || semanticData.embedderError || 'model-missing'}`,
+                  semanticData.reason === 'runtime-missing'
+                    ? t('recallRuntimeMissing')
+                    : `${t('recallSemanticHint')}: ${semanticData.error || semanticData.embedderError || 'model-missing'}`,
+                )
+              : null,
+            semanticData && semanticData.available === false
+              ? h(
+                  'div',
+                  { className: 'am-note-dim', style: { wordBreak: 'break-all' } },
+                  semanticData.error || '',
                 )
               : null,
             semanticData && semanticData.available === false
@@ -2634,17 +2654,15 @@ window.__ModuleLoader__.load({
                     'button',
                     {
                       className: 'am-btn am-btn-sm am-btn-primary',
-                      disabled: busy !== '' || semanticBusy,
+                      disabled: semanticBusy || modelJob?.state === 'running',
                       onClick: () => void downloadModel(),
                     },
-                    semanticBusy ? t('recallModelDownloading') : t('recallModelDownload'),
+                    modelJob?.state === 'running' ? t('recallModelDownloading') : t('recallModelDownload'),
                   ),
-                  modelJob && modelJob.current !== ''
-                    ? h('span', { className: 'am-note-dim' }, `${modelJob.current} · ${t('recallModelProgress')} ${modelJob.files.length}`)
+                  modelJob?.current
+                    ? h('span', { className: 'am-note-dim' }, `${modelJob.current} · ${t('recallModelProgress')} ${modelJob.files?.length ?? 0}`)
                     : null,
-                  modelJob && modelJob.state === 'error'
-                    ? h('span', { className: 'am-note-dim' }, modelJob.error)
-                    : null,
+                  modelJob?.state === 'error' ? h('span', { className: 'am-note-dim' }, modelJob.error) : null,
                 )
               : null,
             semanticData && semanticData.available && semanticData.present === false

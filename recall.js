@@ -134,7 +134,7 @@ export function createRecall(options = {}) {
   let embedder = null
   let vectors = null
 
-  /** (Re)build the local embedder; a missing model leaves it null on purpose. */
+  /** (Re)build the local embedder; a missing model keeps it null on purpose. */
   function buildEmbedder() {
     if (options.embedder === null) return null
     if (options.embedder !== undefined) return options.embedder
@@ -152,14 +152,29 @@ export function createRecall(options = {}) {
     if (options.vectors !== undefined && options.vectors !== null) return options.vectors
     if (embedder === null) return null
     return createVectors({
-      // `vectorsDir` exists for the A/B eval scripts: they build several
-      // stores (whole-note vs chunked) over the same corpus without touching
-      // the real index.
+      // `vectorsDir` exists for the A/B eval scripts: they build several stores
+      // (whole-note vs chunked) over the same corpus without touching the real index.
       rootDir: options.vectorsDir ?? root,
       embedder,
       model: options.model ?? DEFAULT_MODEL,
       chunkChars: options.chunkChars,
     })
+  }
+
+  /** What the panel shows in the semantic card. */
+  function semanticStatus() {
+    if (vectors === null) {
+      const error = embedderError || 'model-missing'
+      return {
+        available: false,
+        model: '',
+        error,
+        // The model files and the native runtime are two different gaps; the
+        // panel words the fix differently.
+        reason: /onnxruntime|Cannot find module/i.test(error) ? 'runtime-missing' : 'model-missing',
+      }
+    }
+    return { available: true, embedderError, ...vectors.status() }
   }
 
   /** Pick up a model that appeared after startup (the panel's download button). */
@@ -828,12 +843,6 @@ export function createRecall(options = {}) {
       },
       semantic: semanticStatus(),
     }
-  }
-
-  /** What the panel shows in the semantic card. */
-  function semanticStatus() {
-    if (vectors === null) return { available: false, model: '', error: embedderError || 'model-missing' }
-    return { available: true, embedderError, ...vectors.status() }
   }
 
   /** Load the local model ahead of the first search (called from plugin startup). */

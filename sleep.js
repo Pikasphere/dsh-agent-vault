@@ -30,11 +30,16 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // 'shelve' archives the slice into the agent's journal and replaces it with
   // a pointer stub, which needs no service and cannot fail on size.
   mode: 'host',
+  // One idle can fold several slices: a single 30k slice cannot keep up with a
+  // session that grows faster than the cooldown.
+  maxSlices: 3,
+  // Above the hard threshold one slice should be BIG: many small slices cannot
+  // catch up with a session that keeps growing, and the cache is lost anyway.
+  bigChunkTokens: 200000,
+  // When the host compaction service is unreachable (it lives in the preset's
+  // isolate scope), fall back to memory-backed slices instead of doing nothing.
+  fallbackShelve: true,
   cooldownMs: 10 * 60 * 1000,
-  // One idle may drain several slices: a 400k context needs more than the
-  // ~30k a single slice reclaims, and waiting a cooldown per slice never
-  // catches up with a fast-moving conversation.
-  maxSlices: 6,
 })
 
 /** The compaction service is asked for `context-overflow`: the documented way to
@@ -57,11 +62,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     const trigger = Number(raw.triggerTokens)
     const cooldown = Number(raw.cooldownMs)
-    const slices = Number(raw.maxSlices)
     const soft = Number(raw.softTokens)
     const chunk = Number(raw.chunkTokens)
     const keep = Number(raw.keepRecent)
     const minFold = Number(raw.minFoldTokens)
+    const maxSlices = Number(raw.maxSlices)
+    const bigChunk = Number(raw.bigChunkTokens)
     return {
       enabled: raw.enabled === true,
       debug: raw.debug === true,
@@ -71,8 +77,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : SLEEP_DEFAULTS.keepRecent,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
+      maxSlices: Number.isFinite(maxSlices) && maxSlices >= 1 ? Math.min(Math.trunc(maxSlices), 8) : SLEEP_DEFAULTS.maxSlices,
+      bigChunkTokens: Number.isFinite(bigChunk) && bigChunk >= 5000 ? Math.trunc(bigChunk) : SLEEP_DEFAULTS.bigChunkTokens,
+      fallbackShelve: raw.fallbackShelve !== false,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : SLEEP_DEFAULTS.cooldownMs,
-      maxSlices: Number.isFinite(slices) && slices >= 1 ? Math.trunc(slices) : SLEEP_DEFAULTS.maxSlices,
     }
   }
 
@@ -132,12 +140,6 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       kind: 'probe',
       ...detail,
     })
-  }
-
-  /** Surface size, used only to prove a fold actually shrank something. */
-  function nodesOf(sessionId) {
-    const session = sessionOf(sessionId)
-    return Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : 0
   }
 
   function sessionOf(sessionId) {
@@ -378,7 +380,17 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (agentId === '') return { attempted: false, why: 'no-agent' }
     const session = sessionOf(sessionId)
     if (session === null) return { attempted: false, why: 'no-session' }
-    const span = selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, foldStartOf(sessionId))
+    const tokensBefore = measureTokens(sessionId)
+    // A "deep" fold deliberately ignores the watermark: it is the cache-breaking
+    // big compression, run rarely, and it must reach back past earlier folds or
+    // the backlog can never come down.
+    const span = selectSpan(
+      session,
+      config.chunkTokens,
+      config.keepRecent,
+      config.minFoldTokens,
+      config.deep === true ? null : foldStartOf(sessionId),
+    )
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
     const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
@@ -422,11 +434,19 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       return { attempted: true, ok: false, error }
     }
     setFoldStart(sessionId, span.start)
+    // Two independent numbers on purpose: `shadowedTokenCount` is what the fold
+    // archived (content side), `tokensBefore/After` is what the meter reports on
+    // the rebuilt surface. They do not agree, so record both — tuning the
+    // threshold needs the meter, judging the archive needs the shadow.
+    const tokensAfter = measureTokens(sessionId)
     record({
       at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
       span: { start: span.start, end: span.end, nodes: span.nodes },
       archived: ids, stubChars: stub.length,
       shadowedTokenCount: Math.round((span.chars ?? 0) / 3),
+      tokensBefore: tokensBefore > 0 ? tokensBefore : null,
+      tokensAfter: tokensAfter > 0 ? tokensAfter : null,
+      savedTokens: tokensBefore > 0 && tokensAfter > 0 ? Math.max(0, tokensBefore - tokensAfter) : null,
       durationMs: Date.now() - startedAt,
     })
     return { attempted: true, ok: true, archived: ids }
@@ -453,20 +473,36 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     if (config.mode === 'shelve') {
       inFlight.add(sessionId)
-      lastAttempt.set(sessionId, Date.now())
-      let last = null
-      let remaining = tokens
       try {
-        for (let slice = 0; slice < config.maxSlices; slice += 1) {
-          if (remaining < config.softTokens) break
-          const before = nodesOf(sessionId)
-          last = await shelve(sessionId, agent, config)
-          if (last === null || last.attempted !== true || last.ok !== true) break
-          const after = nodesOf(sessionId)
-          if (after >= before) break
-          remaining = measureTokens(sessionId)
-          record({ at: new Date().toISOString(), kind: 'slice', sessionId, slice: slice + 1, remaining, nodes: after })
+        let last = null
+        let pressure = tokens
+        // A deep fold is a one-shot per idle: it already reaches back past the
+        // watermark, so repeating it archives overlapping spans (the second
+        // pass would fold the pointer the first one just wrote).
+        let slices = config.maxSlices
+        for (let slice = 0; slice < slices; slice += 1) {
+          // One big slice once the hard threshold is crossed; small slices only
+          // top up below it.
+          const deep = pressure >= config.triggerTokens
+          if (deep) slices = 1
+          const sliceConfig = deep
+            ? {
+                ...config,
+                // Enough to come back under the soft threshold, capped so one
+                // summary never becomes an unbounded archive job.
+                chunkTokens: Math.min(Math.max(pressure - config.softTokens, config.chunkTokens), config.bigChunkTokens),
+                maxSlices: 1,
+                deep: true,
+              }
+            : config
+          last = await shelve(sessionId, agent, sliceConfig)
+          pressure = measureTokens(sessionId)
+          if (!last || last.attempted !== true) break
+          if (measureTokens(sessionId) < config.softTokens) break
         }
+        // Only a real attempt earns the cooldown: resetting it on "no span"
+        // starved every later attempt for a full minute at a time.
+        if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
         return last
       } catch (error) {
         record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, error: String(error?.message ?? error).slice(0, 300) })
@@ -477,8 +513,23 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     const { service: compaction, source } = resolveCompaction(agent)
     if (compaction === undefined || compaction === null) {
-      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-compaction-service', tokens, tried: source })
-      return null
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'no-compaction-service', tokens, tried: source, fallback: config.fallbackShelve })
+      if (!config.fallbackShelve) return null
+      // The service lives in the preset's isolate scope; folding into memory is
+      // the only thing a profile-level plugin can do, and doing nothing is worse.
+      inFlight.add(sessionId)
+      try {
+        let last = null
+        for (let slice = 0; slice < config.maxSlices; slice += 1) {
+          last = await shelve(sessionId, agent, config)
+          if (!last || last.attempted !== true) break
+          if (measureTokens(sessionId) < config.softTokens) break
+        }
+        if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
+        return last
+      } finally {
+        inFlight.delete(sessionId)
+      }
     }
     if (source !== 'root') record({ at: new Date().toISOString(), kind: 'acquired', sessionId, source })
     if (big && typeof compaction.compactIfNeeded !== 'function') {

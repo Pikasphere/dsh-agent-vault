@@ -215,6 +215,9 @@ export function createStore(options = {}) {
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : 8,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : 5000,
       mode: value.mode === 'shelve' ? 'shelve' : 'host',
+      maxSlices: Number.isFinite(Number(value.maxSlices)) && Number(value.maxSlices) >= 1 ? Math.min(Math.trunc(Number(value.maxSlices)), 8) : 3,
+      bigChunkTokens: Number.isFinite(Number(value.bigChunkTokens)) && Number(value.bigChunkTokens) >= 5000 ? Math.trunc(Number(value.bigChunkTokens)) : 200000,
+      fallbackShelve: value.fallbackShelve !== false,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : 600000,
     }
   }
@@ -569,6 +572,9 @@ export function createStore(options = {}) {
       const minFold = Number(patch.sleep.minFoldTokens)
       if (Number.isFinite(minFold) && minFold > 0) merged.minFoldTokens = Math.trunc(minFold)
       if (patch.sleep.mode === 'host' || patch.sleep.mode === 'shelve') merged.mode = patch.sleep.mode
+      const slices = Number(patch.sleep.maxSlices)
+      if (Number.isFinite(slices) && slices >= 1) merged.maxSlices = Math.min(Math.trunc(slices), 8)
+      if (typeof patch.sleep.fallbackShelve === 'boolean') merged.fallbackShelve = patch.sleep.fallbackShelve
       const cooldown = Number(patch.sleep.cooldownMs)
       if (Number.isFinite(cooldown) && cooldown >= 0) merged.cooldownMs = Math.trunc(cooldown)
       next.sleep = merged

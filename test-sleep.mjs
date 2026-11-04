@@ -189,7 +189,10 @@ function harness(options = {}) {
     measureTokens: () => 999999,
     recordError: () => {},
   })
-  assert.equal(await bare.maybeCompact({ id: 'session-a' }), null)
+  const bareResult = await bare.maybeCompact({ id: 'session-a' })
+  // With the host service unreachable the sweep falls back to memory slices;
+  // here there is no agent binding, so the fallback reports why it did nothing.
+  assert.ok(bareResult === null || bareResult.attempted === false)
 }
 
 // state(): settings + totals from the log
@@ -272,7 +275,7 @@ function harness(options = {}) {
 
 // shelve mode: archive into the journal first, then replace the span with a stub
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.ok, true)
@@ -333,7 +336,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', cooldownMs: 600000, maxSlices: 6 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

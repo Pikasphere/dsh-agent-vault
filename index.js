@@ -27,9 +27,9 @@ import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createSleep } from './sleep.js'
-import { fetchModel } from './scripts/fetch-model.mjs'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall, DEFAULT_MODEL } from './recall.js'
+import { fetchModel } from './scripts/fetch-model.mjs'
 import { createReveal, REVEAL_TARGETS } from './reveal.js'
 import { withTimeHint } from './time.js'
 
@@ -50,28 +50,15 @@ const PLUGIN_VERSION = (() => {
 })()
 
 /** One download at a time, shared by every panel session in this process. */
-const modelJob = {
-  state: 'idle', // idle | running | done | error
-  startedAt: '',
-  finishedAt: '',
-  files: [],
-  error: '',
-  current: '',
-}
+const modelJob = { state: 'idle', startedAt: '', finishedAt: '', files: [], current: '', error: '' }
 
 function modelJobStatus() {
-  return {
-    state: modelJob.state,
-    startedAt: modelJob.startedAt,
-    finishedAt: modelJob.finishedAt,
-    current: modelJob.current,
-    files: modelJob.files.slice(-6),
-    error: modelJob.error,
-  }
+  return { state: modelJob.state, startedAt: modelJob.startedAt, finishedAt: modelJob.finishedAt, current: modelJob.current, files: modelJob.files.slice(-6), error: modelJob.error }
 }
 
+/** Fire-and-forget on purpose: the panel must not hold a request for minutes. */
 async function startModelDownload(modelsDir, onDone) {
-  if (modelJob.state === 'running') return { started: false, ...modelJobStatus() }
+  if (modelJob.state === 'running') return modelJobStatus()
   modelJob.state = 'running'
   modelJob.startedAt = new Date().toISOString()
   modelJob.finishedAt = ''
@@ -100,7 +87,7 @@ async function startModelDownload(modelsDir, onDone) {
     modelJob.finishedAt = new Date().toISOString()
     modelJob.error = String(error?.message ?? error).slice(0, 400)
   }
-  return { started: true, ...modelJobStatus() }
+  return modelJobStatus()
 }
 
 export function apply(ctx, config = {}) {
@@ -1421,17 +1408,18 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       const action = typeof args.action === 'string' ? args.action : 'status'
       if (action === 'prepare') return recall.prepare()
       if (action === 'download') {
-        // The model directory lives under the memory root, next to the vectors.
         const modelsDir = path.join(store.root, 'models', DEFAULT_MODEL)
-        return startModelDownload(modelsDir, () => {
-          // Make the freshly downloaded model usable without a restart.
-          try {
-            recall.reloadModel()
-            recall.prepare().catch(error => recordError(store, 'model/prepare', error))
-          } catch (error) {
-            recordError(store, 'model/reload', error)
-          }
-        })
+        if (modelJob.state !== 'running') {
+          void startModelDownload(modelsDir, () => {
+            try {
+              recall.reloadModel()
+              recall.prepare().catch(error => recordError(store, 'model/prepare', error))
+            } catch (error) {
+              recordError(store, 'model/reload', error)
+            }
+          })
+        }
+        return { started: true, ...modelJobStatus() }
       }
       return { ...recall.state().semantic, download: modelJobStatus() }
     }

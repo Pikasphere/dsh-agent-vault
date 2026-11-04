@@ -350,7 +350,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 
 词法检索的盲区是「换个说法就找不到」：笔记里写「自动弱归档」，查询说「会话怎么被收起来」，没有一个字重合。`2.0.0-alpha.8` 在**日志层**（journal + 记忆日志）上叠加本地语义向量：
 
-- **模型本地、离线**：BGE-small-zh-v1.5 的 int8 ONNX（24 MB，512 维），走 `onnxruntime-node`（N-API，Electron ABI 稳定）。模型不进 npm 包，用 `node scripts/fetch-model.mjs（或面板「回忆 → 语义索引 → 下载模型」）` 下载（逐文件校验 size 与 sha256，按 hf-mirror → huggingface 顺序，可重跑续传）。分词是自写的 BERT WordPiece（`vocab.txt` 驱动），不引 `transformers.js`。
+- **模型本地、离线**：BGE-small-zh-v1.5 的 int8 ONNX（24 MB，512 维），走 `onnxruntime-node`（N-API，Electron ABI 稳定）。模型不进 npm 包，用 `node scripts/fetch-model.mjs` 下载（逐文件校验 size 与 sha256，按 hf-mirror → huggingface 顺序，可重跑续传）。分词是自写的 BERT WordPiece（`vocab.txt` 驱动），不引 `transformers.js`。
 - **只嵌日志层**：检查点与 4K 短记忆是权威状态、整段注入提示词，嵌了反而可能把陈旧版本当检索结果；对话原文太大且未脱敏，仍走词法。向量存 `index/vectors.bin`（float32、L2 归一化）+ `index/vectors.json`（`{key, src, at, hash}`），**按内容 hash 判脏**——日志是追加写，按 mtime 会每次保存都全量重嵌。
 - **融合用 RRF，不用加权和**：先按 `0.6×归一化词法 + 0.4×余弦` 实现，改写查询集只有 33.3%（vs 纯词法 25%）；原因是量纲——词法最大项恒被归一化成 1.0（占 0.6），余弦常年在 0.5–0.65（只占 0.2–0.26），任何有词法命中的条目都压住只靠语义的正确条目。改成倒数排名融合（`0.6/(20+lexRank) + 0.4/(20+semRank)`）后同一集合 top-1 41.7%。
 - **余弦下限 0.45**：低于它的条目没有语义名次（不按相似度硬塞进来）；语义命中带 `via:"semantic"`，面板显示「语义」徽标，且**不作为图扩展的种子**（共现边与语义空间是两套结构，混用噪声相乘）。这个值是量出来的，不是拍的：见下面的「参数」一节。

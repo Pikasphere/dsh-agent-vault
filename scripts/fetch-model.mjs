@@ -27,7 +27,7 @@ const FILES = [
   ['onnx/model_quantized.onnx', 24010842, '15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc'],
 ]
 
-export const argv = process.argv.slice(2)
+const argv = process.argv.slice(2)
 const flag = name => {
   const at = argv.indexOf(`--${name}`)
   return at === -1 ? '' : String(argv[at + 1] ?? '')
@@ -46,14 +46,13 @@ function ok(file, size, sha) {
   return sha256(file) === sha
 }
 
-async function downloadOne(baseDir, name, size, sha, force, onProgress) {
+async function downloadOne(baseDir, name, size, sha, forceFlag, onProgress) {
   const target = path.join(baseDir, name)
   fs.mkdirSync(path.dirname(target), { recursive: true })
-  if (!force && ok(target, size, sha)) {
+  if (!forceFlag && ok(target, size, sha)) {
     onProgress({ name, state: 'present', bytes: size })
     return
   }
-  onProgress({ name, state: 'fetching', bytes: 0 })
   let lastError = null
   for (const mirror of MIRRORS) {
     const url = `${mirror}/${REPO}/resolve/main/${name}`
@@ -78,19 +77,18 @@ async function downloadOne(baseDir, name, size, sha, force, onProgress) {
 }
 
 /**
- * Download every model file into `<dir>`, resuming what is already correct.
+ * Download every model file into `dir`, resuming what is already correct.
  * Shared by the CLI and the panel's button (`memory.model {action:"download"}`).
  */
 export async function fetchModel({ dir: baseDir = dir, force: forceFlag = false, onProgress = () => {} } = {}) {
-  const total = FILES.length
   let index = 0
   for (const [name, size, sha] of FILES) {
     index += 1
-    onProgress({ name, state: 'start', index, total })
-    await downloadOne(baseDir, name, size, sha, forceFlag, event => onProgress({ ...event, index, total }))
+    onProgress({ name, state: 'start', index, total: FILES.length })
+    await downloadOne(baseDir, name, size, sha, forceFlag, event => onProgress({ ...event, index, total: FILES.length }))
   }
-  onProgress({ state: 'complete', total })
-  return { dir: baseDir, files: total }
+  onProgress({ state: 'complete', total: FILES.length })
+  return { dir: baseDir, files: FILES.length }
 }
 
 export async function main() {
