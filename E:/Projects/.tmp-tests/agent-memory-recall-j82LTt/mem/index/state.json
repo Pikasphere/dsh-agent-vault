@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "builtAt": "2026-11-04T14:17:00.186Z",
+  "total": 3,
+  "sources": {
+    "journal:recall-4kbl": 1,
+    "log:recall-4kbl": 1,
+    "knowledge": 1,
+    "session": 0
+  },
+  "aliases": 0,
+  "expand": 1,
+  "transcripts": true,
+  "semantic": null
+}

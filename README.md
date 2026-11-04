@@ -199,6 +199,21 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 讨论室的发言由**用户驱动**：在某个已绑定智能体的对话里让它「去讨论室说点什么」，它会用 `agent_room` 读上下文并发言；也可以由你直接在面板里发言。插件不做自动轮流发言。
 
+### 安装 onnxruntime-node（2.1.0-beta.8）
+
+`onnxruntime-node` 的 postinstall 会去 NuGet 拉 CUDA provider，网络不通时（返回 302 不跟跳转）整个安装失败。npm 包里**本来就带 CPU 版** `libonnxruntime.so` 和 binding，所以：
+
+```bash
+npm i onnxruntime-node --ignore-scripts
+# 或 ONNXRUNTIME_NODE_INSTALL=skip npm i onnxruntime-node
+```
+
+Linux + AMD 显卡上就是这样跑起来的（实测 load 59 ms、单条推理 6 ms）；GPU 加速不是必需品，这个模型只有 33M 参数。
+
+### 嵌入发生在什么时候（2.1.0-beta.8）
+
+写入路径**不**向量化；`recall.search()` 里先做增量 `sync()`（按文本 hash 比对，未变的行直接复用），启动后 4 秒还有一次预热。日志/记忆写入会调 `recall.touch()`，1.2 秒后在后台补嵌入，于是搜索通常不用等。
+
 ### 小压缩（尾部折叠，2.1.0-alpha.4）
 
 折叠点会一直往后推：每次折叠的起点写进 `index/sleep.json`，下一次不允许在水印或之前再折（那会重写仍在缓存里的前缀）；区间不到 `minFoldTokens`（默认 5000）就攒着。这两条都是从 billion-context 的 `pendingOrphanSweepMinRef` 与 `minCompressRange` 学来的。

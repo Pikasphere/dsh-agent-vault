@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "knowledgeDir": "",
+  "activeVault": "agent-39ns",
+  "hideBoundSessions": false,
+  "transcripts": true,
+  "sessionsRoot": "",
+  "transcriptExclude": [],
+  "sleep": {
+    "enabled": false,
+    "triggerTokens": 400000,
+    "softTokens": 300000,
+    "chunkTokens": 20000,
+    "keepRecent": 8,
+    "minFoldTokens": 5000,
+    "mode": "host",
+    "maxSlices": 3,
+    "bigChunkTokens": 200000,
+    "fallbackShelve": true,
+    "cooldownMs": 600000
+  },
+  "recall": {
+    "mode": "hybrid",
+    "lexicalWeight": 0.6,
+    "semanticWeight": 0.4,
+    "minCosine": 1,
+    "rrfK": 20,
+    "titleWeight": 0,
+    "heat": 0.25,
+    "dedupe": 0,
+    "mmr": 0
+  }
+}

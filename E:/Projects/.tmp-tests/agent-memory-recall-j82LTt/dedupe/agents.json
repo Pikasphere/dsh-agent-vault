@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "dup-wqf1",
+      "name": "Dup",
+      "description": "",
+      "createdAt": "2026-11-04T14:17:00.199Z",
+      "updatedAt": "2026-11-04T14:17:00.199Z",
+      "memoryUpdatedAt": ""
+    }
+  ]
+}

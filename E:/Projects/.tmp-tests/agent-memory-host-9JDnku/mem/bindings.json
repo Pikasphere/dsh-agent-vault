@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "sessions": {
+    "session-test-1234": "agent-39ns",
+    "session-next-2": "agent-39ns",
+    "session-created": "agent-39ns"
+  }
+}

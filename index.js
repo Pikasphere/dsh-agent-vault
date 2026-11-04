@@ -629,8 +629,11 @@ function registerJournalTools(register, store, journals) {
         if (action === 'list') return { ok: true, ...journals.list({ id, limit: args?.limit }) }
         if (action === 'search') return { ok: true, ...journals.list({ id, query: args?.query, limit: args?.limit }) }
         if (action === 'read') return { ok: true, ...journals.read({ id, entry: args?.entry }) }
-        if (action === 'write')
-          return withTimeHint({ ok: true, ...journals.write({ id, title: args?.title, text: args?.text }) }, args?.text)
+        if (action === 'write') {
+          const written = journals.write({ id, title: args?.title, text: args?.text })
+          recall.touch()
+          return withTimeHint({ ok: true, ...written }, args?.text)
+        }
         throw new MemoryError('bad-action', `unknown action: ${action}`)
       }),
     },
@@ -1471,8 +1474,8 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       })
     case 'journal.read':
       return journals.read({ id: args.id, entry: args.entry })
-    case 'journal.write':
-      return journals.write({
+    case 'journal.write': {
+      const written = journals.write({
         id: args.id,
         title: args.title,
         text: args.text,
@@ -1481,6 +1484,9 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
         kind: args.kind,
         meta: args.meta,
       })
+      recall.touch()
+      return written
+    }
     case 'journal.delete':
       return journals.remove({ id: args.id, entry: args.entry })
     case 'handoff.status':

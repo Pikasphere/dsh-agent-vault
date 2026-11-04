@@ -12,7 +12,11 @@ import { decompressFrames } from './zstd-frames.mjs'
 export const SESSION_FILE = 'session.v4.jsonl.zstd'
 export const MAX_CHARS = 12000
 const HEAD_CHARS = 2000
-const CHUNK_CHARS = 6000
+// Small blocks are deliberate: the vector layer re-cuts every entry into ~420
+// character rows, and a block whose content changes (the open tail block does,
+// on every turn) re-embeds all of its rows. 1200 keeps one turn's re-embed to
+// ~3 rows instead of ~18, while still being a readable snippet.
+const CHUNK_CHARS = 1200
 
 const SECRETS = [
   [/\bsk-[A-Za-z0-9]{16,}\b/g, '[redacted-key]'],

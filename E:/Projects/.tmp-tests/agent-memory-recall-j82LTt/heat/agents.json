@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "heat-r0ey",
+      "name": "Heat",
+      "description": "",
+      "createdAt": "2026-11-04T14:17:00.197Z",
+      "updatedAt": "2026-11-04T14:17:00.197Z",
+      "memoryUpdatedAt": ""
+    }
+  ]
+}

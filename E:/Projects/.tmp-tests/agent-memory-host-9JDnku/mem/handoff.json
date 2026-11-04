@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": true,
+  "triggerTokens": 300000,
+  "remindEverySteps": 2,
+  "exportDir": "",
+  "autoSwitch": false,
+  "startupPrompt": "继续上次的界面工作。"
+}

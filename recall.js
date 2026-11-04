@@ -845,6 +845,24 @@ export function createRecall(options = {}) {
     }
   }
 
+  let touchTimer = null
+  /**
+   * Vectorise soon, off the write path: writes stay instant and the embedding
+   * runs once the agent falls quiet, so the next search usually finds the index
+   * already warm and pays nothing for the new material.
+   */
+  function touch() {
+    if (vectors === null) return
+    if (touchTimer !== null) return
+    touchTimer = setTimeout(() => {
+      touchTimer = null
+      vectors.sync(vectorEntries()).catch(error => {
+        embedderError = String(error?.message ?? error)
+      })
+    }, 1200)
+    if (typeof touchTimer.unref === 'function') touchTimer.unref()
+  }
+
   /** Load the local model ahead of the first search (called from plugin startup). */
   async function prepare() {
     const result = await warm()
@@ -948,6 +966,7 @@ export function createRecall(options = {}) {
     reindex,
     state,
     prepare,
+    touch,
     SOURCES,
   }
 }
