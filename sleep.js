@@ -11,7 +11,7 @@
 // index/compaction.jsonl so the threshold can be tuned against real data.
 
 import fs from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 export const SLEEP_DEFAULTS = Object.freeze({
@@ -199,6 +199,53 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
   }
 
+  /** Call id a tool/result node answers, or '' when the log does not record it. */
+  function resultCallIds(session, seq) {
+    try {
+      const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
+      if (event?.type !== 'tool/result') return []
+      const id = event?.data?.message?.toolCallId
+      return typeof id === 'string' && id !== '' ? [id] : []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Would folding this slice leave a call without its result (or the reverse)?
+   * Deletions are the only thing that can break pairing: both nodes stay if
+   * both are kept, both vanish if both are folded. So compare membership —
+   * never trust the slice's edges to be the only place a pair can be cut.
+   *
+   * This is the guard that was missing when a fold of 16558–16579 dropped an
+   * assistant message at 16580 whose call the provider still expected: the
+   * session loaded fine and only the next request died with "tool result has
+   * no matching call".
+   */
+  function pairingProblem(session, slice) {
+    const nodes = Array.isArray(session?.surface?.nodes) ? session.surface.nodes : []
+    if (nodes.length === 0) return null
+    const removed = new Set(slice)
+    const callAt = new Map()
+    const resultAt = new Map()
+    for (const seq of nodes) {
+      for (const id of toolCallIds(session, seq)) callAt.set(id, seq)
+      for (const id of resultCallIds(session, seq)) resultAt.set(id, seq)
+    }
+    for (const [id, resultSeq] of resultAt) {
+      const callSeq = callAt.get(id)
+      // A pair that was already broken before this fold is not ours to judge.
+      if (callSeq === undefined) continue
+      const callRemoved = removed.has(callSeq)
+      const resultRemoved = removed.has(resultSeq)
+      if (callRemoved === resultRemoved) continue
+      return callRemoved
+        ? `call ${id} (seq ${callSeq}) would be folded while its result (seq ${resultSeq}) stays`
+        : `result ${id} (seq ${resultSeq}) would be folded while its call (seq ${callSeq}) stays`
+    }
+    return null
+  }
+
   /**
    * Pick a slice near the tail, leaving the recent working set alone. Position
    * matters more than size: replacing a span at P invalidates every cached
@@ -249,7 +296,19 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // numeric seq (the first implementation) dropped nodes the host still
     // considered "inside" the span and got the replacement refused.
     const startIndexFinal = startAt
-    const seqs = nodes.slice(startIndexFinal, endIndex + 1)
+    let seqs = nodes.slice(startIndexFinal, endIndex + 1)
+    // Shrink rather than refuse: dropping from the tail keeps the (watermark
+    // clamped) start, and the loop always terminates because the slice shrinks.
+    let cut = null
+    while (seqs.length >= 2) {
+      const problem = pairingProblem(session, seqs)
+      if (problem === null) {
+        cut = null
+        break
+      }
+      cut = problem
+      seqs = seqs.slice(0, -1)
+    }
     if (seqs.length < 2) return null
     return {
       start: seqs[0],
@@ -375,6 +434,38 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     return parts.join(String.fromCharCode(10)).trim()
   }
 
+  /** Deterministic marker for one (session, slice) pair, so a retry can see it. */
+  function spanStamp(sessionId, seqs) {
+    return createHash('sha256').update(`${sessionId}:${seqs.join(',')}`).digest('hex').slice(0, 12)
+  }
+
+  /**
+   * Has this exact slice already been replaced? A retry that appends a second
+   * stub for the same span would archive it twice and — worse — replace nodes
+   * that are no longer there. Check the durable log, not our own bookkeeping:
+   * the log is what survived the crash.
+   */
+  function alreadyShelved(session, stamp) {
+    let events = []
+    try {
+      if (typeof session?.snapshotEvents === 'function') events = session.snapshotEvents()
+      else if (typeof session?.ownEvents === 'function') events = session.ownEvents()
+      else if (typeof session?.eventAt === 'function') events = []
+    } catch {
+      events = []
+    }
+    const needle = `#am-${stamp}`
+    for (const event of events) {
+      if (event?.type !== 'user/message') continue
+      const content = event?.data?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block !== null && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string' && block.text.includes(needle)) return true
+      }
+    }
+    return false
+  }
+
   async function shelve(sessionId, agent, config) {
     const agentId = store.bindingOf(sessionId) || ''
     if (agentId === '') return { attempted: false, why: 'no-agent' }
@@ -394,6 +485,11 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
     const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
+    const stamp = spanStamp(sessionId, seqs)
+    if (alreadyShelved(session, stamp)) {
+      record({ at: new Date().toISOString(), kind: 'shelve', ok: true, skipped: 'duplicate', sessionId, stage: 'duplicate', span: { start: span.start, end: span.end, nodes: span.nodes } })
+      return { attempted: false, why: 'duplicate' }
+    }
     let written = null
     try {
       written = shelveMessages(session, span, agentId, sessionId, seqs)
@@ -403,7 +499,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
     const ids = written.map(item => item.id)
-    const stub = `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。`
+    const stub = `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
     try {
       session.append(
         'user/message',
