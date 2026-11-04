@@ -31,6 +31,10 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // a pointer stub, which needs no service and cannot fail on size.
   mode: 'host',
   cooldownMs: 10 * 60 * 1000,
+  // One idle may drain several slices: a 400k context needs more than the
+  // ~30k a single slice reclaims, and waiting a cooldown per slice never
+  // catches up with a fast-moving conversation.
+  maxSlices: 6,
 })
 
 /** The compaction service is asked for `context-overflow`: the documented way to
@@ -53,6 +57,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     const trigger = Number(raw.triggerTokens)
     const cooldown = Number(raw.cooldownMs)
+    const slices = Number(raw.maxSlices)
     const soft = Number(raw.softTokens)
     const chunk = Number(raw.chunkTokens)
     const keep = Number(raw.keepRecent)
@@ -67,6 +72,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
       cooldownMs: Number.isFinite(cooldown) && cooldown >= 0 ? Math.trunc(cooldown) : SLEEP_DEFAULTS.cooldownMs,
+      maxSlices: Number.isFinite(slices) && slices >= 1 ? Math.trunc(slices) : SLEEP_DEFAULTS.maxSlices,
     }
   }
 
@@ -126,6 +132,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       kind: 'probe',
       ...detail,
     })
+  }
+
+  /** Surface size, used only to prove a fold actually shrank something. */
+  function nodesOf(sessionId) {
+    const session = sessionOf(sessionId)
+    return Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : 0
   }
 
   function sessionOf(sessionId) {
@@ -442,8 +454,20 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (config.mode === 'shelve') {
       inFlight.add(sessionId)
       lastAttempt.set(sessionId, Date.now())
+      let last = null
+      let remaining = tokens
       try {
-        return await shelve(sessionId, agent, config)
+        for (let slice = 0; slice < config.maxSlices; slice += 1) {
+          if (remaining < config.softTokens) break
+          const before = nodesOf(sessionId)
+          last = await shelve(sessionId, agent, config)
+          if (last === null || last.attempted !== true || last.ok !== true) break
+          const after = nodesOf(sessionId)
+          if (after >= before) break
+          remaining = measureTokens(sessionId)
+          record({ at: new Date().toISOString(), kind: 'slice', sessionId, slice: slice + 1, remaining, nodes: after })
+        }
+        return last
       } catch (error) {
         record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, error: String(error?.message ?? error).slice(0, 300) })
         return { attempted: true, ok: false, error }

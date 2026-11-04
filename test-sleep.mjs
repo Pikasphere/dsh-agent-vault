@@ -333,7 +333,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', cooldownMs: 600000, maxSlices: 6 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })
