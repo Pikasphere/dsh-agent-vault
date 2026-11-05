@@ -4572,49 +4572,70 @@ window.__ModuleLoader__.load({
      * compaction is intercepted yet — this shows what an accounting pass would
      * have to read, so the takeover can be designed against real data.
      */
+    /**
+     * Conversation body view: the read-only ledger. The top half is the part
+     * that decides cache cost — continuous tail folds (cheap, the prefix stays
+     * warm) versus deep folds (rare, reach back past the watermark). The host's
+     * own compaction runs and the session event mix sit underneath as ground
+     * truth, so the two paths can be compared against what the model really saw.
+     */
     function SessionLedger(props) {
       const { sessionId, getLocale } = props
       const zh = zhLocale(typeof getLocale === 'function' ? getLocale() : '')
       const labels = zh
         ? {
-            hint: '只读账本：本会话的事件构成与压缩记录。压缩记账尚未接入，这里不做任何拦截或改写。',
+            hint: '只读账本：折叠分成两条路径——持续折叠只动尾部，硬折叠越过水印重写，代价完全不同。',
             reading: '读取中…',
             failed: '读取失败',
             records: '条记录',
             empty: '这个会话还没有可读的事件记录。',
+            continuous: '持续折叠',
+            continuousHint: '尾部小折叠 · 缓存只废尾巴',
+            deep: '硬折叠',
+            deepHint: '越过水印 · 前缀全部重付',
+            archived: '归档',
+            last: '最近',
+            foldRuns: '次',
+            recentFolds: '最近折叠',
+            noFolds: '本会话还没有折叠记录。',
+            failedFolds: '连续失败',
             types: '事件构成',
-            compactions: '压缩与摘要',
-            runs: '压缩与摘要',
+            runs: '宿主压缩',
             noCompactions: '这个会话还没有压缩/摘要事件。',
             ok: '成功',
             refused: '被代理拒绝',
             failedRun: '失败',
             summaryChars: '摘要字符',
-            attempts: '压缩尝试',
-            pruned: '工具结果剪枝',
-            prunedTokens: '剪枝折叠 token',
-            peakRequest: '峰值请求 token',
+            peakRequest: '峰值请求',
             summaryTotal: '摘要总字符',
+            tokens: 'tokens',
           }
         : {
-            hint: 'Read-only ledger: this session event mix and compaction records. Accounting is not wired yet — nothing is intercepted or rewritten.',
+            hint: 'Read-only ledger: folds split into two paths — continuous folds touch only the tail, deep folds reach past the watermark. Very different costs.',
             reading: 'Reading…',
             failed: 'Failed to read',
             records: 'records',
             empty: 'This session has no readable events yet.',
+            continuous: 'Continuous',
+            continuousHint: 'tail folds · only the tail of the cache is re-billed',
+            deep: 'Deep fold',
+            deepHint: 'past the watermark · the whole prefix is re-billed',
+            archived: 'archived',
+            last: 'last',
+            foldRuns: 'runs',
+            recentFolds: 'Recent folds',
+            noFolds: 'No fold recorded for this session yet.',
+            failedFolds: 'consecutive failures',
             types: 'Event mix',
-            compactions: 'Compaction & summary',
-            runs: 'Compaction & summary',
+            runs: 'Host compaction',
             noCompactions: 'No compaction or summary event in this session yet.',
             ok: 'ok',
             refused: 'refused by proxy',
             failedRun: 'failed',
             summaryChars: 'summary chars',
-            attempts: 'compaction runs',
-            pruned: 'tool-result prunes',
-            prunedTokens: 'pruned tokens',
-            peakRequest: 'peak request tokens',
+            peakRequest: 'peak request',
             summaryTotal: 'summary chars',
+            tokens: 'tokens',
           }
       const [data, setData] = useState(null)
       const [error, setError] = useState('')
@@ -4635,6 +4656,50 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId])
 
+      const accent = 'var(--am-accent, #4d6bfe)'
+      const warn = 'var(--am-warn, #f5a524)'
+      const danger = 'var(--am-danger, #e5484d)'
+      const number = value => Number(value || 0).toLocaleString()
+      const clock = value => {
+        if (typeof value !== 'string' || value === '') return ''
+        const date = new Date(value)
+        return Number.isNaN(date.getTime()) ? value.slice(11, 19) : date.toLocaleTimeString(undefined, { hour12: false })
+      }
+      const pill = (text, color) =>
+        h(
+          'span',
+          {
+            style: {
+              fontSize: '11px',
+              lineHeight: '18px',
+              padding: '0 8px',
+              borderRadius: '9px',
+              border: `1px solid ${color}`,
+              color,
+              whiteSpace: 'nowrap',
+            },
+          },
+          text,
+        )
+      const statCard = (title, hint, count, tokens, lastAt, color) =>
+        h(
+          'div',
+          {
+            className: 'am-item',
+            style: { flex: '1 1 220px', minWidth: '180px', padding: '12px 14px', borderLeft: `3px solid ${color}` },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, title),
+            pill(labels.foldRuns, color),
+          ),
+          h('div', { style: { fontSize: '26px', fontWeight: 700, lineHeight: '1.25', margin: '4px 0 2px' } }, number(count)),
+          h('div', { className: 'am-note-dim', style: { fontSize: '11px' } }, hint),
+          h('div', { className: 'am-note-dim', style: { fontSize: '12px', marginTop: '6px' } }, `${labels.archived} ${number(tokens)} ${labels.tokens}`),
+          lastAt === '' ? null : h('div', { className: 'am-note-dim', style: { fontSize: '11px' } }, `${labels.last} ${clock(lastAt)}`),
+        )
+
       const style = {
         height: '100%',
         overflowY: 'auto',
@@ -4646,16 +4711,67 @@ window.__ModuleLoader__.load({
       }
       const body = [h('div', { className: 'am-note' }, labels.hint)]
       if (error !== '') {
-        body.push(h('div', { className: 'am-note', style: { color: 'var(--am-danger, #e5484d)' } }, `${labels.failed}: ${error}`))
+        body.push(h('div', { className: 'am-note', style: { color: danger } }, `${labels.failed}: ${error}`))
       } else if (data === null) {
         body.push(h('div', { className: 'am-note' }, labels.reading))
       } else if (data.available !== true || data.records === 0) {
         body.push(h('div', { className: 'am-note' }, labels.empty))
       } else {
-        body.push(h('div', { className: 'am-note-dim' }, `${data.records} ${labels.records}`))
-        if (data.stats !== undefined) body.push(summaryCard(data.stats, labels))
+        const folds = data.folds ?? null
+        const stats = data.stats ?? {}
+        body.push(
+          h(
+            'div',
+            { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
+            h('span', { className: 'am-note-dim', style: { fontSize: '12px' } }, `${number(data.records)} ${labels.records}`),
+            stats.peakRequestTokens > 0 ? pill(`${labels.peakRequest} ${number(stats.peakRequestTokens)}`, warn) : null,
+            stats.summaryChars > 0 ? pill(`${labels.summaryTotal} ${number(stats.summaryChars)}`, accent) : null,
+            stats.prunedCount > 0 ? pill(`${labels.types} · prune ${number(stats.prunedCount)}`, accent) : null,
+          ),
+        )
+        if (folds !== null) {
+          if (folds.alert !== null && folds.alert !== undefined) {
+            body.push(
+              h(
+                'div',
+                {
+                  className: 'am-item',
+                  style: { borderLeft: `3px solid ${danger}`, padding: '10px 12px', color: danger, fontSize: '12px' },
+                },
+                `${labels.failedFolds}: ${folds.alert.count} · ${String(folds.alert.error ?? '').slice(0, 200) || folds.alert.kind}`,
+              ),
+            )
+          }
+          body.push(
+            h(
+              'div',
+              { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+              statCard(labels.continuous, labels.continuousHint, folds.continuous.count, folds.continuous.tokens, folds.continuous.lastAt, accent),
+              statCard(labels.deep, labels.deepHint, folds.deep.count, folds.deep.tokens, folds.deep.lastAt, danger),
+            ),
+          )
+          body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.recentFolds))
+          if (folds.recent.length === 0) {
+            body.push(h('div', { className: 'am-note' }, labels.noFolds))
+          } else {
+            for (const [index, run] of [...folds.recent].reverse().slice(0, 8).entries()) {
+              const color = run.ok !== true ? danger : run.deep ? danger : accent
+              body.push(
+                h(
+                  'div',
+                  { key: `fold-${index}-${run.at}`, style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' } },
+                  h('span', { className: 'am-note-dim', style: { fontVariantNumeric: 'tabular-nums', minWidth: '62px' } }, clock(run.at)),
+                  pill(run.ok !== true ? labels.failedRun : run.deep ? labels.deep : labels.continuous, color),
+                  h('span', { className: 'am-note-dim', style: { fontSize: '11px' } }, `${number(run.nodes)} ${zh ? '节点' : 'nodes'} · ${number(run.tokens)} ${labels.tokens}`),
+                  run.ms > 0 ? h('span', { className: 'am-note-dim', style: { fontSize: '11px', opacity: 0.7 } }, `${run.ms}ms`) : null,
+                  run.ok !== true && run.error !== '' ? h('span', { style: { color: danger, fontSize: '11px' } }, run.error.slice(0, 120)) : null,
+                ),
+              )
+            }
+          }
+        }
         body.push(h('div', { className: 'am-item-title', style: { marginTop: '6px' } }, labels.types))
-        const top = data.types.slice(0, 12)
+        const top = data.types.slice(0, 10)
         const max = top.reduce((value, item) => Math.max(value, item.count), 1)
         for (const item of top) {
           body.push(
@@ -4663,16 +4779,9 @@ window.__ModuleLoader__.load({
               'div',
               { key: `type-${item.type}`, style: { display: 'flex', alignItems: 'center', gap: '8px' } },
               h('span', { style: { minWidth: '150px', fontSize: '12px', opacity: 0.85 } }, item.type),
-              h('span', {
-                style: {
-                  height: '8px',
-                  borderRadius: '4px',
-                  background: 'var(--am-accent, #4d6bfe)',
-                  width: `${Math.round((item.count / max) * 60)}%`,
-                  maxWidth: '60%',
-                },
-              }),
-              h('span', { className: 'am-note-dim', style: { fontSize: '12px' } }, String(item.count)),
+              h('span', { style: { flex: 1, height: '8px', borderRadius: '4px', background: 'var(--am-bg-soft, rgba(127,127,127,.12))', overflow: 'hidden' } },
+                h('span', { style: { display: 'block', height: '100%', width: `${Math.max(2, Math.round((item.count / max) * 100))}%`, background: accent, opacity: 0.75 } })),
+              h('span', { className: 'am-note-dim', style: { fontSize: '12px', minWidth: '46px', textAlign: 'end' } }, number(item.count)),
             ),
           )
         }
@@ -4681,15 +4790,22 @@ window.__ModuleLoader__.load({
           body.push(h('div', { className: 'am-note' }, labels.noCompactions))
         } else {
           for (const run of data.runs) {
-            const verdict = run.ok === true ? labels.ok : run.reason === 'refused-by-proxy' ? labels.refused : labels.failedRun
+            const okRun = run.ok === true
+            const refused = run.reason === 'refused-by-proxy'
+            const color = okRun ? accent : danger
             body.push(
               h(
                 'div',
-                { key: `run-${run.compactionId}`, className: 'am-item' },
-                h('div', { className: 'am-item-meta' }, `turn ${run.turn} · ${run.startedAt} · ${run.durationMs}ms · ${verdict}`),
+                { key: `run-${run.compactionId}`, className: 'am-item', style: { padding: '8px 10px', borderLeft: `3px solid ${color}` } },
+                h(
+                  'div',
+                  { className: 'am-item-meta', style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
+                  pill(okRun ? labels.ok : refused ? labels.refused : labels.failedRun, color),
+                  `turn ${run.turn} · ${clock(run.startedAt)} · ${run.durationMs}ms`,
+                ),
                 run.summaryChars > 0
-                  ? h('div', { className: 'am-item-snippet' }, `${labels.summaryChars}: ${run.summaryChars}`)
-                  : h('div', { className: 'am-item-snippet am-note-dim' }, run.reason.slice(0, 220)),
+                  ? h('div', { className: 'am-item-snippet' }, `${labels.summaryChars}: ${number(run.summaryChars)}`)
+                  : h('div', { className: 'am-item-snippet am-note-dim' }, String(run.reason || '').slice(0, 220)),
               ),
             )
           }

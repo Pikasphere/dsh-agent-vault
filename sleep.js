@@ -546,6 +546,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const tokensAfter = measureTokens(sessionId)
     record({
       at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
+      deep: config.deep === true,
       span: { start: span.start, end: span.end, nodes: span.nodes },
       archived: ids, stubChars: stub.length,
       shadowedTokenCount: Math.round((span.chars ?? 0) / 3),
@@ -945,6 +946,56 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
   }
 
   /**
+   * Fold accounting for one session, split by the two paths: the continuous
+   * tail folds that keep the prefix cached, and the deep fold that reaches past
+   * the watermark once the hard threshold is crossed. The panel shows them as
+   * separate numbers on purpose — they have different costs and different
+   * failure modes, and a session that only ever deep-folds is being neglected.
+   */
+  function foldSummary(sessionId) {
+    const rows = history(2000).filter(row => String(row.sessionId ?? '') === sessionId && row.kind === 'shelve')
+    const blank = () => ({ count: 0, tokens: 0, nodes: 0, lastAt: '', lastRun: null })
+    const continuous = blank()
+    const deep = blank()
+    const recent = []
+    const failures = []
+    let streak = { count: 0, at: '', stage: '', error: '' }
+    for (const row of rows) {
+      const bucket = row.deep === true || (Number(row.shadowedTokenCount) || 0) >= 120000 ? deep : continuous
+      if (row.ok === true) {
+        bucket.count += 1
+        bucket.tokens += Number(row.shadowedTokenCount) || 0
+        bucket.nodes += Number(row.span?.nodes) || 0
+        bucket.lastAt = row.at ?? ''
+        bucket.lastRun = row
+        streak = { count: 0, at: '', stage: '', error: '' }
+      } else {
+        failures.push({ at: row.at ?? '', stage: row.stage ?? '', error: String(row.error ?? '').slice(0, 300) })
+        streak = { count: streak.count + 1, at: row.at ?? '', stage: row.stage ?? '', error: String(row.error ?? '').slice(0, 300) }
+      }
+      recent.push({
+        at: row.at ?? '',
+        ok: row.ok === true,
+        deep: row.deep === true || (Number(row.shadowedTokenCount) || 0) >= 120000,
+        nodes: Number(row.span?.nodes) || 0,
+        tokens: Number(row.shadowedTokenCount) || 0,
+        saved: Number(row.savedTokens) || 0,
+        ms: Number(row.durationMs) || 0,
+        stage: row.stage ?? '',
+        error: String(row.error ?? '').slice(0, 200),
+      })
+    }
+    return {
+      continuous,
+      deep,
+      recent: recent.slice(-12),
+      failures: failures.slice(-5),
+      alert: streak.count >= 2 ? streak : null,
+      totalTokens: continuous.tokens + deep.tokens,
+    }
+  }
+
+  /**
    * Sessions whose last attempts all failed. The host treats a refused
    * compaction as a warning and carries on, so a session can sit over its
    * window with nothing but a warn line in a log nobody reads — this run count
@@ -987,5 +1038,5 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
   }
 
-  return { attach, maybeCompact, settings, state, history, failures, logFile }
+  return { attach, maybeCompact, settings, state, history, failures, foldSummary, logFile }
 }

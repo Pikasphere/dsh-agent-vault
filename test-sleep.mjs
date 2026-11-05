@@ -413,6 +413,28 @@ function harness(options = {}) {
   fs.rmSync(dir, { recursive: true, force: true })
 }
 
+// foldSummary keeps the two fold paths apart: the ledger shows them separately
+{
+  const continuous = harness({ tokens: 700, toolResults: false, settings: { keepUnder: 500, triggerTokens: 5000, mode: 'shelve', minFoldTokens: 500, cooldownMs: 0 } })
+  const first = await continuous.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(first?.ok, true)
+  const summary = continuous.sleep.foldSummary('session-a')
+  assert.ok(summary.continuous.count >= 1, 'at least one continuous fold')
+  assert.equal(summary.deep.count, 0)
+  assert.equal(summary.recent.at(-1).deep, false)
+  assert.ok(summary.continuous.tokens > 0)
+  assert.equal(summary.alert, null)
+}
+{
+  const deep = harness({ tokens: 700, toolResults: false, settings: { keepUnder: 500, triggerTokens: 600, mode: 'shelve', minFoldTokens: 500, cooldownMs: 0 } })
+  const first = await deep.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(first?.ok, true)
+  const summary = deep.sleep.foldSummary('session-a')
+  assert.equal(summary.deep.count, 1)
+  assert.equal(summary.continuous.count, 0)
+  assert.equal(summary.recent.at(-1).deep, true)
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },

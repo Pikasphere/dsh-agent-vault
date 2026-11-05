@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0-beta.13 — 2026-11-05
+
+账本页重做：折叠按「持续 / 硬」两条路径分开显示，失败的折叠不再只是日志里的一行。
+
+- `sleep.foldSummary(sessionId)`：把 `index/compaction.jsonl` 里本会话的 shelve 记录分成持续折叠与硬折叠（新记录带 `deep: true`；旧记录按 `shadowedTokenCount >= 120000` 判定——实测持续折叠均值 3.1 万、硬折叠 20 万，界线干净）。另给 `alert`：尾部连续失败 ≥2 次。
+- `session.context` 返回体新增 `folds`（continuous / deep / recent / failures / alert），由 `handleOp` 合并 `sleep.foldSummary`。
+- 面板账本页改成：顶部统计芯片（峰值请求、摘要字符、剪枝次数）→ 两张并排卡片（持续折叠 / 硬折叠，各显示次数、归档 token、最近一次时间）→ 最近折叠时间线（带彩色徽章与失败原因）→ 事件构成条形图 → 宿主压缩记录。
+- 失败可见性：连续失败时页面顶部出现红色告警条，写清次数与错误文本；`sleep.state()` 早先已有 `failing`/`alert`。
+- 测试：`test-sleep.mjs` 覆盖两条路径的分类与告警阈值。
+
 ## 2.1.0-beta.12 — 2026-11-05
 
 只留两条路径，删掉中间那条。

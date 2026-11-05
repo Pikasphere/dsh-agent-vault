@@ -1321,7 +1321,7 @@ function rejectionFor(ctx, req) {
   return structuralRejection(req)
 }
 
-async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, op, args) {
+async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, sleep, op, args) {
   switch (op) {
     case 'state':
       return store.state()
@@ -1399,7 +1399,13 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
       if (agentId === '') throw new MemoryError('no-agent', 'this session is not bound to an agent')
       const readable = recall.sessions(agentId).some(item => item.sessionId === sessionId)
       if (!readable) throw new MemoryError('not-found', `session ${sessionId} is not readable by this agent`)
-      if (op === 'session.context') return recall.sessionLedger(sessionId)
+      if (op === 'session.context') {
+        const ledger = recall.sessionLedger(sessionId)
+        const folds = sleep !== undefined && sleep !== null && typeof sleep.foldSummary === 'function'
+          ? sleep.foldSummary(sessionId)
+          : null
+        return { ...ledger, folds }
+      }
       if (op === 'session.map') return recall.sessionMap(sessionId)
       return recall.sessionFind({ sessionId, query: args.query, limit: args.limit })
     }
@@ -1644,7 +1650,7 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, op, args)
+          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, sleep, op, args)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })
