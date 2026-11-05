@@ -19,7 +19,9 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // Hard threshold: ask the host for its own balanced reduction.
   triggerTokens: 400000,
   // Target size of one tail slice, and how much recent work never to touch.
-  chunkTokens: 20000,
+  // Bigger slices amortise the cache re-pay: at 20k a fold freed ~3k of what
+  // the model actually reads and cost ~1k of cache miss, a wash within a turn.
+  chunkTokens: 60000,
   keepRecent: 8,
   // Below this a fold costs more (one summary call + a cache re-pay) than it
   // saves, so small slices wait for the next idle.
@@ -29,7 +31,7 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // what the model actually reads (tool results are already pruned to ~5k
   // chars), and the fold costs a full prompt-cache miss — so small slices are
   // a net loss.
-  minSavedTokens: 30000,
+  minSavedTokens: 3000,
   // 'host' asks the compaction service (unreachable from a profile plugin);
   // 'shelve' archives the slice into the agent's journal and replaces it with
   // a pointer stub, which needs no service and cannot fail on size.
@@ -537,16 +539,26 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       record({ at: new Date().toISOString(), kind: 'shelve', ok: true, skipped: 'duplicate', sessionId, stage: 'duplicate', span: { start: span.start, end: span.end, nodes: span.nodes } })
       return { attempted: false, why: 'duplicate' }
     }
+    // Only a hard fold is archived into the journal. A small fold is a cache
+    // move, not a memory: the raw events stay in the session log, which the
+    // session index covers end to end, so writing every slice into the journal
+    // would only pollute it (1,133 such notes by 2026-11-05) and duplicate what
+    // `agent_recall` can already reach.
+    const archive = config.archive !== false
     let written = null
-    try {
-      written = shelveMessages(session, span, agentId, sessionId, seqs)
-    } catch (error) {
-      record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'journal', error: String(error?.message ?? error).slice(0, 300) })
-      return { attempted: true, ok: false }
+    if (archive) {
+      try {
+        written = shelveMessages(session, span, agentId, sessionId, seqs)
+      } catch (error) {
+        record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'journal', error: String(error?.message ?? error).slice(0, 300) })
+        return { attempted: true, ok: false }
+      }
+      if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
     }
-    if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
-    const ids = written.map(item => item.id)
-    const stub = `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
+    const ids = written === null ? [] : written.map(item => item.id)
+    const stub = archive
+      ? `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
+      : `【已折叠】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已移出上下文。原文仍在会话 ${sessionId} 的 seq ${span.start}–${span.end}，需要细节时用 agent_recall 的 session 来源检索，不要凭印象补写。 #am-${stamp}`
     try {
       session.append(
         'user/message',
@@ -641,13 +653,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // `keepUnder` is the stopping line in both modes: with `foldEveryTurn`
         // it bounds how far one turn's pass goes, and 0 means "no line at all,
         // fold until nothing foldable is left".
-        const target = config.keepUnder
-        let slices = Math.max(config.maxSlices, 6)
+        // One slice per turn end. Folding repeatedly inside a single idle was
+        // measured at 60 folds in 13 minutes with a net context change of zero:
+        // each slice was too small to amortise its own cache miss.
+        const slices = 1
         for (let slice = 0; slice < slices; slice += 1) {
-          // One big slice once the hard threshold is crossed; small slices only
-          // top up below it.
           const deep = pressure >= config.triggerTokens
-          if (deep) slices = 1
           const sliceConfig = deep
             ? {
                 ...config,
@@ -656,13 +667,13 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
                 chunkTokens: Math.min(Math.max(pressure - (config.keepUnder > 0 ? config.keepUnder : Math.trunc(config.triggerTokens / 2)), config.chunkTokens), config.bigChunkTokens),
                 maxSlices: 1,
                 deep: true,
+                archive: true,
               }
-            : config
+            : { ...config, maxSlices: 1, archive: false }
           last = await shelve(sessionId, agent, sliceConfig)
           if (last && last.attempted === true) done = last
           pressure = measureTokens(sessionId)
           if (!last || last.attempted !== true) break
-          if (measureTokens(sessionId) < target) break
         }
         // Only a real attempt earns the cooldown: resetting it on "no span"
         // starved every later attempt for a full minute at a time.
@@ -685,12 +696,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       try {
         let last = null
         let done = null
-        for (let slice = 0; slice < config.maxSlices; slice += 1) {
-          last = await shelve(sessionId, agent, config)
-          if (last && last.attempted === true) done = last
-          if (!last || last.attempted !== true) break
-          if (measureTokens(sessionId) < config.keepUnder) break
-        }
+        // Same rule as the service path: one slice per turn end, and only a
+        // slice big enough to cross the hard threshold is archived.
+        last = await shelve(sessionId, agent, { ...config, maxSlices: 1, archive: tokens >= config.triggerTokens })
+        if (last && last.attempted === true) done = last
         if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
         return done ?? last
       } finally {

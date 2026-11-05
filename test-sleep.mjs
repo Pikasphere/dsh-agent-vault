@@ -378,9 +378,9 @@ function harness(options = {}) {
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'continuous mode folds below the soft threshold')
-  assert.ok(h.writes.length >= 2, `expected several folds, got ${h.writes.length}`)
-  assert.ok(h.appended.length >= 2, 'each fold leaves a pointer stub')
-  assert.equal(h.writes[0].meta?.archive, true, 'archives are marked so the vector layer skips them')
+  assert.equal(h.appended.length, 1, 'one slice per turn end, not a burst')
+  assert.equal(h.writes.length, 0, 'a small fold is a cache move, not a journal note')
+  assert.ok(h.appended[0].data.content[0].text.includes('【已折叠】'), 'the stub points at the session log')
 }
 
 // without keepUnder the same session is simply below threshold
@@ -400,8 +400,8 @@ function harness(options = {}) {
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'folds even though the session is tiny')
-  assert.ok(h.writes.length >= 1, 'archived something')
-  assert.ok(h.appended.length >= 1, 'left a pointer stub')
+  assert.equal(h.writes.length, 0, 'a small fold is not journaled')
+  assert.equal(h.appended.length, 1, 'left one pointer stub')
 }
 
 // foldEveryTurn off: the same tiny session is left alone, cooldown or not
@@ -465,7 +465,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 30000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, chunkTokens: 60000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 3000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

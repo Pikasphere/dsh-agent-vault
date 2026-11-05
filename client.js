@@ -3168,7 +3168,7 @@ window.__ModuleLoader__.load({
                 type: 'number',
                 min: '2000',
                 step: '5000',
-                value: sleepChunkDraft === '' ? String(data.sleep?.chunkTokens ?? 20000) : sleepChunkDraft,
+                value: sleepChunkDraft === '' ? String(data.sleep?.chunkTokens ?? 60000) : sleepChunkDraft,
                 disabled: busy !== '',
                 onChange: event => setSleepChunkDraft(event.target.value),
                 onBlur: () => {
@@ -3218,7 +3218,7 @@ window.__ModuleLoader__.load({
                 type: 'number',
                 min: '0',
                 step: '10000',
-                value: sleepMinSavedDraft === '' ? String(data.sleep?.minSavedTokens ?? 30000) : sleepMinSavedDraft,
+                value: sleepMinSavedDraft === '' ? String(data.sleep?.minSavedTokens ?? 3000) : sleepMinSavedDraft,
                 disabled: busy !== '',
                 onChange: event => setSleepMinSavedDraft(event.target.value),
                 onBlur: () => {
