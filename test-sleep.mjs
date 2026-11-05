@@ -28,7 +28,7 @@ function harness(options = {}) {
   for (let index = 1; index <= totalNodes; index += 1) {
     const seq = index
     nodes.push(seq)
-    const isToolResult = index % 5 === 0
+    const isToolResult = options.toolResults !== false && index % 5 === 0
     const body = [{ type: 'text', text: 'x'.repeat(200) }]
     events.set(
       seq,
@@ -331,6 +331,35 @@ function harness(options = {}) {
   assert.equal(result?.attempted, true)
   const [append] = h.appended
   assert.ok(append.opts.surfaceOp.endSeq < pending, 'the fold stops before the pending call')
+}
+
+// a run of failed attempts is surfaced, and only counts the trailing run
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleep-fail-'))
+  fs.mkdirSync(path.join(dir, 'index'), { recursive: true })
+  const lines = [
+    { at: '2026-11-04T10:00:00.000Z', kind: 'shelve', ok: false, sessionId: 'session-a', error: 'boom' },
+    { at: '2026-11-04T10:01:00.000Z', kind: 'shelve', ok: false, sessionId: 'session-a', error: 'boom again' },
+    { at: '2026-11-04T10:02:00.000Z', kind: 'shelve', ok: false, sessionId: 'session-b', error: 'unbalanced' },
+    { at: '2026-11-04T10:03:00.000Z', kind: 'shelve', ok: true, sessionId: 'session-b', shadowedTokenCount: 10 },
+  ]
+  fs.writeFileSync(
+    path.join(dir, 'index', 'compaction.jsonl'),
+    lines.map(line => JSON.stringify(line)).join('\n') + '\n',
+  )
+  const bare = createSleep({
+    ctx: { get: () => undefined, on: () => () => {}, effect: fn => fn(), logger: console },
+    store: { root: dir, bindingOf: () => 'agent-a', settings: () => ({}) },
+    journals: { notes: () => [] },
+    measureTokens: () => 0,
+  })
+  const reported = bare.state()
+  assert.equal(reported.failing.length, 1, 'the trailing run wins over older failures')
+  assert.equal(reported.failing[0].sessionId, 'session-a')
+  assert.equal(reported.failing[0].count, 2)
+  assert.equal(reported.failing[0].error, 'boom again')
+  assert.equal(reported.alert?.sessionId, 'session-a', 'two in a row is an alert')
+  fs.rmSync(dir, { recursive: true, force: true })
 }
 
 // defaults stay conservative

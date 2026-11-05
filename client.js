@@ -265,6 +265,7 @@ window.__ModuleLoader__.load({
         sleepThreshold: '触发阈值（tokens）',
         sleepThresholdHint: '按整个上下文的 token 数计。10 万窗口的模型建议 4 万；1M 窗口按需调高。',
         sleepStats: '已尝试 / 累计折叠',
+        sleepFailing: '压缩连续失败',
         sleepSoft: '开始小压缩（tokens）',
         sleepSoftHint: '超过这个值先做「尾部小折叠」：只压最近已消费的一段，缓存只废掉尾巴，不惊动前缀。默认是硬阈值的 75%。',
         sleepChunk: '每次折叠目标（tokens）',
@@ -548,6 +549,7 @@ window.__ModuleLoader__.load({
         sleepThreshold: 'Trigger (tokens)',
         sleepThresholdHint: 'Counted over the whole context. Roughly 40k for a 100k window; raise it for a 1M window.',
         sleepStats: 'attempts / folded',
+        sleepFailing: 'Compaction failing repeatedly',
         sleepSoft: 'Start small folds (tokens)',
         sleepSoftHint: 'Above this, fold a recent consumed slice first: only the tail of the cache is re-billed, the prefix stays warm. Defaults to 75% of the hard threshold.',
         sleepChunk: 'Fold size (tokens)',
@@ -3192,6 +3194,13 @@ window.__ModuleLoader__.load({
                   'p',
                   { className: 'am-note-dim' },
                   `${t('sleepStats')}: ${Number(data.sleep?.attempts ?? 0)} / ${Number(data.sleep?.savedTokens ?? 0)}`,
+                )
+              : null,
+            data.sleep?.alert
+              ? h(
+                  'p',
+                  { className: 'am-error' },
+                  `${t('sleepFailing')} ${Number(data.sleep.alert.count)} × — ${String(data.sleep.alert.error ?? '')}`,
                 )
               : null,
           ),

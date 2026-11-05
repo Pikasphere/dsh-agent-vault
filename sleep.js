@@ -915,8 +915,37 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
   }
 
+  /**
+   * Sessions whose last attempts all failed. The host treats a refused
+   * compaction as a warning and carries on, so a session can sit over its
+   * window with nothing but a warn line in a log nobody reads — this run count
+   * is what the panel turns into a red row.
+   */
+  function failures(window = 200) {
+    const rows = history(window).filter(row => row.ok === true || row.ok === false)
+    const runs = new Map()
+    for (const row of rows) {
+      const sessionId = String(row.sessionId ?? '')
+      if (sessionId === '') continue
+      if (row.ok === true) {
+        runs.delete(sessionId)
+        continue
+      }
+      const previous = runs.get(sessionId)
+      runs.set(sessionId, {
+        sessionId,
+        count: (previous?.count ?? 0) + 1,
+        at: row.at ?? '',
+        kind: row.kind ?? '',
+        error: String(row.error ?? '').slice(0, 400),
+      })
+    }
+    return [...runs.values()].sort((a, b) => b.count - a.count)
+  }
+
   function state() {
     const rows = history(200)
+    const failing = failures(200)
     return {
       ...settings(),
       logFile,
@@ -924,8 +953,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       attempts: rows.length,
       last: rows.length === 0 ? null : rows[rows.length - 1],
       savedTokens: rows.reduce((sum, row) => sum + (Number(row.shadowedTokenCount) || 0), 0),
+      failing,
+      alert: failing.length > 0 && failing[0].count >= 2 ? failing[0] : null,
     }
   }
 
-  return { attach, maybeCompact, settings, state, history, logFile }
+  return { attach, maybeCompact, settings, state, history, failures, logFile }
 }
