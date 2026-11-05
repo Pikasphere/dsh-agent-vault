@@ -26,11 +26,12 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // Below this a fold costs more (one summary call + a cache re-pay) than it
   // saves, so small slices wait for the next idle.
   minFoldTokens: 5000,
-  // Estimated model-visible tokens a slice must free before it is worth
-  // folding. Measured 2026-11-05: a 33k-token slice usually frees only ~3k of
-  // what the model actually reads (tool results are already pruned to ~5k
-  // chars), and the fold costs a full prompt-cache miss — so small slices are
-  // a net loss.
+  // How many tokens a slice must actually free, after calibration. Measured
+  // 2026-11-05 over 297 folds: median saving 2.7k, p75 3.8k, and 60% of folds
+  // fell under 3k — the gate is what removed those. Every fold also re-bills
+  // the tail after the stub (~540 uncached tokens at the median), so the bar
+  // cannot go near zero; and it must not go far above the median or folding
+  // stops happening at all.
   minSavedTokens: 3000,
   // 'host' asks the compaction service (unreachable from a profile plugin);
   // 'shelve' archives the slice into the agent's journal and replaces it with
