@@ -122,13 +122,32 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     return path.join(store.root, 'index', 'sleep.json')
   }
 
-  function watermarks() {
+  function readState() {
     try {
       const parsed = JSON.parse(fs.readFileSync(watermarkFile(), 'utf8'))
-      return parsed !== null && typeof parsed === 'object' && typeof parsed.foldStartSeq === 'object' ? parsed.foldStartSeq : {}
+      return parsed !== null && typeof parsed === 'object' ? parsed : {}
     } catch {
       return {}
     }
+  }
+
+  function writeState(patch) {
+    try {
+      const next = { version: 1, ...readState(), ...patch }
+      fs.mkdirSync(path.dirname(watermarkFile()), { recursive: true })
+      const tmp = `${watermarkFile()}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify(next, null, 2))
+      fs.renameSync(tmp, watermarkFile())
+      return true
+    } catch (error) {
+      recordError(store, 'sleep/watermark', error)
+      return false
+    }
+  }
+
+  function watermarks() {
+    const table = readState().foldStartSeq
+    return table !== null && typeof table === 'object' ? table : {}
   }
 
   function foldStartOf(sessionId) {
@@ -138,15 +157,37 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
 
   function setFoldStart(sessionId, seq) {
     if (!Number.isFinite(seq)) return
-    try {
-      const table = { ...watermarks(), [sessionId]: seq }
-      fs.mkdirSync(path.dirname(watermarkFile()), { recursive: true })
-      const tmp = `${watermarkFile()}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, foldStartSeq: table }, null, 2))
-      fs.renameSync(tmp, watermarkFile())
-    } catch (error) {
-      recordError(store, 'sleep/watermark', error)
-    }
+    writeState({ foldStartSeq: { ...watermarks(), [sessionId]: seq } })
+  }
+
+  /**
+   * How much the estimator over-predicts, learned per session.
+   *
+   * Measured 2026-11-05: raw estimates ran ~4.5x the token count the meter
+   * actually dropped (a 33k-char slice that looked like 12k tokens freed 2.7k),
+   * so the 30k gate let almost everything through. The ratio is smoothed toward
+   * `savedTokens / rawEstimate` after every successful fold.
+   */
+  function calibrations() {
+    const table = readState().calibration
+    return table !== null && typeof table === 'object' ? table : {}
+  }
+
+  function calibrationOf(sessionId) {
+    const ratio = Number(calibrations()[sessionId]?.ratio)
+    if (!Number.isFinite(ratio) || ratio <= 0) return 1
+    return Math.min(2, Math.max(0.05, ratio))
+  }
+
+  function learnCalibration(sessionId, rawEstimate, actual) {
+    if (!Number.isFinite(rawEstimate) || rawEstimate <= 0) return
+    if (!Number.isFinite(actual) || actual < 0) return
+    const observed = Math.min(2, Math.max(0.05, actual / rawEstimate))
+    const previous = calibrationOf(sessionId)
+    // Half-and-half: one odd fold (a huge tool result, a resumed session) must
+    // move the factor, but not reset it.
+    const next = Math.round((previous * 0.5 + observed * 0.5) * 1000) / 1000
+    writeState({ calibration: { ...calibrations(), [sessionId]: { ratio: next, at: new Date().toISOString() } } })
   }
 
   /** One line per idle when `sleep.debug` is on: where the decision stopped. */
@@ -522,7 +563,9 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
     const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
-    const estimatedSavedTokens = estimateSavedTokens(session, seqs)
+    const rawEstimate = estimateSavedTokens(session, seqs)
+    const calibration = calibrationOf(sessionId)
+    const estimatedSavedTokens = Math.round(rawEstimate * calibration)
     if (config.minSavedTokens > 0 && estimatedSavedTokens < config.minSavedTokens) {
       record({
         at: new Date().toISOString(),
@@ -530,6 +573,8 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         why: 'low-gain',
         sessionId,
         estimatedSavedTokens,
+        rawEstimatedSavedTokens: rawEstimate,
+        calibration,
         span: { start: span.start, end: span.end, nodes: span.nodes },
       })
       return { attempted: false, why: 'low-gain', estimatedSavedTokens }
@@ -594,6 +639,8 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // the rebuilt surface. They do not agree, so record both — tuning the
     // threshold needs the meter, judging the archive needs the shadow.
     const tokensAfter = measureTokens(sessionId)
+    const savedTokens = tokensBefore > 0 && tokensAfter > 0 ? Math.max(0, tokensBefore - tokensAfter) : null
+    learnCalibration(sessionId, rawEstimate, savedTokens)
     record({
       at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
       deep: config.deep === true,
@@ -601,10 +648,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       archived: ids,
       stubChars: stub.length,
       estimatedSavedTokens,
+      rawEstimatedSavedTokens: rawEstimate,
+      calibration,
       shadowedTokenCount: Math.round((span.chars ?? 0) / 3),
       tokensBefore: tokensBefore > 0 ? tokensBefore : null,
       tokensAfter: tokensAfter > 0 ? tokensAfter : null,
-      savedTokens: tokensBefore > 0 && tokensAfter > 0 ? Math.max(0, tokensBefore - tokensAfter) : null,
+      savedTokens,
       durationMs: Date.now() - startedAt,
     })
     return { attempted: true, ok: true, archived: ids }

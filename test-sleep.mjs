@@ -275,6 +275,30 @@ function harness(options = {}) {
   assert.ok(row.span.start >= first.start)
 }
 
+// calibration: the estimator is corrected by what the meter actually dropped
+{
+  const h = harness({
+    tokens: 1200,
+    settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minSavedTokens: 0, minFoldTokens: 100 },
+  })
+  const first = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(first?.ok, true)
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.calibration, 1, 'the first fold trusts the raw estimate')
+  const ratio = Number(JSON.parse(fs.readFileSync(path.join(root, 'index', 'sleep.json'), 'utf8')).calibration['session-a'].ratio)
+  assert.ok(ratio > 0 && ratio <= 2, `learned ratio ${ratio}`)
+  assert.notEqual(ratio, 1, 'the factor moves toward the measured saving')
+  // The learned factor sticks and is applied to the next estimate.
+  const before = h.sleep.history(10).length
+  const second = await h.sleep.maybeCompact({ id: 'session-a' })
+  const rows = h.sleep.history(10)
+  if (second !== null && rows.length > before) {
+    // Same-ISO-second rows can tie, so look for the row rather than trusting order.
+    const calibrated = rows.find(r => r.calibration === ratio && r.rawEstimatedSavedTokens > 0)
+    assert.ok(calibrated !== undefined, 'the previous fold calibrated this one')
+  }
+}
+
 // low-gain gate: a slice that would free too little is skipped, not folded
 {
   const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minSavedTokens: 30000, minFoldTokens: 100 } })
