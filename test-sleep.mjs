@@ -333,6 +333,36 @@ function harness(options = {}) {
   assert.ok(append.opts.surfaceOp.endSeq < pending, 'the fold stops before the pending call')
 }
 
+// continuous mode: fold on every idle until the target token count is met
+{
+  const h = harness({
+    tokens: 90000,
+    toolResults: false,
+    settings: {
+      softTokens: 200000,
+      triggerTokens: 325000,
+      keepUnder: 40000,
+      chunkTokens: 20000,
+      keepRecent: 4,
+      minFoldTokens: 1500,
+      cooldownMs: 0,
+      mode: 'shelve',
+    },
+  })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true, 'continuous mode folds below the soft threshold')
+  assert.ok(h.writes.length >= 2, `expected several folds, got ${h.writes.length}`)
+  assert.ok(h.appended.length >= 2, 'each fold leaves a pointer stub')
+  assert.equal(h.writes[0].meta?.archive, true, 'archives are marked so the vector layer skips them')
+}
+
+// without keepUnder the same session is simply below threshold
+{
+  const h = harness({ tokens: 90000, toolResults: false, settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve' } })
+  assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
+  assert.equal(h.writes.length, 0)
+}
+
 // a run of failed attempts is surfaced, and only counts the trailing run
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleep-fail-'))
@@ -365,7 +395,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

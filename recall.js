@@ -372,6 +372,10 @@ export function createRecall(options = {}) {
         title: String(entry.title ?? ''),
         text: String(entry.text ?? ''),
         tags: [],
+        // Folded archives are the long tail of a session: keep them lexically
+        // searchable but out of the vector layer, or one long conversation adds
+        // megabytes of chunks to every index rebuild.
+        archive: entry.meta?.archive === true,
         sessionId: String(entry.meta?.sessionId ?? ''),
       }),
     )

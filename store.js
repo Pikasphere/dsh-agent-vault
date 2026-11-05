@@ -206,6 +206,7 @@ export function createStore(options = {}) {
     const soft = Number(value.softTokens)
     const chunk = Number(value.chunkTokens)
     const keep = Number(value.keepRecent)
+    const under = Number(value.keepUnder)
     const minFold = Number(value.minFoldTokens)
     return {
       enabled: value.enabled === true,
@@ -213,6 +214,7 @@ export function createStore(options = {}) {
       softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : 300000,
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : 20000,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : 8,
+      keepUnder: Number.isFinite(under) && under >= 20000 ? Math.trunc(under) : 0,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : 5000,
       mode: value.mode === 'shelve' ? 'shelve' : 'host',
       maxSlices: Number.isFinite(Number(value.maxSlices)) && Number(value.maxSlices) >= 1 ? Math.min(Math.trunc(Number(value.maxSlices)), 8) : 3,
@@ -569,6 +571,9 @@ export function createStore(options = {}) {
       if (Number.isFinite(chunk) && chunk >= 2000) merged.chunkTokens = Math.trunc(chunk)
       const keep = Number(patch.sleep.keepRecent)
       if (Number.isFinite(keep) && keep >= 2) merged.keepRecent = Math.trunc(keep)
+      const under = Number(patch.sleep.keepUnder)
+      if (Number.isFinite(under) && under >= 20000) merged.keepUnder = Math.trunc(under)
+      if (under === 0) merged.keepUnder = 0
       const minFold = Number(patch.sleep.minFoldTokens)
       if (Number.isFinite(minFold) && minFold > 0) merged.minFoldTokens = Math.trunc(minFold)
       if (patch.sleep.mode === 'host' || patch.sleep.mode === 'shelve') merged.mode = patch.sleep.mode

@@ -270,6 +270,8 @@ window.__ModuleLoader__.load({
         sleepSoftHint: '超过这个值先做「尾部小折叠」：只压最近已消费的一段，缓存只废掉尾巴，不惊动前缀。默认是硬阈值的 75%。',
         sleepChunk: '每次折叠目标（tokens）',
         sleepChunkHint: '一次折叠大约吃掉这么多 token 的历史。太小收益低，太大一样会伤缓存。',
+        sleepKeepUnder: '持续压缩目标（tokens，0=关闭）',
+        sleepKeepUnderHint: '填一个数（例如 120000），每次空闲就把上下文折回这个大小以下，不必等软阈值。归档只进词法检索、不进向量索引，所以不会拖慢嵌入。',
         recallSrcSession: '对话',
         recallSessions: '对话来源',
         recallSessionsHint: '以下是本智能体有权读取的会话。取消勾选后，该会话不再进入索引（检索不到），但「回到对话」仍可用。',
@@ -554,6 +556,8 @@ window.__ModuleLoader__.load({
         sleepSoftHint: 'Above this, fold a recent consumed slice first: only the tail of the cache is re-billed, the prefix stays warm. Defaults to 75% of the hard threshold.',
         sleepChunk: 'Fold size (tokens)',
         sleepChunkHint: 'History consumed by one fold. Too small barely helps; too large breaks as much cache as a big compaction.',
+        sleepKeepUnder: 'Keep context under (tokens, 0 = off)',
+        sleepKeepUnderHint: 'Set e.g. 120000 and every idle folds the context back under it, no soft-threshold wait. Archives stay lexically searchable but skip the vector index, so embedding cost stays flat.',
         recallSrcSession: 'conversation',
         recallSessions: 'Conversations',
         recallSessionsHint: 'Sessions this agent may read. Uncheck one to keep it out of the index (it will not be searchable), while "Go to conversation" still works.',
@@ -941,6 +945,7 @@ window.__ModuleLoader__.load({
       const [sleepDraft, setSleepDraft] = useState('')
       const [sleepSoftDraft, setSleepSoftDraft] = useState('')
       const [sleepChunkDraft, setSleepChunkDraft] = useState('')
+      const [sleepUnderDraft, setSleepUnderDraft] = useState('')
       // null until the user touches a field: the card shows the persisted values
       // straight from memory.index, so a stale panel can never "save" old numbers.
       const [tuningDraft, setTuningDraft] = useState(null)
@@ -3189,6 +3194,28 @@ window.__ModuleLoader__.load({
               }),
             ),
             h('p', { className: 'am-note-dim' }, t('sleepChunkHint')),
+            h(
+              Field,
+              { label: t('sleepKeepUnder') },
+              h('input', {
+                className: 'am-input',
+                type: 'number',
+                min: '0',
+                step: '10000',
+                value: sleepUnderDraft === '' ? String(data.sleep?.keepUnder ?? 0) : sleepUnderDraft,
+                disabled: busy !== '',
+                onChange: event => setSleepUnderDraft(event.target.value),
+                onBlur: () => {
+                  const next = Number(sleepUnderDraft)
+                  if (sleepUnderDraft !== '' && Number.isFinite(next) && next >= 0) void saveSleep({ keepUnder: next })
+                  setSleepUnderDraft('')
+                },
+                onKeyDown: event => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                },
+              }),
+            ),
+            h('p', { className: 'am-note-dim' }, t('sleepKeepUnderHint')),
             data.sleep
               ? h(
                   'p',

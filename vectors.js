@@ -180,7 +180,7 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     // stable order the `changed` check below fires on every call and rewrites
     // 300 KB per query just because two agents were visited in another order.
     const wanted = entries
-      .filter(entry => VECTOR_SOURCES.includes(entry.src) && sourceText(entry).trim() !== '')
+      .filter(entry => VECTOR_SOURCES.includes(entry.src) && entry.archive !== true && sourceText(entry).trim() !== '')
       .sort((a, b) => entryKey(a).localeCompare(entryKey(b)))
     const current = load()
     const known = new Map() // entry key -> {hash, chunkRows:[Float32Array], titleRow: Float32Array|null}
