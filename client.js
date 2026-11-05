@@ -125,46 +125,6 @@ window.__ModuleLoader__.load({
         journalHint: '私有日志：只属于这个智能体的详细记录（类似日记）。其他智能体看不到，也不会自动注入，它自己决定何时查阅。',
         journalEmpty: '这个智能体还没有写日志。',
         journalReadOnly: '日志是追加式的，已有条目只读；要补充就新建一条。',
-        checkpoints: '检查点',
-        checkpointsHint: '每次交棒时写下的交接上下文。这是权威状态：召回索引不检索它，也不会被当成检索素材；它只在这里按时间倒序陈列。',
-        checkpointsEmpty: '还没有检查点。上下文压力到达阈值、且记忆与日志都写完时，才会写一条。',
-        checkpointTriggered: '触发时',
-        checkpointThreshold: '阈值',
-        checkpointSession: '会话',
-        checkpointCopy: '复制全文',
-        checkpointCopied: '已复制',
-        checkpointCopyFail: '复制失败',
-        handoff: '接力',
-        handoffHint: '上下文压力到达阈值后，这一步会提醒模型先写记忆和日志；两件都完成后自动写下一份交棒检查点（可选再导出一份 markdown）。',
-        handoffEnabled: '启用接力提醒',
-        handoffEnabledHint: '关闭后不再测量压力，也不生成检查点。',
-        handoffThreshold: '触发的 token 阈值',
-        handoffRemindEvery: '提醒间隔（步）',
-        handoffExport: '导出目录（可选）',
-        handoffExportPlaceholder: '留空则只写入日志',
-        handoffExportHint: '填了就额外写一份 markdown 到该目录；日志始终是唯一真相。',
-        handoffSessions: '当前会话压力',
-        handoffNoSessions: '当前没有活动会话。',
-        autoSwitch: '检查点后自动开启新对话',
-        autoSwitchHint: '当前会话写下检查点、且这个回合结束后，自动新建一个对话并切过去（继承绑定、工作区、审批策略与模型），旧会话转为归档。需要面板保持打开或页面在运行。',
-        autoStartPrompt: '启动指令',
-        autoStartPromptPlaceholder: '新对话打开后自动发送的第一条消息…',
-        autoStartPromptHint: '自动切换创建新对话后，把这段文字作为第一条消息发出去；留空则只打开对话、不发消息。手动「续会话」不会发送。',
-        'stage.off': '已关闭',
-        'stage.watching': '观察中',
-        'stage.due': '已到阈值',
-        'stage.requested': '等待沉淀',
-        'stage.settled': '已生成检查点',
-        handoffSave: '保存设置',
-        handoffReset: '重置',
-        handoffResetConfirm: '重置这个会话的接力状态？它会重新从“观察中”开始；已生成的检查点日志不会删除。',
-        handoffCheckpoint: '检查点',
-        handoffExported: '已导出',
-        handoffContinue: '续会话',
-        handoffContinueHint: '新建一个会话：自动绑定这个智能体，并继承当前的审批策略。',
-        handoffNoWorkspace: '当前环境不支持从面板新建会话。',
-        handoffArmed: '待续',
-        handoffArmedHint: '30 分钟内在这个目录新建的会话会自动绑定该智能体，并继承审批策略。',
         sessionsTab: '对话',
         sessionsHint: '这里按智能体收拢它的对话。已绑定的对话会从左侧工作区列表里隐藏，只能从这里或搜索找到；选择工作区会立即切过去。',
         sessionsTitle: '它的对话',
@@ -413,46 +373,6 @@ window.__ModuleLoader__.load({
         journalHint: 'Private journal: the detailed diary-like record of this one agent. Other agents cannot see it, nothing is injected automatically, and the agent decides when to consult it.',
         journalEmpty: 'This agent has not written a journal entry yet.',
         journalReadOnly: 'The journal is append-only, so an existing entry is read-only; add a new one instead.',
-        checkpoints: 'Checkpoints',
-        checkpointsHint: 'The handoff context written at each relay. This is authoritative state: recall never indexes it and never treats it as material; it is listed here, newest first.',
-        checkpointsEmpty: 'No checkpoint yet. One is written once pressure passes the threshold and both memory and journal are saved.',
-        checkpointTriggered: 'Written at',
-        checkpointThreshold: 'threshold',
-        checkpointSession: 'session',
-        checkpointCopy: 'Copy all',
-        checkpointCopied: 'Copied',
-        checkpointCopyFail: 'Copy failed',
-        handoff: 'Handoff',
-        handoffHint: 'When context pressure reaches the threshold, this step asks the model to write its memory and journal first; once both land, a handoff checkpoint is written (optionally exported as markdown).',
-        handoffEnabled: 'Enable handoff reminders',
-        handoffEnabledHint: 'When off, pressure is not measured and no checkpoint is produced.',
-        handoffThreshold: 'Trigger threshold (tokens)',
-        handoffRemindEvery: 'Remind every N steps',
-        handoffExport: 'Export directory (optional)',
-        handoffExportPlaceholder: 'Empty: journal only',
-        handoffExportHint: 'When set, a markdown copy is written there too; the journal stays the source of truth.',
-        handoffSessions: 'Current session pressure',
-        handoffNoSessions: 'No live sessions right now.',
-        autoSwitch: 'Start a new conversation after a checkpoint',
-        autoSwitchHint: 'Once the current session has a checkpoint and its turn is over, a fresh conversation opens automatically in the same workspace with the inherited agent, approval policy and model; the old one is archived.',
-        autoStartPrompt: 'Startup instruction',
-        autoStartPromptPlaceholder: 'First message sent into the new conversation…',
-        autoStartPromptHint: 'After the automatic switch creates the new conversation, this text is sent as its first message. Leave it empty to open the conversation without sending anything. Manual "Continue in new session" never sends it.',
-        'stage.off': 'off',
-        'stage.watching': 'watching',
-        'stage.due': 'at threshold',
-        'stage.requested': 'awaiting checkpoint',
-        'stage.settled': 'checkpoint written',
-        handoffSave: 'Save settings',
-        handoffReset: 'Reset',
-        handoffResetConfirm: 'Reset this session’s handoff state? It restarts from "watching"; checkpoints already written to the journal are kept.',
-        handoffCheckpoint: 'checkpoint',
-        handoffExported: 'exported',
-        handoffContinue: 'Continue in new session',
-        handoffContinueHint: 'Start a fresh session bound to this agent and carrying over its approval policy.',
-        handoffNoWorkspace: 'This environment cannot start a session from the panel.',
-        handoffArmed: 'ready to continue',
-        handoffArmedHint: 'A new session in this directory within 30 minutes will inherit this agent and its approval policy.',
         sessionsTab: 'Sessions',
         sessionsHint: 'Each agent keeps its own conversations here. Bound conversations are hidden from the workspace list on the left; find them here or through search. Picking a workspace switches to it right away.',
         sessionsTitle: 'Its conversations',
@@ -921,16 +841,6 @@ window.__ModuleLoader__.load({
       const [journal, setJournal] = useState([])
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
-      const [checkpoints, setCheckpoints] = useState([])
-      const [checkpointEntry, setCheckpointEntry] = useState(null)
-      const [handoffInfo, setHandoffInfo] = useState(null)
-      const [handoffDraft, setHandoffDraft] = useState({
-        triggerTokens: 300000,
-        remindEverySteps: 2,
-        exportDir: '',
-        startupPrompt: '',
-      })
-      const [handoffVersion, setHandoffVersion] = useState(0)
       const [sessionsInfo, setSessionsInfo] = useState({ sessions: [], workspaces: [] })
       const [sessionsWorkspace, setSessionsWorkspace] = useState('')
       const [sessionsVersion, setSessionsVersion] = useState(0)
@@ -1164,54 +1074,7 @@ window.__ModuleLoader__.load({
       }, [vault?.id, tab, journalVersion])
 
       useEffect(() => {
-        if (!vault || tab !== 'checkpoints') return undefined
-        let live = true
-        request('/op', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ op: 'journal.list', args: { id: vault.id, includeCheckpoints: true, limit: 100 } }),
-        })
-          .then(payload => {
-            if (!live) return
-            const rows = (payload.value?.entries ?? []).filter(entry => entry.kind === 'checkpoint')
-            setCheckpoints(rows)
-          })
-          .catch(error => {
-            if (live) setFailure(String(error?.message ?? error))
-          })
-        return () => {
-          live = false
-        }
-      }, [vault?.id, tab, journalVersion])
-
-      useEffect(() => {
-        if (tab !== 'handoff') return undefined
-        let live = true
-        request('/op', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ op: 'handoff.status', args: {} }),
-        })
-          .then(payload => {
-            if (!live) return
-            const value = payload.value ?? null
-            setHandoffInfo(value)
-            if (value) {
-              setHandoffDraft({
-                triggerTokens: value.config.triggerTokens,
-                remindEverySteps: value.config.remindEverySteps,
-                exportDir: value.config.exportDir,
-                startupPrompt: value.config.startupPrompt ?? '',
-              })
-            }
-          })
-          .catch(error => {
-            if (live) setFailure(String(error?.message ?? error))
-          })
-        return () => {
-          live = false
-        }
-      }, [tab, handoffVersion])
+      }, [tab])
 
       useEffect(() => {
         // A different agent may live in other workspaces; let the fetch pick
@@ -1382,40 +1245,12 @@ window.__ModuleLoader__.load({
         setRoomVersion(value => value + 1)
       }
 
-      const saveHandoff = async patch => {
-        const value = await call('handoff.save', patch)
-        if (value) setHandoffVersion(item => item + 1)
-      }
-
-      const resetHandoff = async sessionId => {
-        if (!(await askConfirm(t('handoffResetConfirm')))) return
-        const value = await call('handoff.reset', { sessionId })
-        if (value) setHandoffVersion(item => item + 1)
-      }
-
-      const continueHandoff = async sessionId => {
-        const armed = await call('handoff.arm', { sessionId })
-        if (!armed) return
-        const ui = typeof props.uiWorkspace === 'function' ? props.uiWorkspace() : undefined
-        if (!ui || typeof ui.startSession !== 'function') {
-          setFailure(t('handoffNoWorkspace'))
-          return
-        }
-        // Inherit the source session's workspace and Agent preset, not whatever
-        // tab or mode was last used.
-        ui.startSession(
-          armed.workspaceId || undefined,
-          armed.agentPreset ? { agentPreset: armed.agentPreset } : undefined,
-        )
-        setHandoffVersion(item => item + 1)
-      }
-
       const sessionsUi = () => (typeof props.uiWorkspace === 'function' ? props.uiWorkspace() : undefined)
 
       const openBoundSession = sessionId => {
         const ui = sessionsUi()
         if (!ui || typeof ui.openSession !== 'function') {
-          setFailure(t('handoffNoWorkspace'))
+          setFailure(t('sessionsNoWorkspace'))
           return
         }
         ui.openSession(sessionId)
@@ -1425,7 +1260,7 @@ window.__ModuleLoader__.load({
         if (!vault) return
         const ui = sessionsUi()
         if (!ui || typeof ui.openSession !== 'function') {
-          setFailure(t('handoffNoWorkspace'))
+          setFailure(t('sessionsNoWorkspace'))
           return
         }
         const created = await call('agent.newSession', { id: vault.id, workspaceId: sessionsWorkspace })
@@ -1439,7 +1274,7 @@ window.__ModuleLoader__.load({
         if (workspaceId === '') return
         const ui = sessionsUi()
         if (!ui || typeof ui.openWorkspace !== 'function') {
-          setFailure(t('handoffNoWorkspace'))
+          setFailure(t('sessionsNoWorkspace'))
           return
         }
         try {
@@ -1503,12 +1338,6 @@ window.__ModuleLoader__.load({
           setJournalEditor(null)
           setJournalVersion(value => value + 1)
         }
-      }
-
-      const checkpointOpen = async entryId => {
-        if (!vault) return
-        const entry = await call('journal.read', { id: vault.id, entry: entryId })
-        if (entry) setCheckpointEntry(entry)
       }
 
       const saveMemory = async () => {
@@ -2129,230 +1958,6 @@ window.__ModuleLoader__.load({
                     ),
                   ),
             )
-      } else if (tab === 'checkpoints') {
-        body = checkpointEntry
-          ? h(
-              'div',
-              { className: 'am-split' },
-              h(
-                'div',
-                { className: 'am-row' },
-                h('button', { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => setCheckpointEntry(null) }, `← ${t('back')}`),
-                h('span', { style: { flex: 1 } }),
-                h(
-                  'button',
-                  {
-                    className: 'am-btn am-btn-sm',
-                    onClick: async () => {
-                      const done = await copyText(checkpointEntry.text)
-                      setNotice(done ? t('checkpointCopied') : t('checkpointCopyFail'))
-                    },
-                  },
-                  t('checkpointCopy'),
-                ),
-              ),
-              h(
-                'div',
-                { className: 'am-card' },
-                h('div', { className: 'am-item-title' }, checkpointEntry.title || checkpointEntry.id),
-                h(
-                  'div',
-                  { className: 'am-item-meta' },
-                  h('span', { className: 'am-mono' }, checkpointEntry.id),
-                  h('span', null, ago(checkpointEntry.at, locale)),
-                  checkpointEntry.meta?.tokens
-                    ? h('span', null, `${t('checkpointTriggered')} ${checkpointEntry.meta.tokens} tokens`)
-                    : null,
-                  checkpointEntry.meta?.threshold
-                    ? h('span', null, `${t('checkpointThreshold')} ${checkpointEntry.meta.threshold}`)
-                    : null,
-                ),
-                checkpointEntry.meta?.sessionId
-                  ? h(
-                      'div',
-                      { className: 'am-item-meta' },
-                      h('span', null, `${t('checkpointSession')} `),
-                      h('span', { className: 'am-mono' }, checkpointEntry.meta.sessionId),
-                    )
-                  : null,
-              ),
-              h('textarea', {
-                className: 'am-textarea',
-                style: { minHeight: 360 },
-                readOnly: true,
-                value: checkpointEntry.text,
-              }),
-            )
-          : h(
-              'div',
-              { className: 'am-split' },
-              h('p', { className: 'am-note' }, t('checkpointsHint')),
-              checkpoints.length === 0
-                ? h('p', { className: 'am-note-dim' }, t('checkpointsEmpty'))
-                : h(
-                    'div',
-                    { className: 'am-list' },
-                    checkpoints.map(entry =>
-                      h(
-                        'button',
-                        { key: entry.id, className: 'am-item', onClick: () => void checkpointOpen(entry.id) },
-                        h('span', { className: 'am-item-title' }, entry.title || entry.id),
-                        entry.preview ? h('span', { className: 'am-item-snippet' }, entry.preview) : null,
-                        h(
-                          'span',
-                          { className: 'am-item-meta' },
-                          h('span', { className: 'am-mono' }, entry.id),
-                          h('span', null, ago(entry.at, locale)),
-                        ),
-                      ),
-                    ),
-                  ),
-            )
-      } else if (tab === 'handoff') {
-        body = h(
-          'div',
-          { className: 'am-split' },
-          h('p', { className: 'am-note' }, t('handoffHint')),
-          h(
-            'div',
-            { className: 'am-card' },
-            h(Switch, {
-              checked: handoffInfo?.config?.enabled !== false,
-              label: t('handoffEnabled'),
-              hint: t('handoffEnabledHint'),
-              disabled: busy !== '',
-              onChange: checked => void saveHandoff({ enabled: checked }),
-            }),
-            h(Switch, {
-              checked: handoffInfo?.config?.autoSwitch === true,
-              label: t('autoSwitch'),
-              hint: t('autoSwitchHint'),
-              disabled: busy !== '',
-              onChange: checked => void saveHandoff({ autoSwitch: checked }),
-            }),
-            handoffInfo?.capabilities?.startPrompt === true
-              ? h(
-                  'div',
-                  { className: 'am-split' },
-                  h(Field, { label: t('autoStartPrompt') }, h('textarea', {
-                    className: 'am-textarea am-textarea-sm',
-                    rows: 3,
-                    value: handoffDraft.startupPrompt,
-                    placeholder: t('autoStartPromptPlaceholder'),
-                    disabled: busy !== '',
-                    onChange: event => setHandoffDraft({ ...handoffDraft, startupPrompt: event.target.value }),
-                  })),
-                  h('p', { className: 'am-note-dim' }, t('autoStartPromptHint')),
-                )
-              : null,
-            h(Field, { label: t('handoffThreshold') }, h('input', {
-              className: 'am-input',
-              type: 'number',
-              min: 20000,
-              step: 10000,
-              value: handoffDraft.triggerTokens,
-              onChange: event => setHandoffDraft({ ...handoffDraft, triggerTokens: Number(event.target.value) }),
-            })),
-            h(Field, { label: t('handoffRemindEvery') }, h('input', {
-              className: 'am-input',
-              type: 'number',
-              min: 1,
-              max: 20,
-              step: 1,
-              value: handoffDraft.remindEverySteps,
-              onChange: event => setHandoffDraft({ ...handoffDraft, remindEverySteps: Number(event.target.value) }),
-            })),
-            h(Field, { label: t('handoffExport') }, h('input', {
-              className: 'am-input',
-              value: handoffDraft.exportDir,
-              placeholder: t('handoffExportPlaceholder'),
-              onChange: event => setHandoffDraft({ ...handoffDraft, exportDir: event.target.value }),
-            })),
-            h('p', { className: 'am-note-dim' }, t('handoffExportHint')),
-            h(
-              'div',
-              { className: 'am-row am-row-end' },
-              h(
-                'button',
-                {
-                  className: 'am-btn am-btn-primary',
-                  disabled: busy !== '',
-                  onClick: () => void saveHandoff({
-                    triggerTokens: handoffDraft.triggerTokens,
-                    remindEverySteps: handoffDraft.remindEverySteps,
-                    exportDir: handoffDraft.exportDir,
-                    startupPrompt: handoffDraft.startupPrompt,
-                  }),
-                },
-                t('handoffSave'),
-              ),
-            ),
-          ),
-          h('span', { className: 'am-label' }, t('handoffSessions')),
-          (handoffInfo?.sessions ?? []).length === 0
-            ? h('p', { className: 'am-note-dim' }, t('handoffNoSessions'))
-            : h(
-                'div',
-                { className: 'am-list' },
-                handoffInfo.sessions.map(session =>
-                  h(
-                    'div',
-                    { key: session.sessionId, className: 'am-card' },
-                    h(
-                      'div',
-                      { className: 'am-row' },
-                      h('span', { className: 'am-usage-title' }, session.title || t('untitled')),
-                      h('span', { className: 'am-tag' }, t(`stage.${session.stage}`)),
-                      session.armed
-                        ? h('span', { className: 'am-tag', title: t('handoffArmedHint') }, t('handoffArmed'))
-                        : null,
-                      session.checkpoint
-                        ? h(
-                            'span',
-                            { className: 'am-tag am-mono', title: session.exported ? `${t('handoffExported')}: ${session.exported}` : '' },
-                            `${t('handoffCheckpoint')} ${session.checkpoint}`,
-                          )
-                        : null,
-                      h('span', { style: { flex: 1 } }),
-                      handoffInfo?.capabilities?.arm === true && session.stage === 'settled'
-                        ? h(
-                            'button',
-                            {
-                              className: 'am-btn am-btn-sm am-btn-primary',
-                              title: t('handoffContinueHint'),
-                              disabled: busy !== '',
-                              onClick: () => void continueHandoff(session.sessionId),
-                            },
-                            t('handoffContinue'),
-                          )
-                        : null,
-                      session.stage === 'requested' || session.stage === 'settled'
-                        ? h(
-                            'button',
-                            {
-                              className: 'am-btn am-btn-sm am-btn-ghost',
-                              disabled: busy !== '',
-                              onClick: () => void resetHandoff(session.sessionId),
-                            },
-                            t('handoffReset'),
-                          )
-                        : null,
-                    ),
-                    h(
-                      'div',
-                      { className: 'am-row' },
-                      h('span', { className: 'am-mono' }, session.sessionId.slice(0, 13)),
-                      h(
-                        'span',
-                        { className: 'am-note-dim' },
-                        `${Number(session.tokens).toLocaleString('en-US')} / ${Number(handoffInfo.config.triggerTokens).toLocaleString('en-US')}`,
-                      ),
-                      session.agentId ? h('span', { className: 'am-tag' }, session.agentId) : null,
-                    ),
-                  ),
-                ),
-              ),
-        )
       } else if (tab === 'sessions') {
         body = h(
           'div',
@@ -3295,7 +2900,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'nav',
                 { className: 'am-tabs' },
-                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'checkpoints', 'handoff', 'settings']
+                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'settings']
                   .filter(key => key !== 'sessions' || data?.capabilities?.sessions === true)
                   .map(key =>
                   h(
@@ -3309,7 +2914,6 @@ window.__ModuleLoader__.load({
                           setEditor(null)
                           setResults(null)
                         }
-                        if (key !== 'checkpoints') setCheckpointEntry(null)
                       },
                     },
                     key === 'sessions' ? t('sessionsTab') : t(key),
@@ -3552,7 +3156,6 @@ window.__ModuleLoader__.load({
         let sectionOpen = true
         let lastAgents = []
         let bannerSessionId = ''
-        const autoSwitched = new Set()
         let observer = null
         let observedRoot = null
         const collapsed = new Set()
@@ -3562,8 +3165,6 @@ window.__ModuleLoader__.load({
         let sortMode = 'recent'
         let showArchived = true
         let viewOpen = false
-        /** Only a checkpoint written within this window is worth an auto switch. */
-        const AUTO_SWITCH_FRESH_MS = 30 * 60 * 1000
         const prefsKey = 'agent-memory:sidebar'
         try {
           const saved = JSON.parse(window.localStorage.getItem(prefsKey) ?? '{}')
@@ -4215,77 +3816,6 @@ window.__ModuleLoader__.load({
               }
             } else if (banner !== null) {
               banner.remove()
-            }
-            // Auto handoff: any settled session that still holds a live handoff
-            // intent gets a fresh conversation — no need to keep that session
-            // selected. Skip the whole poll while any turn is running.
-            if (state?.capabilities?.arm === true) {
-              const statusPayload = await request('/op', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ op: 'handoff.status', args: {} }),
-              })
-              if (stopped) return
-              const status = statusPayload.value
-              if (status?.config?.autoSwitch === true) {
-                const rows = Array.isArray(status.sessions) ? status.sessions : []
-                const busy = rows.some(row => row.running === true)
-                // A checkpoint is only worth handing off right after it was
-                // written: the context just overflowed while the work was still
-                // in flight. A session settled days ago is finished business.
-                const fresh = row => {
-                  const at = Date.parse(row?.settledAt ?? '')
-                  return Number.isFinite(at) && Date.now() - at <= AUTO_SWITCH_FRESH_MS
-                }
-                const pick = rows
-                  .filter(
-                    row =>
-                      row.stage === 'settled' &&
-                      row.armed === true &&
-                      row.running !== true &&
-                      fresh(row) &&
-                      !autoSwitched.has(row.sessionId),
-                  )
-                  .sort((left, right) => String(right.armedAt ?? '').localeCompare(String(left.armedAt ?? '')))[0]
-                let ui
-                try {
-                  ui = ctx.get('uiWorkspace')
-                } catch (error) {
-                  console.log('[am-autoswitch] uiWorkspace lookup failed:', String(error))
-                }
-                if (!busy && pick !== undefined && ui !== undefined && typeof ui.startSession === 'function') {
-                  autoSwitched.add(pick.sessionId)
-                  const open = () => {
-                    if (stopped) return
-                    try {
-                      // Deliberately no options: `startSession(workspaceId,
-                      // { agentPreset })` takes DSH's *reuse-a-blank* path, which
-                      // only prepares a draft — no Agent is created, so nothing
-                      // inherits the binding and the startup instruction is never
-                      // delivered. The Host inherits the preset on `agent/created`
-                      // instead, before the first turn.
-                      ui.startSession(pick.workspaceId || undefined)
-                    } catch (error) {
-                      console.log('[am-autoswitch] startSession threw:', String(error))
-                      autoSwitched.delete(pick.sessionId)
-                    }
-                  }
-                  if (status?.capabilities?.startPrompt === true) {
-                    // Attach the startup instruction to the handoff intent
-                    // first: the Host sends it after the new session inherits
-                    // the binding, approval policy and model. A failed arm
-                    // still opens the conversation, just without a message.
-                    void request('/op', {
-                      method: 'POST',
-                      headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ op: 'handoff.arm', args: { sessionId: pick.sessionId, autoStart: true } }),
-                    })
-                      .then(open, open)
-                  } else {
-                    open()
-                  }
-                }
-              }
             }
           } catch {
             /* the API may not be mounted yet */

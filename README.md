@@ -32,7 +32,6 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 | 知识库自主查 | `agent_knowledge_search` / `read` / `write` 由模型自行决定调用 |
 | 讨论室 | 可建多个房间；用户指定哪些智能体加入，成员可中途加入或退出；每条发言标注是哪个智能体说的 |
 | 私有日志 | 每个智能体一份详细的日记式记录，**只有它自己能读写**，按需检索，不自动注入 |
-| 接力（检查点） | 上下文到阈值时提醒模型先写记忆和日志，两件都完成后自动写下一份交棒检查点（`checkpoints/<agentId>.jsonl`）；可选额外导出 markdown；settle 后新会话自动继承绑定、审批策略与模型，面板「续会话」一键续到新会话；可开启「检查点后自动开启新对话」，并在新对话里自动发送一条「启动指令」 |
 | 自动归档 | 续会话/新会话接管后，旧会话自动转为**归档**（只读、可查看、不能继续）；面板「对话」页签可取消归档、转**强归档**（侧栏隐藏、面板灰色）或转回归档 |
 | 侧栏右键菜单 | 侧栏「智能体对话」里右键对话：打开 / 归档 / 转化为强归档 / 取消归档 / 在该智能体名下新建对话；Ctrl（⌘）点击切换选中、Shift 点击区间多选，右键作用于整个选中集合；右键智能体行可新建对话或收起/展开 |
 
@@ -40,7 +39,7 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 
 DSH 插件以 profile 包的形式安装。任选一种：
 
-> **版本提示**：npm 的 `latest` 从 **2.0.0** 起指向 2.0（召回层、检查点页签、侧栏右键菜单）。仍在 1.3.3 上的，按 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md) 走一遍即可，磁盘上只会多出 `checkpoints/` 与 `index/`。1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完会报 `ERR_MODULE_NOT_FOUND`，不要用这两个版本。要从源码改代码，用目录或 `link:` 安装。
+> **版本提示**：npm 的 `latest` 从 **2.0.0** 起指向 2.0（召回层、侧栏右键菜单）。仍在 1.3.3 上的，按 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md) 走一遍即可，磁盘上只会多出 `checkpoints/` 与 `index/`。1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完会报 `ERR_MODULE_NOT_FOUND`，不要用这两个版本。要从源码改代码，用目录或 `link:` 安装。
 
 ### 方式一：从目录安装
 
@@ -97,15 +96,12 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 <memoryDir>/rooms/<roomId>/room.json     讨论室元数据（名称、成员）
 <memoryDir>/rooms/<roomId>/messages.jsonl 讨论室发言（每行一条，带发言人）
 <memoryDir>/journal/<agentId>.jsonl      私有日志·笔记（每行一条，只有该智能体可读）
-<memoryDir>/checkpoints/<agentId>.jsonl   私有日志·检查点（2.0 起从这里读；旧文件首次访问时自动拆分）
 <memoryDir>/index/state.json             召回索引的构建记录（builtAt / 各来源条数 / semantic 状态）
 <memoryDir>/index/aliases.json           别名表（手写，{"别名": ["实体", …]}）
 <memoryDir>/index/vectors.bin            语义向量（float32、L2 归一化，按 entries 顺序）
 <memoryDir>/index/vectors.json           向量的元数据（{key, row, src, at, hash, chunk, chunks}）
 <memoryDir>/index/access.json            引用/打开/曝光计数（2.0.0-beta.4 起，热度排序用）
 <memoryDir>/models/<model>/              本地 embedding 模型（不进 npm 包，用 scripts/fetch-model.mjs 下载）
-<memoryDir>/handoff.json                 接力配置（阈值、导出目录）
-<memoryDir>/handoff-state.json           每会话的接力阶段
 ```
 
 全部是普通 Markdown / JSON，可以直接用编辑器改，也可以纳入 git。
@@ -127,70 +123,18 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 
 `agent_recall` 也接受 `expand`（默认 1：一跳关联扩展，0：纯词法）与 `source` / `since` / `limit`；语义层见下节。
 
-`agent_recall` 永远不返回检查点：检查点是权威状态（整段注入、旧的可能误导），只属于「读取」，不属于「检索」。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
+`agent_recall` 只检索日志、记忆审计与共享知识：旧版的交棒检查点（`kind: "checkpoint"`）不再生成，历史文件仍按日志读，但不会被检索。检索结果走工具返回值而不是 system prompt，所以不会顶掉前缀缓存。排序规则（标题权重、覆盖率平方、30 天半衰期）见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md)。
 
 > **2.0.0**：召回层随 2.0 转正，契约冻结（工具参数、宿主 op、设置键、磁盘格式见 [`docs/memory-recall-v2.md`](docs/memory-recall-v2.md) §13），从 2.0 起破坏性变更只发生在 3.0。磁盘上只多出 `checkpoints/` 与 `index/` 两个目录，旧数据首次访问时自动拆分，不会写坏。**从 2.0 降回 1.3.x 之前**，先把 `checkpoints/<agentId>.jsonl` 的行并回 `journal/<agentId>.jsonl`（1.3 只读后者），否则旧版会看不到检查点；完整迁移与回退步骤见 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md)。
-
-## 接力（交棒检查点）
-
-长时间任务会让单个会话堆到窗口边缘，越后面越贵、越容易复发早期已经修好的问题。接力做的事很简单：**在还来得及的时候，把这次工作沉淀成记忆和日志**。
-
-| 阶段 | 发生什么 |
-|---|---|
-| watching | 每步进入前用 `ctx.tokenMeter.measure(session).totalTokens` 量压力，低于阈值什么都不做 |
-| requested | 超过阈值：在该步的系统提示里插入一条交接提醒，要求模型先用 `agent_memory_save` 写记忆、再用 `agent_journal` 写一条详细日志 |
-| ready | 检测到记忆的 `memoryUpdatedAt` 与最近一条普通日志都**晚于这次提醒** → 生成检查点 |
-| settled | 检查点写入 `checkpoints/<agentId>.jsonl`（`kind: "checkpoint"`），本会话继续用，不再重复提醒 |
-
-要点：
-
-- **检查点属于该智能体的日志域**，不是工作区里的文件：`2.0` 起物理上单独存 `checkpoints/<agentId>.jsonl`（读取时与笔记合并，面板「检查点」页签单列）。它天然属于该智能体、天然隔离、天然能用 `agent_journal` 找回来。
-- 记忆或日志掉回阈值 90% 以下（例如手动压缩过），这次请求会被清掉，允许下次重新触发。
-- **提醒不换会话、不打断**：它只是在那一步的系统提示里多一段话，模型照常继续手上的工作。
-
-### 阈值
-
-只有一个 `triggerTokens`，默认 **300000**，是**绝对值、不按窗口自适应**。
-
-| 窗口 | 建议阈值 |
-|---|---|
-| 256K（官方默认） | 180000 |
-| 512K 及以上 | 300000–350000 |
-
-窗口越小越要往下调，否则永远不触发，看起来像插件没工作。
-
-### 配置
-
-面板「接力」页签可改，也可以直接写 `<memoryDir>/handoff.json`：
-
-```json
-{
-  "enabled": true,
-  "triggerTokens": 300000,
-  "remindEverySteps": 2,
-  "exportDir": "",
-  "autoSwitch": false,
-  "startupPrompt": "这是交接后的新会话（上下文已重置）。先读你最近的日志和交棒检查点（agent_journal），再搜共享知识库里的相关经验，确认上次的进度后继续完成工作；结束前更新记忆和日志。"
-}
-```
-
-`remindEverySteps` 控制提醒频率：超阈值后**每隔这么多步**才重复一次（默认 2）。第一次触发总会提醒，之后按这个间隔降噪；记忆和日志一落盘就彻底停止。提醒文本只写阈值、不写实时 token 数——它是一段 system prompt，文字一变后面全部消息都要重付缓存。`exportDir` 留空时就只写日志；填了会额外落一份 markdown（`checkpoint-<会话短 id>-<时间>.md`），方便用编辑器看或给别的工具读。`startupPrompt` 是自动切换后发给新会话的第一条消息，留空则只打开对话、不发消息（上限 2000 字）。
-
-### 重置
-
-「接力」页签的会话列表里，处于等待沉淀或已生成检查点的会话那一行会有「重置」。它只清掉该会话的阶段记录，让它重新从 `watching` 开始；已经写进日志的检查点**不会删除**。适合手动压缩过上下文、或者想在同一会话里再走一轮的时候。
-
-检查点落盘后会记一个 30 分钟内有效的「下一会话」意图：在这个目录里新建的会话会自动绑定同一智能体，并继承审批策略、模型与 Agent preset（`resume`、子智能体和已绑定的会话不会误消费）。面板的「续会话」按钮把意图刷新 + 新建会话合成一步，并让新会话落在源会话所在的工作区、沿用源会话的模式。开启「检查点后自动开启新对话」后，客户端在回合结束、会话空闲时自动完成这套切换，旧会话自动归档；切换前会把「启动指令」写进交棒意图，新会话继承完成后由主机自动发送，作为它的第一条消息（手动「续会话」不发送）。API 事实与实现细节见 [docs/handoff-v2.md](docs/handoff-v2.md)。
 
 ## 面板
 
 侧栏出现「智能体」图标，打开后：
 
 - 左侧：顶部可在「智能体 / 讨论室」之间切换
-- 智能体视图：列表显示记忆字数、贡献条数、被几个对话使用；右侧八个页签：记忆 / 回忆 / 对话 / 共享知识库 / 日志 / 检查点 / 接力 / 设置
+- 智能体视图：列表显示记忆字数、贡献条数、被几个对话使用；右侧六个页签：记忆 / 回忆 / 对话 / 共享知识库 / 日志 / 设置
 - 对话页签：按智能体收拢它的对话（标题、工作区、时间、运行状态），可「打开」「解绑」；顶部可选工作区并「切换过去」或「新建对话」（新建的会话自动绑定该智能体）
 - 讨论室视图：新建房间、点成员名字加入或移出、消息流、直接发言（Enter 发送）
-- 检查点页签：按时间倒序列出这个智能体的交棒检查点（标题 / 摘要 / id / 时间），点开看全文与元信息（触发 token 数、阈值、所属会话），可「复制全文」。只读——检查点是权威状态，不从这里新建或删除，召回索引也不收录它
 - 记忆页底部列出正在使用它的对话（显示**对话标题 + 短 id**），可一键解除绑定
 
 已绑定智能体的对话会从左侧工作区列表里隐藏（客户端展示层过滤，不改会话数据，搜索仍可命中）。设置页可以关掉这个隐藏行为。工作区上方还有一块「智能体对话」区，按智能体分组列出这些对话，点一下就能打开。细节与限制见 [docs/sessions-and-workspaces.md](docs/sessions-and-workspaces.md)。
@@ -258,7 +202,7 @@ Linux + AMD 显卡上就是这样跑起来的（实测 load 59 ms、单条推理
 
 ### 危险操作的确认（2.0.3，2.0.5 修定位）
 
-删除智能体、删除讨论室、重置接力、删除知识条目都要二次确认。确认框是**面板自己画的**（遮罩 + 居中卡片），不是浏览器的 `window.confirm()`——后者在部分手机/平板的 WebView 里会被静默丢弃，点击后既不弹框也不执行，看起来像按钮坏了。窄屏下两枚按钮竖排、整宽，拇指够得到；点遮罩空白或按 Esc 等于取消。
+删除智能体、删除讨论室、删除知识条目都要二次确认。确认框是**面板自己画的**（遮罩 + 居中卡片），不是浏览器的 `window.confirm()`——后者在部分手机/平板的 WebView 里会被静默丢弃，点击后既不弹框也不执行，看起来像按钮坏了。窄屏下两枚按钮竖排、整宽，拇指够得到；点遮罩空白或按 Esc 等于取消。
 
 遮罩贴的是**视口**（`position:fixed`）而不是面板盒子（2.0.5）：窄屏上面板可能比屏幕还高，绝对定位的遮罩会把「居中」算到整块内容的正中，滚到底部点按钮时对话框就停在屏幕外面了。
 
@@ -298,7 +242,7 @@ Linux + AMD 显卡上就是这样跑起来的（实测 load 59 ms、单条推理
 - 输入关键词回车或点「检索」，可先用下拉限定来源（日志 / 记忆 / 知识库）、用日期框只保留该日之后的内容；结果按 `标题权重 6 / 标签 4 / 正文 40 + 覆盖率平方 + 30 天半衰期` 排序，每条显示来源徽标、时间和得分。
 - 点一条结果展开**全文**（面板里的展开视图，不影响任何索引状态）；再点收起。
 - 索引状态卡片显示条目总数、构建时间与各来源条数。「重建索引」走 `memory.reindex`，重建后卡片立即刷新。
-- 面板检索**只在索引里查**：不进 system prompt，不改缓存前缀，也不消耗额外 token。检查点不在索引里——它是权威状态，整段注入，永不被检索。
+- 面板检索**只在索引里查**：不进 system prompt，不改缓存前缀，也不消耗额外 token。旧检查点同样不进索引：它们是历史快照，整段注入反而可能误导。
 - 同样的能力模型侧用 `agent_recall` 工具发起，两者命中同一套索引。
 
 ### 关联扩展（2.0.0-alpha.3）
@@ -474,7 +418,6 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `graph.js` — 实体抽取与一跳关联扩展
 - `rooms.js` — 讨论室存储
 - `journal.js` — 私有日志存储
-- `handoff.js` — 接力：配置、每会话阶段、检查点文本与导出
 - `recall.js` — 召回：索引缓存、词法打分、别名与图扩展、会话来源、语义融合
 - `access.js` — 引用/打开/曝光计数（`index/access.json`，热度排序用）
 - `embed.js` — 本地 BGE 推理：WordPiece 分词、ONNX 会话、查询指令前缀
@@ -483,7 +426,7 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - `zstd-frames.mjs` — 最小 zstd 帧解析（无原生依赖）
 - `archive.js` — 归档级别（`weak` / `strong`）的持久记录
 
-设计文档：`docs/handoff-v2.md`（接力 v2）、`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现并随 2.0.0 冻结）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0）、`docs/migrate-1.3-to-2.0.md`（升级与回退步骤）。
+设计文档：`docs/sessions-and-workspaces.md`（会话与工作区）、`docs/memory-recall-v2.md`（2.0 记忆召回，已实现并随 2.0.0 冻结）、`docs/embedding-local.md`（本地语义索引，已实现到 2.0.0）、`docs/migrate-1.3-to-2.0.md`（升级与回退步骤）。
 
 测试（无需安装依赖）：
 
@@ -496,7 +439,7 @@ node test-host.mjs       # 用 mock ctx 跑注册、工具与 HTTP 分发
 node test-migrate.mjs    # 旧「按智能体分目录」布局合并到共享库
 node test-binding.mjs    # 对话绑定与解析优先级
 node test-rooms.mjs      # 讨论室：成员、中途加入、发言顺序
-node test-journal.mjs    # 私有日志、检查点分文件与跨智能体隔离
+node test-journal.mjs    # 私有日志与跨智能体隔离
 node test-handoff.mjs    # 接力：阈值、requested→ready、检查点文本、启动指令与导出
 node test-recall.mjs     # 召回：打分、图扩展、别名、透传 includeCheckpoints、mode 持久化
 node test-transcripts.mjs # 会话原文：归属、消息切分、预算裁剪、排除后退出索引

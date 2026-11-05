@@ -292,45 +292,43 @@ assert.equal(full.ok, true)
 assert.ok(full.content.includes('链接'))
 console.log('tools ok')
 
-// ── handoff status/reset over HTTP ──────────────────────────────────────────
-// Services are pended on at call time, so the mocks can land after apply.
+
+// archive + session-creation mocks: these services are pended on at call time
+const archiveCalls = []
+const unarchiveCalls = []
+const createCalls = []
+const archiveService = {
+  archive: (sessionId, options) => {
+    archiveCalls.push({ sessionId, options })
+    return Promise.resolve({ archived: true })
+  },
+  unarchive: sessionId => {
+    unarchiveCalls.push(sessionId)
+    return Promise.resolve({ archived: false })
+  },
+  levelOf: () => '',
+}
+const realGet = ctx.get
 ctx.get = name => {
-  if (name === 'agents') return { list: () => [{ id: 'session-test-1234' }] }
-  if (name === 'sessions') {
+  if (name === 'archive') return archiveService
+  if (name === 'workspaceRegistry') {
     return {
-      get: sessionId => ({
-        id: sessionId,
-        header: String(sessionId).includes('sub') ? { origin: 'subagent' } : { agentPreset: 'cordis' },
-        requestHeader: () => ({ config: { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' } }),
-      }),
-    }
-  }
-  // DSH keeps a session's live preset in a projection; the header is only the
-  // creation-time value. Mirror that so the status row and arm response use it.
-  if (name === 'sessionProjections') {
-    return {
-      stateOf: (session, key) => (key === 'agentPreset' ? (String(session.id).includes('sub') ? 'standard' : 'cordis') : undefined),
-    }
-  }
-  if (name === 'tokenMeter') return { measure: () => ({ totalTokens: 310000 }) }
-  if (name === 'workingDirectory') return { get: () => 'E:\\work' }
-  if (name === 'approval') {
-    return {
-      overrideOf: () => 'never',
-      setPolicy: (agent, policy) => approvalCalls.push([agent.id, policy]),
+      list: () => [
+        { id: 'w-work', title: 'Work', path: 'E:\\work' },
+        { id: 'w-other', title: 'Other', path: 'E:\\other' },
+      ],
+      archiveSession: (sessionId, options) => {
+        archiveCalls.push({ sessionId, options })
+        return Promise.resolve({ archived: true })
+      },
+      unarchiveSession: sessionId => {
+        unarchiveCalls.push(sessionId)
+        return Promise.resolve({ archived: false })
+      },
     }
   }
   if (name === 'sessionController') {
     return {
-      selectModel: request => {
-        modelCalls.push(request)
-        return Promise.resolve({ selected: { provider: request.provider, model: request.model } })
-      },
-      prompt: (request, signal) => {
-        promptCalls.push(request)
-        promptSignals.push(signal)
-        return Promise.resolve({ accepted: true })
-      },
       list: () =>
         Promise.resolve({
           items: [
@@ -344,139 +342,23 @@ ctx.get = name => {
       },
     }
   }
-  if (name === 'workspaceRegistry') {
+  if (name === 'workingDirectory') return { get: () => 'E:\\work' }
+  if (name === 'workspace') {
     return {
       list: () => [
-        { id: 'w-work', title: 'Work', path: 'E:\\work', sessionIds: ['session-test-1234'] },
-        { id: 'w-other', title: 'Other', path: 'E:\\other', sessionIds: [] },
+        { id: 'w-work', title: 'Work', path: 'E:\\work' },
+        { id: 'w-other', title: 'Other', path: 'E:\\other' },
       ],
-      archiveSession: (sessionId, options) => {
-        archiveCalls.push({ sessionId, options })
-        return Promise.resolve()
-      },
-      unarchiveSession: sessionId => {
-        unarchiveCalls.push(sessionId)
-        return Promise.resolve()
-      },
     }
   }
-  return undefined
-}
-const approvalCalls = []
-const modelCalls = []
-const promptCalls = []
-const promptSignals = []
-const createCalls = []
-const archiveCalls = []
-const unarchiveCalls = []
-const preStep = registered.handlers.find(item => item.event === 'agent/pre-step').handler
-await call('POST', '/op', { op: 'binding.set', args: { sessionId: 'session-test-1234', agentId: id } })
-await preStep({ agent: { id: 'session-test-1234' } }, async () => {})
-const status = await call('POST', '/op', { op: 'handoff.status', args: {} })
-assert.equal(status.status, 200)
-assert.equal(status.payload.value.config.triggerTokens, 300000)
-assert.equal(status.payload.value.capabilities.arm, true)
-assert.equal(status.payload.value.sessions.length, 1)
-assert.equal(status.payload.value.sessions[0].agentId, id)
-assert.equal(status.payload.value.sessions[0].stage, 'requested')
-assert.equal(status.payload.value.sessions[0].workspaceId, 'w-work')
-assert.equal(status.payload.value.sessions[0].agentPreset, 'cordis')
-assert.ok(status.payload.value.sessions[0].requestedAt)
-assert.equal(status.payload.value.sessions[0].checkpoint, undefined)
-
-// The auto switch must find a settled session that is NOT open in the browser:
-// rows come from bindings + persisted summaries, not from live Agents.
-const realGet = ctx.get
-ctx.get = name => {
-  if (name === 'agents') return { list: () => [] }
-  if (name === 'sessions') return { get: () => undefined }
   return realGet(name)
 }
-const coldStored = await call('POST', '/op', { op: 'handoff.status', args: {} })
-ctx.get = realGet
-assert.equal(coldStored.payload.value.sessions.length, 1)
-assert.equal(coldStored.payload.value.sessions[0].sessionId, 'session-test-1234')
-assert.equal(coldStored.payload.value.sessions[0].workspaceId, 'w-work')
-assert.equal(coldStored.payload.value.sessions[0].running, true)
-console.log('handoff cold session ok')
+await call('POST', '/op', { op: 'binding.set', args: { sessionId: 'session-test-1234', agentId: id } })
 
-const autoSaved = await call('POST', '/op', { op: 'handoff.save', args: { autoSwitch: true } })
-assert.equal(autoSaved.payload.value.autoSwitch, true)
-const promptSaved = await call('POST', '/op', {
-  op: 'handoff.save',
-  args: { startupPrompt: '继续上次的界面工作。' },
-})
-assert.equal(promptSaved.payload.value.startupPrompt, '继续上次的界面工作。')
-assert.equal(promptSaved.payload.value.autoSwitch, true)
-const autoStatus = await call('POST', '/op', { op: 'handoff.status', args: {} })
-assert.equal(autoStatus.payload.value.config.autoSwitch, true)
-assert.equal(autoStatus.payload.value.config.startupPrompt, '继续上次的界面工作。')
-assert.equal(autoStatus.payload.value.capabilities.startPrompt, true)
-await call('POST', '/op', { op: 'handoff.save', args: { autoSwitch: false } })
-const reset = await call('POST', '/op', { op: 'handoff.reset', args: { sessionId: 'session-test-1234' } })
-assert.equal(reset.status, 200)
-const afterReset = await call('POST', '/op', { op: 'handoff.status', args: {} })
-assert.equal(afterReset.payload.value.sessions[0].stage, 'due')
-assert.equal(afterReset.payload.value.sessions[0].requestedAt, undefined)
-console.log('handoff status/reset ok')
-
-// ── the next fresh session inherits agent + approval policy ────────────────
-const nextSession = registered.handlers.find(item => item.event === 'agent/created').handler
-const bindings = async () => (await call('POST', '/op', { op: 'binding.list', args: {} })).payload.value
-const armed = await call('POST', '/op', { op: 'handoff.arm', args: { sessionId: 'session-test-1234', autoStart: true } })
-assert.equal(armed.status, 200)
-assert.equal(armed.payload.value.next.agentId, id)
-assert.equal(armed.payload.value.next.cwd, 'E:\\work')
-assert.equal(armed.payload.value.next.approval, 'never')
-assert.equal(armed.payload.value.next.startupPrompt, '继续上次的界面工作。')
-assert.equal(armed.payload.value.startupPrompt, '继续上次的界面工作。')
-assert.equal(armed.payload.value.agentPreset, 'cordis')
-assert.deepEqual(armed.payload.value.next.model, { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' })
-
-// resume is not a new session: the intent survives
-await nextSession({ agent: { id: 'session-next-1' }, source: 'resume' })
-assert.equal((await bindings()).some(item => item.sessionId === 'session-next-1'), false)
-assert.ok((await call('POST', '/op', { op: 'handoff.status', args: {} })).payload.value.sessions[0].armed)
-assert.equal(modelCalls.length, 0)
-assert.equal(promptCalls.length, 0)
-
-// subagents never capture it
-await nextSession({ agent: { id: 'session-sub-1' }, source: 'startup' })
-assert.equal((await bindings()).some(item => item.sessionId === 'session-sub-1'), false)
-assert.equal(modelCalls.length, 0)
-assert.equal(promptCalls.length, 0)
-
-// a real fresh session consumes it once, binding the same agent and policy,
-// and receives the startup instruction as its first message
-await nextSession({ agent: { id: 'session-next-2' }, source: 'startup' })
-const bound = (await bindings()).find(item => item.sessionId === 'session-next-2')
-assert.equal(bound?.agentId, id)
-assert.deepEqual(approvalCalls, [['session-next-2', 'never']])
-assert.deepEqual(modelCalls, [
-  { sessionId: 'session-next-2', provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' },
-])
-assert.deepEqual(promptCalls, [
-  {
-    requestId: 'handoff-start-session-next-2',
-    sessionId: 'session-next-2',
-    mode: 'queue',
-    content: [{ type: 'text', text: '继续上次的界面工作。' }],
-  },
-])
-assert.ok(promptSignals[0] !== undefined)
-assert.equal((await call('POST', '/op', { op: 'handoff.status', args: {} })).payload.value.sessions[0].armed, false)
-
-// the next session after that does not inherit anything
-await nextSession({ agent: { id: 'session-next-3' }, source: 'startup' })
-assert.equal((await bindings()).some(item => item.sessionId === 'session-next-3'), false)
-assert.deepEqual(approvalCalls, [['session-next-2', 'never']])
-assert.equal(modelCalls.length, 1)
-assert.equal(promptCalls.length, 1)
-console.log('handoff next-session inheritance ok')
-
-// ── weak auto-archive + manual level changes ────────────────────────────────
+// ── manual archive levels ───────────────────────────────────────────────────
 // Weak is plugin-level: the session stays a normal DSH session (openable).
 assert.equal(archiveCalls.length, 0)
+await call('POST', '/op', { op: 'archive.set', args: { sessionId: 'session-test-1234', level: 'weak' } })
 const archivedRow = (await call('POST', '/op', { op: 'agent.sessions', args: { id } })).payload.value.sessions.find(
   item => item.sessionId === 'session-test-1234',
 )
@@ -519,26 +401,17 @@ assert.equal(row.workspaceId, 'w-work')
 assert.equal(row.workspaceTitle, 'Work')
 assert.equal(row.running, true)
 assert.equal(row.visible, true)
-const gone = agentSessionList.payload.value.sessions.find(item => item.sessionId === 'session-next-2')
-assert.equal(gone.visible, false)
-assert.equal(gone.workspaceId, '')
 
 const newSessionResult = await call('POST', '/op', { op: 'agent.newSession', args: { id, workspaceId: 'w-work' } })
 assert.equal(newSessionResult.payload.value.sessionId, 'session-created')
 assert.deepEqual(createCalls[0], { workspaceId: 'w-work' })
-assert.ok((await bindings()).some(item => item.sessionId === 'session-created' && item.agentId === id))
+const boundAfterCreate = await call('POST', '/op', { op: 'binding.list', args: {} })
+assert.ok(boundAfterCreate.payload.value.some(item => item.sessionId === 'session-created' && item.agentId === id))
 
 const boundGroups = await call('POST', '/op', { op: 'bound.list', args: {} })
 const demoGroup = boundGroups.payload.value.agents.find(item => item.agentId === id)
 assert.ok(demoGroup !== undefined)
 assert.ok(demoGroup.sessions.some(item => item.sessionId === 'session-created'))
-
-const armedAgain = await call('POST', '/op', { op: 'handoff.arm', args: { sessionId: 'session-test-1234' } })
-assert.equal(armedAgain.payload.value.workspaceId, 'w-work')
-// a manual continue refreshes the intent but does not attach a message
-assert.equal(armedAgain.payload.value.next.startupPrompt, undefined)
-assert.equal(armedAgain.payload.value.startupPrompt, '')
-assert.equal(promptCalls.length, 1)
 
 assert.equal((await call('GET', '/state')).payload.state.hideBoundSessions, true)
 const hidden = await call('POST', '/op', { op: 'settings.save', args: { hideBoundSessions: false } })

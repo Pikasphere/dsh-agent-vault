@@ -25,7 +25,6 @@ import { fileURLToPath } from 'node:url'
 import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
-import { createHandoff, DEFAULT_NEXT_TTL_MS } from './handoff.js'
 import { createSleep } from './sleep.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall, DEFAULT_MODEL } from './recall.js'
@@ -122,7 +121,6 @@ export function apply(ctx, config = {}) {
     transcripts: recallSettings.transcripts,
     sessionsRoot: recallSettings.sessionsRoot,
   })
-  const handoff = createHandoff({ rootDir: store.root })
   const archives = createArchives({ rootDir: store.root })
   const sleep = createSleep({
     ctx,
@@ -132,14 +130,13 @@ export function apply(ctx, config = {}) {
     recordError,
   })
   const reveal = typeof config.reveal === 'function' ? config.reveal : createReveal()
-  const hints = new Map()
 
   try {
     registerPrompt(ctx, store)
     registerTools(ctx, store, rooms, journals, recall)
-    registerHandoff(ctx, store, journals, handoff, archives, hints)
+    registerArchiveGate(ctx, store, archives)
     sleep.attach()
-    registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal, sleep)
+    registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -325,7 +322,7 @@ function registerTools(ctx, store, rooms, journals, recall) {
           properties: {
             id: { type: 'string', description: 'Agent id. Omit to use the agent currently selected by the user.' },
             content: { type: 'string', description: `The memory text, at most ${limit} characters.` },
-            note: { type: 'string', description: 'Optional short label for the save (for example "handoff" or "done").' },
+            note: { type: 'string', description: 'Optional short label for the save (for example "done").' },
           },
           required: ['content'],
         },
@@ -641,7 +638,7 @@ function registerJournalTools(register, store, journals) {
   )
 }
 
-// ── handoff: pressure → checkpoint ──────────────────────────────────────────
+// ── token measurement ───────────────────────────────────────────────────────
 
 function measureTrace(step, extra) {
   try {
@@ -665,7 +662,7 @@ function measureTokens(ctx, sessionId) {
     // The meter is optional in a plugin context (it may simply not be visible
     // here), and it can also legitimately answer 0 before the first request.
     // Falling back to pricing the model-visible messages keeps every caller
-    // (handoff thresholds, the sleep sweep) working instead of silently
+    // (the sleep sweep) working instead of silently
     // reading "context is empty forever".
     try {
       const meter = ctx.get('tokenMeter')
@@ -718,24 +715,6 @@ function measureTokens(ctx, sessionId) {
     measureTrace('threw', { sessionId, error: String(error?.message ?? error).slice(0, 300) })
     return 0
   }
-}
-
-/**
- * The handoff reminder is injected as a prompt section (order 121), which sits
- * inside the cached prefix: its text must stay byte-identical across steps or
- * every step re-bills the whole conversation. So it carries the threshold (a
- * setting, stable for the session) and never the live token count — the count
- * changes every step, the wording does not.
- */
-function handoffHint(threshold) {
-  return [
-    `[交接提醒] 上下文已到阈值 ${threshold.toLocaleString('en-US')} tokens。`,
-    '在这一步先完成两件事，然后继续手上的工作：',
-    '1) `agent_memory_save`：写一段不超过 400 字的记忆（下一步做什么、关键决策、遗留问题）',
-    '2) `agent_journal` 的 `write`：追加一条详细日志（这次做了什么、为什么、踩了什么坑）',
-    '两处都用绝对日期（2026-10-30），不要写「今天/昨天」：下一段会话可能在几周后读它。',
-    '两件都完成后会自动生成一份交棒检查点，本会话仍可继续使用。',
-  ].join('\n')
 }
 
 function sessionOf(ctx, sessionId) {
@@ -967,289 +946,24 @@ async function allBoundSessions(ctx, store, archives) {
   return { agents }
 }
 
-function writeCheckpoint(ctx, store, journals, handoff, input) {
-  try {
-    const state = store.state()
-    const vault = state.vaults.find(item => item.id === input.agentId)
-    const entries = journals.list({ id: input.agentId, limit: 5 }).entries
-    const text = handoff.buildCheckpointText({
-      agentId: input.agentId,
-      agentName: vault?.name ?? input.agentId,
-      sessionId: input.sessionId,
-      tokens: input.tokens,
-      threshold: input.threshold,
-      memory: vault?.memory ?? '',
-      entries,
-    })
-    const written = journals.write({
-      id: input.agentId,
-      kind: 'checkpoint',
-      title: `交棒检查点 · ${Math.round(input.tokens / 1000)}k tokens`,
-      text,
-      meta: { tokens: input.tokens, threshold: input.threshold, sessionId: input.sessionId, memoryChars: vault?.memoryChars ?? 0 },
-    })
-    const exported = handoff.exportCheckpoint({ text, sessionId: input.sessionId })
-    handoff.patchState(input.sessionId, { settledAt: new Date().toISOString(), checkpoint: written.id, exported })
-    // A fresh session in the same directory picks this agent up automatically
-    // (see the agent/created listener) until the intent expires.
-    handoff.armNext(input.sessionId, {
-      agentId: input.agentId,
-      cwd: sessionCwd(ctx, input.sessionId),
-      approval: approvalOf(ctx, input.sessionId),
-      model: modelOf(ctx, input.sessionId),
-      // The Agent preset has to travel with the intent. A fresh Session starts
-      // on the default preset, and the client must not pass one along: DSH's
-      // `startSession(workspaceId, { agentPreset })` takes the *reuse-a-blank*
-      // path, which yields a draft with no Agent — so nothing would inherit the
-      // binding or receive the startup instruction. Applying the preset here,
-      // before the first turn, is the supported way (`agentPresets.select`).
-      agentPreset: agentPresetOf(ctx, input.sessionId),
-    })
-  } catch (error) {
-    recordError(store, 'handoff/checkpoint', error)
-  }
-}
-
 /**
- * Send the startup instruction into a fresh session. Admission is durable: the
- * Agent inbox owns the message even before the browser finishes opening the
- * conversation. The request id is stable per session, and the Host dedupes by
- * it, so the deferred retry cannot post the message twice.
+ * Archived conversations are read-only. This gate runs before a step reaches
+ * the model, so a weak archive stays viewable in DSH but cannot continue.
  */
-async function sendStartupPrompt(ctx, store, sessionId, text) {
-  const controller = ctx.get('sessionController')
-  if (controller === undefined || typeof controller.prompt !== 'function') return
-  const admit = () =>
-    controller.prompt(
-      {
-        requestId: `handoff-start-${sessionId}`,
-        sessionId,
-        mode: 'queue',
-        content: [{ type: 'text', text }],
-      },
-      new AbortController().signal,
-    )
-  try {
-    await admit()
-  } catch (error) {
-    // Creation can still be settling; one deferred retry usually lands.
-    setTimeout(() => {
-      admit().catch(retryError => recordError(store, 'handoff/startup-prompt', retryError))
-    }, 500)
-  }
-}
-
-/**
- * Handoff status for every bound session, live or cold.
- *
- * The auto switch must work for a session the user merely opened — or for one
- * that settled earlier and is not open at all — so the row set comes from the
- * bindings joined with persisted session summaries, not from `agents.list()`
- * (which only carries Agents that were resumed into this process).
- */
-async function handoffStatus(ctx, store, handoff) {
-  const config = handoff.config()
-  const summaries = await sessionSummaries(ctx)
-  const summaryById = new Map(summaries.map(item => [String(item.sessionId), item]))
-  const live = ctx.get('agents')
-  const liveIds = new Set(
-    (live !== undefined && typeof live.list === 'function' ? live.list() : []).map(agent => String(agent.id)),
-  )
-  const ids = new Set(store.listBindings().map(item => item.sessionId))
-  for (const id of liveIds) if (store.bindingOf(id) !== '') ids.add(id)
-  const sessions = [...ids].map(sessionId => {
-    const summary = summaryById.get(sessionId)
-    const tokens = measureTokens(ctx, sessionId)
-    const state = handoff.stateOf(sessionId)
-    const bound = store.bindingOf(sessionId)
-    const stage = state?.settledAt
-      ? 'settled'
-      : state?.requestedAt
-        ? 'requested'
-        : tokens >= config.triggerTokens
-          ? 'due'
-          : 'watching'
-    const cwd = sessionCwd(ctx, sessionId) ?? (typeof summary?.cwd === 'string' ? summary.cwd : undefined)
-    // An expired intent is not "armed": the client would open a new session
-    // and then `takeNext` would drop the intent, leaving it unbound.
-    const next = state?.next
-    const armed =
-      next !== undefined &&
-      next !== null &&
-      Number.isFinite(Date.parse(next.at)) &&
-      Date.parse(next.at) >= Date.now() - DEFAULT_NEXT_TTL_MS
-    return {
-      sessionId,
-      title: sessionTitleOf(ctx, sessionId),
-      tokens,
-      agentId: bound,
-      stage,
-      workspaceId: workspaceIdOf(ctx, cwd),
-      agentPreset: agentPresetOf(ctx, sessionId),
-      running: summary?.running === true,
-      requestedAt: state?.requestedAt,
-      settledAt: state?.settledAt,
-      checkpoint: state?.checkpoint,
-      exported: state?.exported,
-      armed,
-      armedAt: armed ? next.at : undefined,
-    }
-  })
-  return { config, capabilities: { arm: true, startPrompt: true }, sessions }
-}
-
-function registerHandoff(ctx, store, journals, handoff, archives, hints) {
+function registerArchiveGate(ctx, store, archives) {
   ctx.effect(
     () =>
       ctx.on('agent/pre-step', async (payload, next) => {
         try {
           const sessionId = String(payload?.agent?.id ?? '')
-          // Archived conversations are read-only: reject the step before it
-          // reaches the model. Weak archives stay openable in DSH; this gate is
-          // what actually stops them from continuing.
-          if (sessionId !== '' && archives.levelOf(sessionId) !== '') {
-            hints.delete(sessionId)
-            return { kind: 'reject' }
-          }
-          const config = handoff.config()
-          if (!config.enabled || sessionId === '') {
-            if (sessionId !== '') hints.delete(sessionId)
-            return await next()
-          }
-          const tokens = measureTokens(ctx, sessionId)
-          if (tokens < config.triggerTokens) {
-            hints.delete(sessionId)
-            return await next()
-          }
-          const agentId = store.bindingOf(sessionId)
-          if (agentId === '') {
-            hints.delete(sessionId)
-            return await next()
-          }
-          const result = handoff.evaluate({
-            sessionId,
-            tokens,
-            memoryAt: store.memoryUpdatedAt(agentId),
-            journalAt: journals.latestAt(agentId),
-          })
-          if (result.stage === 'requested') hints.set(sessionId, handoffHint(result.threshold))
-          else hints.delete(sessionId)
-          if (result.stage === 'ready') {
-            writeCheckpoint(ctx, store, journals, handoff, {
-              sessionId,
-              agentId,
-              tokens,
-              threshold: result.threshold,
-            })
-          }
+          if (sessionId !== '' && archives.levelOf(sessionId) !== '') return { kind: 'reject' }
         } catch (error) {
-          recordError(store, 'handoff/pre-step', error)
+          recordError(store, 'archive/gate', error)
         }
         return await next()
       }),
-    'agent-memory: handoff step',
+    'agent-memory: archive gate',
   )
-
-  // The next fresh session in the same directory inherits the checkpoint's
-  // agent (and its approval policy). `startup`/`clear` are the only sources
-  // that mean "a new session"; resume must not consume the intent.
-  ctx.effect(
-    () =>
-      ctx.on('agent/created', async payload => {
-        try {
-          const source = String(payload?.source ?? '')
-          if (source !== 'startup' && source !== 'clear') return
-          const agent = payload?.agent
-          if (agent === undefined || agent === null) return
-          const sessionId = String(agent.id ?? '')
-          if (sessionId === '') return
-          const session = sessionOf(ctx, sessionId)
-          if (session?.header?.origin === 'subagent') return
-          const bound = store.bindingOf(sessionId)
-          if (bound !== '') return
-          const taken = handoff.takeNext({ cwd: sessionCwd(ctx, sessionId), excludeSessionId: sessionId })
-          if (taken === null) return
-          store.setBinding({ sessionId, agentId: taken.agentId })
-          let modelPending = false
-          if (taken.approval !== undefined) {
-            const approval = ctx.get('approval')
-            if (approval !== undefined && typeof approval.setPolicy === 'function') approval.setPolicy(agent, taken.approval)
-          }
-          // Inherit the source Session's Agent preset before the first turn: the
-          // preset decides which tools and prompt sections the model sees, and
-          // `agentPresets.select` refuses once a turn has started, so this is the
-          // only window. Failure is not fatal — the Session just runs default.
-          if (typeof taken.agentPreset === 'string' && taken.agentPreset !== '') {
-            const presets = ctx.get('agentPresets')
-            if (presets !== undefined && typeof presets.select === 'function') {
-              try {
-                await presets.select(agent, taken.agentPreset)
-              } catch (error) {
-                recordError(store, 'handoff/select-preset', error)
-              }
-            }
-          }
-          if (taken.model !== undefined && taken.model !== null) {
-            const controller = ctx.get('sessionController')
-            if (controller !== undefined && typeof controller.selectModel === 'function') {
-              const applyModel = () => controller.selectModel({ sessionId, ...taken.model })
-              try {
-                await applyModel()
-              } catch (error) {
-                modelPending = true
-                // Creation can still be settling; one deferred retry usually lands.
-                setTimeout(() => {
-                  applyModel().catch(retryError => recordError(store, 'handoff/select-model', retryError))
-                }, 500)
-              }
-            }
-          }
-          // The conversation we just left is now superseded: park it as a weak
-          // archive. Weak stays a normal (viewable) session in DSH and is made
-          // read-only by the pre-step gate below; strong additionally uses the
-          // native DSH archive.
-          if (typeof taken.sessionId === 'string' && taken.sessionId !== '' && taken.sessionId !== sessionId) {
-            try {
-              archives.setLevel(taken.sessionId, 'weak', {
-                cwd: sessionCwd(ctx, taken.sessionId),
-                title: sessionTitleOf(ctx, taken.sessionId),
-              })
-            } catch (error) {
-              recordError(store, 'handoff/archive', error)
-            }
-          }
-          // Auto-switch only: the client attaches the startup instruction to
-          // the intent right before it opens the conversation. Send it after
-          // the inheritance above so the first turn uses the inherited model.
-          const startupPrompt = typeof taken.startupPrompt === 'string' ? taken.startupPrompt.trim() : ''
-          if (startupPrompt !== '') {
-            if (modelPending) {
-              setTimeout(() => {
-                void sendStartupPrompt(ctx, store, sessionId, startupPrompt)
-              }, 500)
-            } else {
-              await sendStartupPrompt(ctx, store, sessionId, startupPrompt)
-            }
-          }
-        } catch (error) {
-          recordError(store, 'handoff/next-session', error)
-        }
-      }),
-    'agent-memory: handoff next session',
-  )
-
-  ctx.inject(['systemPrompt'], scoped => {
-    scoped.effect(
-      () =>
-        scoped.systemPrompt.context({
-          name: 'agent-handoff',
-          order: SECTION_ORDER + 1,
-          interpolate: false,
-          text: context => hints.get(sessionIdOf(context)) ?? '',
-        }),
-      'agent-memory: handoff hint',
-    )
-  })
 }
 
 // ── HTTP surface for the manager page ────────────────────────────────────────
@@ -1321,7 +1035,7 @@ function rejectionFor(ctx, req) {
   return structuralRejection(req)
 }
 
-async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, sleep, op, args) {
+async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args) {
   switch (op) {
     case 'state':
       return store.state()
@@ -1495,47 +1209,6 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
     }
     case 'journal.delete':
       return journals.remove({ id: args.id, entry: args.entry })
-    case 'handoff.status':
-      return handoffStatus(ctx, store, handoff)
-    case 'handoff.save':
-      return handoff.saveConfig({
-        enabled: args.enabled,
-        triggerTokens: args.triggerTokens,
-        remindEverySteps: args.remindEverySteps,
-        exportDir: args.exportDir,
-        autoSwitch: args.autoSwitch,
-        startupPrompt: args.startupPrompt,
-      })
-    case 'handoff.reset':
-      handoff.clearState(args.sessionId)
-      return { reset: args.sessionId }
-    case 'handoff.arm': {
-      const sessionId = String(args.sessionId ?? '')
-      const agentId = store.bindingOf(sessionId)
-      if (agentId === '') throw new MemoryError('no-agent', 'bind an agent to this session first')
-      const cwd = sessionCwd(ctx, sessionId)
-      const config = handoff.config()
-      // Only the automatic switch asks for the startup instruction; a manual
-      // "continue" or an ordinary new session must not start talking on its own.
-      const startupPrompt =
-        args.autoStart === true && config.startupPrompt.trim() !== '' ? config.startupPrompt.trim() : ''
-      const next = handoff.armNext(sessionId, {
-        agentId,
-        cwd,
-        approval: approvalOf(ctx, sessionId),
-        model: modelOf(ctx, sessionId),
-        agentPreset: agentPresetOf(ctx, sessionId),
-        ...(startupPrompt === '' ? {} : { startupPrompt }),
-      })
-      return {
-        sessionId,
-        agentId,
-        workspaceId: workspaceIdOf(ctx, cwd),
-        agentPreset: agentPresetOf(ctx, sessionId),
-        startupPrompt,
-        next,
-      }
-    }
     case 'workspace.list':
       return { workspaces: listWorkspaces(ctx) }
     case 'agent.sessions':
@@ -1614,11 +1287,11 @@ async function handleOp(ctx, store, rooms, journals, handoff, archives, recall, 
   }
 }
 
-function registerApi(ctx, store, rooms, journals, handoff, archives, hints, recall, reveal, sleep) {
+function registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
-   * well as on `handoff.status` — the poll reads `/state` first.
+   * (the panel polls `/state` first).
    */
   const publicState = () => ({
     ...store.state(),
@@ -1650,7 +1323,7 @@ function registerApi(ctx, store, rooms, journals, handoff, archives, hints, reca
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, handoff, archives, recall, reveal, sleep, op, args)
+          const value = await handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })

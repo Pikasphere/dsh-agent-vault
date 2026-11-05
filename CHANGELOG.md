@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-beta.16 — 2026-11-05
+
+删除检查点与接力（`handoff.js` 整个模块）。折叠已经接管了「上下文过长」这件事，并在真正超出窗口之后仍然有效；检查点要求先写记忆+日志、再由模型判断是否 settled，流程更长、更容易卡在半路。
+
+- 删除 `handoff.js`、`test-handoff.mjs`、`docs/handoff-v2.md`，以及 `handoff.status / save / reset / arm` 四个 op 和 `agent/created` 的继承逻辑。
+- 面板去掉「检查点」「接力」两个页签（右侧剩六个），侧栏去掉自动切换轮询。
+- 归档的前置拒绝门保留，单独抽成 `registerArchiveGate`。
+- `journal.js` 仍能读旧检查点（`kind: "checkpoint"`），历史文件不会坏；只是不再生成。
+
 ## 2.1.0-beta.15 — 2026-11-05
 
 折叠改成「每轮结束折一片、只在大折时归档」。
