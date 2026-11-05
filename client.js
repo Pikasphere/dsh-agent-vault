@@ -272,6 +272,8 @@ window.__ModuleLoader__.load({
         sleepChunkHint: '持续折叠时每片的大小；硬阈值那一刀只把它当下限，实际按「超出目标的量」切，上限 200k。',
         sleepKeepUnder: '持续压缩目标（tokens，0=关闭）',
         sleepKeepUnderHint: '每次空闲折到这么多 token 以下。开「每轮都折」时它是每轮折叠的上限；填 0 表示不限，折到没得折为止。归档只进词法检索、不进向量索引，所以不会拖慢嵌入。',
+        sleepMinSaved: '单次最少收益（tokens）',
+        sleepMinSavedHint: '估算这一片折叠后模型实际少读多少 token；低于这个值就不折。实测 33k 的原始文本往往只省下 3k（工具结果早已被剪枝到 5k 字符），而每次折叠都会让整个提示缓存失效，所以小折是净亏。',
         recallSrcSession: '对话',
         recallSessions: '对话来源',
         recallSessionsHint: '以下是本智能体有权读取的会话。取消勾选后，该会话不再进入索引（检索不到），但「回到对话」仍可用。',
@@ -558,6 +560,8 @@ window.__ModuleLoader__.load({
         sleepChunkHint: 'Slice size while folding continuously. The emergency fold only treats it as a floor: it cuts how far over target you are, capped at 200k.',
         sleepKeepUnder: 'Keep context under (tokens, 0 = off)',
         sleepKeepUnderHint: 'Fold back under this many tokens on every idle. With fold-every-turn it caps each turn pass; 0 means no cap. Archives stay lexically searchable but skip the vector index, so embedding cost stays flat.',
+        sleepMinSaved: 'Minimum saving per fold (tokens)',
+        sleepMinSavedHint: 'Estimated tokens the model actually stops reading when this slice is folded; below it, nothing is folded. Measured: a 33k slice usually frees only ~3k (tool results are already pruned to 5k chars), while every fold invalidates the whole prompt cache, so small folds are a net loss.',
         recallSrcSession: 'conversation',
         recallSessions: 'Conversations',
         recallSessionsHint: 'Sessions this agent may read. Uncheck one to keep it out of the index (it will not be searchable), while "Go to conversation" still works.',
@@ -945,6 +949,7 @@ window.__ModuleLoader__.load({
       const [sleepDraft, setSleepDraft] = useState('')
       const [sleepChunkDraft, setSleepChunkDraft] = useState('')
       const [sleepUnderDraft, setSleepUnderDraft] = useState('')
+      const [sleepMinSavedDraft, setSleepMinSavedDraft] = useState('')
       // null until the user touches a field: the card shows the persisted values
       // straight from memory.index, so a stale panel can never "save" old numbers.
       const [tuningDraft, setTuningDraft] = useState(null)
@@ -3205,6 +3210,28 @@ window.__ModuleLoader__.load({
               }),
             ),
             h('p', { className: 'am-note-dim' }, t('sleepKeepUnderHint')),
+            h(
+              Field,
+              { label: t('sleepMinSaved') },
+              h('input', {
+                className: 'am-input',
+                type: 'number',
+                min: '0',
+                step: '10000',
+                value: sleepMinSavedDraft === '' ? String(data.sleep?.minSavedTokens ?? 30000) : sleepMinSavedDraft,
+                disabled: busy !== '',
+                onChange: event => setSleepMinSavedDraft(event.target.value),
+                onBlur: () => {
+                  const next = Number(sleepMinSavedDraft)
+                  if (sleepMinSavedDraft !== '' && Number.isFinite(next) && next >= 0) void saveSleep({ minSavedTokens: next })
+                  setSleepMinSavedDraft('')
+                },
+                onKeyDown: event => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                },
+              }),
+            ),
+            h('p', { className: 'am-note-dim' }, t('sleepMinSavedHint')),
             data.sleep
               ? h(
                   'p',

@@ -18,6 +18,8 @@ function harness(options = {}) {
     triggerTokens: 1000,
     cooldownMs: 0,
     mode: 'host',
+    // The fake surface is tiny, so the real 30k gate would skip every fold here.
+    minSavedTokens: 0,
     ...(options.settings ?? {}),
   }
   const calls = []
@@ -273,6 +275,31 @@ function harness(options = {}) {
   assert.ok(row.span.start >= first.start)
 }
 
+// low-gain gate: a slice that would free too little is skipped, not folded
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minSavedTokens: 30000, minFoldTokens: 100 } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, false)
+  assert.equal(result.why, 'low-gain')
+  assert.ok(result.estimatedSavedTokens < 30000)
+  assert.equal(h.appended.length, 0, 'the surface is untouched')
+  assert.equal(h.writes.length, 0, 'nothing is archived either')
+  const row = h.sleep.history(10).find(r => r.kind === 'skip' && r.why === 'low-gain')
+  assert.ok(row !== undefined, 'the skip is accounted')
+  assert.ok(row.span.nodes > 1)
+}
+
+// the same slice folds once the bar is low enough
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minSavedTokens: 1, minFoldTokens: 100 } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.ok(h.appended.length >= 1)
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.kind, 'shelve')
+  assert.ok(typeof row.estimatedSavedTokens === 'number')
+}
+
 // shelve mode: archive into the journal first, then replace the span with a stub
 {
   const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
@@ -438,7 +465,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 30000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

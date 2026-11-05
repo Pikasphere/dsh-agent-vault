@@ -24,6 +24,12 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // Below this a fold costs more (one summary call + a cache re-pay) than it
   // saves, so small slices wait for the next idle.
   minFoldTokens: 5000,
+  // Estimated model-visible tokens a slice must free before it is worth
+  // folding. Measured 2026-11-05: a 33k-token slice usually frees only ~3k of
+  // what the model actually reads (tool results are already pruned to ~5k
+  // chars), and the fold costs a full prompt-cache miss — so small slices are
+  // a net loss.
+  minSavedTokens: 30000,
   // 'host' asks the compaction service (unreachable from a profile plugin);
   // 'shelve' archives the slice into the agent's journal and replaces it with
   // a pointer stub, which needs no service and cannot fail on size.
@@ -73,6 +79,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const keep = Number(raw.keepRecent)
     const under = Number(raw.keepUnder)
     const minFold = Number(raw.minFoldTokens)
+    const minSaved = Number(raw.minSavedTokens)
     const maxSlices = Number(raw.maxSlices)
     const bigChunk = Number(raw.bigChunkTokens)
     return {
@@ -84,6 +91,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       keepUnder: Number.isFinite(under) && under > 0 ? Math.trunc(under) : SLEEP_DEFAULTS.keepUnder,
       foldEveryTurn: raw.foldEveryTurn === true,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
+      minSavedTokens: Number.isFinite(minSaved) && minSaved >= 0 ? Math.trunc(minSaved) : SLEEP_DEFAULTS.minSavedTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
       maxSlices: Number.isFinite(maxSlices) && maxSlices >= 1 ? Math.min(Math.trunc(maxSlices), 8) : SLEEP_DEFAULTS.maxSlices,
       bigChunkTokens: Number.isFinite(bigChunk) && bigChunk >= 5000 ? Math.trunc(bigChunk) : SLEEP_DEFAULTS.bigChunkTokens,
@@ -181,6 +189,24 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     } catch {
       return 0
     }
+  }
+
+  /** What the model actually reads for one node: tool results are pruned to a
+   *  head and tail before they reach the prompt, so their raw size overstates
+   *  the saving by an order of magnitude. */
+  const PRUNED_TOOL_CHARS = 5120
+
+  function visibleChars(session, seq) {
+    const chars = nodeCost(session, seq)
+    return nodeType(session, seq) === 'tool/result' ? Math.min(chars, PRUNED_TOOL_CHARS) : chars
+  }
+
+  /** Tokens a slice is expected to free, in the same units `measureTokens` uses. */
+  function estimateSavedTokens(session, seqs) {
+    let chars = 0
+    for (const seq of seqs) chars += visibleChars(session, seq)
+    // The stub that replaces the slice is ~100 CJK characters.
+    return Math.max(0, Math.round(chars / 3) - 40)
   }
 
   function nodeType(session, seq) {
@@ -494,6 +520,18 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (span === null) return { attempted: false, why: 'no-span' }
     const startedAt = Date.now()
     const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
+    const estimatedSavedTokens = estimateSavedTokens(session, seqs)
+    if (config.minSavedTokens > 0 && estimatedSavedTokens < config.minSavedTokens) {
+      record({
+        at: new Date().toISOString(),
+        kind: 'skip',
+        why: 'low-gain',
+        sessionId,
+        estimatedSavedTokens,
+        span: { start: span.start, end: span.end, nodes: span.nodes },
+      })
+      return { attempted: false, why: 'low-gain', estimatedSavedTokens }
+    }
     const stamp = spanStamp(sessionId, seqs)
     if (alreadyShelved(session, stamp)) {
       record({ at: new Date().toISOString(), kind: 'shelve', ok: true, skipped: 'duplicate', sessionId, stage: 'duplicate', span: { start: span.start, end: span.end, nodes: span.nodes } })
@@ -548,7 +586,9 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
       deep: config.deep === true,
       span: { start: span.start, end: span.end, nodes: span.nodes },
-      archived: ids, stubChars: stub.length,
+      archived: ids,
+      stubChars: stub.length,
+      estimatedSavedTokens,
       shadowedTokenCount: Math.round((span.chars ?? 0) / 3),
       tokensBefore: tokensBefore > 0 ? tokensBefore : null,
       tokensAfter: tokensAfter > 0 ? tokensAfter : null,
