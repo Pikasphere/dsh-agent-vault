@@ -363,6 +363,27 @@ function harness(options = {}) {
   assert.equal(h.writes.length, 0)
 }
 
+// foldEveryTurn: no target at all, one pass per idle
+{
+  const h = harness({
+    tokens: 30000,
+    nodes: 120,
+    toolResults: false,
+    settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500 },
+  })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true, 'folds even though the session is tiny')
+  assert.ok(h.writes.length >= 1, 'archived something')
+  assert.ok(h.appended.length >= 1, 'left a pointer stub')
+}
+
+// foldEveryTurn off: the same tiny session is left alone, cooldown or not
+{
+  const h = harness({ tokens: 30000, nodes: 120, toolResults: false, settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve', keepRecent: 4 } })
+  assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
+  assert.equal(h.writes.length, 0)
+}
+
 // a run of failed attempts is surfaced, and only counts the trailing run
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleep-fail-'))
@@ -395,7 +416,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

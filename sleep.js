@@ -41,6 +41,10 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // 0 disables it. This is what keeps a long session from ever approaching the
   // window — the folds are small and near the tail, so the cache survives.
   keepUnder: 0,
+  // Fold on every idle with no size target at all: whatever is past the
+  // recent-working-set window gets archived, so the context never accumulates
+  // between turns. `keepRecent` is the only thing that stays in the window.
+  foldEveryTurn: false,
   // When the host compaction service is unreachable (it lives in the preset's
   // isolate scope), fall back to memory-backed slices instead of doing nothing.
   fallbackShelve: true,
@@ -82,6 +86,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : SLEEP_DEFAULTS.chunkTokens,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : SLEEP_DEFAULTS.keepRecent,
       keepUnder: Number.isFinite(under) && under >= 20000 ? Math.trunc(under) : SLEEP_DEFAULTS.keepUnder,
+      foldEveryTurn: raw.foldEveryTurn === true,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
       maxSlices: Number.isFinite(maxSlices) && maxSlices >= 1 ? Math.min(Math.trunc(maxSlices), 8) : SLEEP_DEFAULTS.maxSlices,
@@ -567,13 +572,14 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const big = tokens >= config.triggerTokens
     // Continuous mode replaces the soft threshold with `keepUnder`: the point
     // is to hold the session at a working size, not to wait for pressure.
+    const always = config.foldEveryTurn === true
     const continuous = config.keepUnder > 0 && tokens > config.keepUnder
-    const small = !big && (tokens >= config.softTokens || continuous)
+    const small = !big && (always || tokens >= config.softTokens || continuous)
     if (!big && !small) {
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'below-threshold', tokens, soft: config.softTokens, trigger: config.triggerTokens })
       return null
     }
-    if (Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
+    if (!always && Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'cooldown', tokens })
       return null
     }
@@ -581,6 +587,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       inFlight.add(sessionId)
       try {
         let last = null
+        let done = null
         let pressure = tokens
         // A deep fold is a one-shot per idle: it already reaches back past the
         // watermark, so repeating it archives overlapping spans (the second
@@ -588,8 +595,11 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // Continuous mode lowers the stopping line from the soft threshold to
         // `keepUnder`: the session is pulled back to a working size on every
         // idle, so it never has to be rescued by a big fold.
-        const target = config.keepUnder > 0 ? config.keepUnder : config.softTokens
-        let slices = config.keepUnder > 0 ? Math.max(config.maxSlices, 6) : config.maxSlices
+        // `foldEveryTurn` has no line to cross: with target 0 the loop runs
+        // until nothing foldable is left (the watermark and the working set stop
+        // it), which is exactly "archive last turn's material now".
+        const target = always ? 0 : config.keepUnder > 0 ? config.keepUnder : config.softTokens
+        let slices = always || config.keepUnder > 0 ? Math.max(config.maxSlices, 6) : config.maxSlices
         for (let slice = 0; slice < slices; slice += 1) {
           // One big slice once the hard threshold is crossed; small slices only
           // top up below it.
@@ -606,6 +616,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
               }
             : config
           last = await shelve(sessionId, agent, sliceConfig)
+          if (last && last.attempted === true) done = last
           pressure = measureTokens(sessionId)
           if (!last || last.attempted !== true) break
           if (measureTokens(sessionId) < target) break
@@ -613,7 +624,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // Only a real attempt earns the cooldown: resetting it on "no span"
         // starved every later attempt for a full minute at a time.
         if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
-        return last
+        return done ?? last
       } catch (error) {
         record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, error: String(error?.message ?? error).slice(0, 300) })
         return { attempted: true, ok: false, error }
@@ -630,13 +641,15 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       inFlight.add(sessionId)
       try {
         let last = null
+        let done = null
         for (let slice = 0; slice < config.maxSlices; slice += 1) {
           last = await shelve(sessionId, agent, config)
+          if (last && last.attempted === true) done = last
           if (!last || last.attempted !== true) break
           if (measureTokens(sessionId) < config.softTokens) break
         }
         if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
-        return last
+        return done ?? last
       } finally {
         inFlight.delete(sessionId)
       }

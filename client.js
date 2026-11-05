@@ -266,6 +266,8 @@ window.__ModuleLoader__.load({
         sleepThresholdHint: '按整个上下文的 token 数计。10 万窗口的模型建议 4 万；1M 窗口按需调高。',
         sleepStats: '已尝试 / 累计折叠',
         sleepFailing: '压缩连续失败',
+        sleepEveryTurn: '每轮都折叠',
+        sleepEveryTurnHint: '不等阈值：每轮结束后把上一轮的已消费内容归档成指针桩，只留最近几条在工作区。上下文不再累积，但跨轮依赖要靠召回。',
         sleepSoft: '开始小压缩（tokens）',
         sleepSoftHint: '超过这个值先做「尾部小折叠」：只压最近已消费的一段，缓存只废掉尾巴，不惊动前缀。默认是硬阈值的 75%。',
         sleepChunk: '每次折叠目标（tokens）',
@@ -552,6 +554,8 @@ window.__ModuleLoader__.load({
         sleepThresholdHint: 'Counted over the whole context. Roughly 40k for a 100k window; raise it for a 1M window.',
         sleepStats: 'attempts / folded',
         sleepFailing: 'Compaction failing repeatedly',
+        sleepEveryTurn: 'Fold every turn',
+        sleepEveryTurnHint: 'No threshold: after each turn, archive the consumed material into pointer stubs and keep only the recent few nodes. The context stops growing; cross-turn continuity relies on recall.',
         sleepSoft: 'Start small folds (tokens)',
         sleepSoftHint: 'Above this, fold a recent consumed slice first: only the tail of the cache is re-billed, the prefix stays warm. Defaults to 75% of the hard threshold.',
         sleepChunk: 'Fold size (tokens)',
@@ -1447,6 +1451,10 @@ window.__ModuleLoader__.load({
 
       const saveHideBound = async checked => {
         await call('settings.save', { hideBoundSessions: checked })
+      }
+
+      const saveFoldEveryTurn = async checked => {
+        await call('settings.save', { sleep: { foldEveryTurn: checked } })
       }
 
       const saveTranscripts = async checked => {
@@ -3194,6 +3202,13 @@ window.__ModuleLoader__.load({
               }),
             ),
             h('p', { className: 'am-note-dim' }, t('sleepChunkHint')),
+            h(Switch, {
+              checked: data.sleep?.foldEveryTurn === true,
+              label: t('sleepEveryTurn'),
+              hint: t('sleepEveryTurnHint'),
+              disabled: busy !== '',
+              onChange: checked => void saveFoldEveryTurn(checked),
+            }),
             h(
               Field,
               { label: t('sleepKeepUnder') },
