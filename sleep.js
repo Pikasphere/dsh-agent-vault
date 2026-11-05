@@ -597,7 +597,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // `foldEveryTurn` has no line to cross: with target 0 the loop runs
         // until nothing foldable is left (the watermark and the working set stop
         // it), which is exactly "archive last turn's material now".
-        const target = always ? 0 : config.keepUnder
+        // `keepUnder` is the stopping line in both modes: with `foldEveryTurn`
+        // it bounds how far one turn's pass goes, and 0 means "no line at all,
+        // fold until nothing foldable is left".
+        const target = config.keepUnder
         let slices = Math.max(config.maxSlices, 6)
         for (let slice = 0; slice < slices; slice += 1) {
           // One big slice once the hard threshold is crossed; small slices only
@@ -645,7 +648,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
           last = await shelve(sessionId, agent, config)
           if (last && last.attempted === true) done = last
           if (!last || last.attempted !== true) break
-          if (measureTokens(sessionId) < (config.foldEveryTurn === true ? 0 : config.keepUnder)) break
+          if (measureTokens(sessionId) < config.keepUnder) break
         }
         if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
         return done ?? last

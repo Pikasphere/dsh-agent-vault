@@ -2,6 +2,16 @@
 
 ## 2.1.0-beta.12 — 2026-11-05
 
+只留两条路径，删掉中间那条。
+
+- **删除软阈值折叠**：`softTokens` 从 SLEEP_DEFAULTS、设置解析、store、面板里全部移除。它和连续折叠在同一轮空闲里同时触发，等于把一件事拆成两个设置。
+- 现在只有：**持续折叠**（`keepUnder` 目标，或「每轮都折」无目标）+ **硬阈值应急**（`triggerTokens`，一片切回目标以下，上限 `bigChunkTokens` 200k）。
+- `keepUnder` 的语义统一：两种模式都是停止线；「每轮都折」+ `keepUnder=0` 表示折到没得折为止。
+- `chunkTokens` 的语义澄清：持续折叠时是每片大小；应急折叠只把它当下限，实际按「超出目标的量」切。
+- 面板文案同步，旧的 `softTokens` 设置项被忽略（不影响已有 settings.json 加载）。
+
+## 2.1.0-beta.12 — 2026-11-05
+
 删掉软阈值折叠：只留两条路径。
 
 - 之前有三条：`tokens ≥ softTokens` 折一小片、`tokens > keepUnder` 持续折、`tokens ≥ triggerTokens` 折一大片。第一条和第二条在同一个 idle 上抢同一件事，只是把一次活拆成两个设置。
