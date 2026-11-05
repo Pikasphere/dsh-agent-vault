@@ -18,8 +18,6 @@ export const SLEEP_DEFAULTS = Object.freeze({
   enabled: false,
   // Hard threshold: ask the host for its own balanced reduction.
   triggerTokens: 400000,
-  // Soft threshold: fold a tail slice instead, which keeps the KV prefix warm.
-  softTokens: 300000,
   // Target size of one tail slice, and how much recent work never to touch.
   chunkTokens: 20000,
   keepRecent: 8,
@@ -71,7 +69,6 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     }
     const trigger = Number(raw.triggerTokens)
     const cooldown = Number(raw.cooldownMs)
-    const soft = Number(raw.softTokens)
     const chunk = Number(raw.chunkTokens)
     const keep = Number(raw.keepRecent)
     const under = Number(raw.keepUnder)
@@ -82,10 +79,9 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       enabled: raw.enabled === true,
       debug: raw.debug === true,
       triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : SLEEP_DEFAULTS.triggerTokens,
-      softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : SLEEP_DEFAULTS.softTokens,
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : SLEEP_DEFAULTS.chunkTokens,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : SLEEP_DEFAULTS.keepRecent,
-      keepUnder: Number.isFinite(under) && under >= 20000 ? Math.trunc(under) : SLEEP_DEFAULTS.keepUnder,
+      keepUnder: Number.isFinite(under) && under > 0 ? Math.trunc(under) : SLEEP_DEFAULTS.keepUnder,
       foldEveryTurn: raw.foldEveryTurn === true,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
@@ -332,7 +328,8 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
   }
 
   /**
-   * Ask for one compaction: a small tail fold above the soft threshold, or the
+   * Ask for one compaction: a tail fold when the session is above the keep-under
+   * target (or on every turn), or the host's balanced reduction above the hard
    * host's balanced reduction above the hard one. Returns null when nothing was
    * attempted, or `{ attempted, kind, result }` so callers can tell "below
    * threshold" from "the service declined".
@@ -570,13 +567,15 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     if (inFlight.has(sessionId)) return null
     const tokens = measureTokens(sessionId)
     const big = tokens >= config.triggerTokens
-    // Continuous mode replaces the soft threshold with `keepUnder`: the point
-    // is to hold the session at a working size, not to wait for pressure.
+    // Two ways to fold, and no third: continuous tail folding (`keepUnder`
+    // target, or every turn with no target at all), or the emergency fold once
+    // the hard threshold is crossed. A mid-sized "soft threshold" fold was
+    // redundant — it fired on the same idle as the continuous pass and only
+    // split one job across two settings.
     const always = config.foldEveryTurn === true
-    const continuous = config.keepUnder > 0 && tokens > config.keepUnder
-    const small = !big && (always || tokens >= config.softTokens || continuous)
-    if (!big && !small) {
-      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'below-threshold', tokens, soft: config.softTokens, trigger: config.triggerTokens })
+    const continuous = always || (config.keepUnder > 0 && tokens > config.keepUnder)
+    if (!big && !continuous) {
+      record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'below-threshold', tokens, keepUnder: config.keepUnder, trigger: config.triggerTokens })
       return null
     }
     if (!always && Date.now() - (lastAttempt.get(sessionId) ?? 0) < config.cooldownMs) {
@@ -598,8 +597,8 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // `foldEveryTurn` has no line to cross: with target 0 the loop runs
         // until nothing foldable is left (the watermark and the working set stop
         // it), which is exactly "archive last turn's material now".
-        const target = always ? 0 : config.keepUnder > 0 ? config.keepUnder : config.softTokens
-        let slices = always || config.keepUnder > 0 ? Math.max(config.maxSlices, 6) : config.maxSlices
+        const target = always ? 0 : config.keepUnder
+        let slices = Math.max(config.maxSlices, 6)
         for (let slice = 0; slice < slices; slice += 1) {
           // One big slice once the hard threshold is crossed; small slices only
           // top up below it.
@@ -610,7 +609,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
                 ...config,
                 // Enough to come back under the soft threshold, capped so one
                 // summary never becomes an unbounded archive job.
-                chunkTokens: Math.min(Math.max(pressure - config.softTokens, config.chunkTokens), config.bigChunkTokens),
+                chunkTokens: Math.min(Math.max(pressure - (config.keepUnder > 0 ? config.keepUnder : Math.trunc(config.triggerTokens / 2)), config.chunkTokens), config.bigChunkTokens),
                 maxSlices: 1,
                 deep: true,
               }
@@ -646,7 +645,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
           last = await shelve(sessionId, agent, config)
           if (last && last.attempted === true) done = last
           if (!last || last.attempted !== true) break
-          if (measureTokens(sessionId) < config.softTokens) break
+          if (measureTokens(sessionId) < (config.foldEveryTurn === true ? 0 : config.keepUnder)) break
         }
         if (last && last.attempted === true) lastAttempt.set(sessionId, Date.now())
         return done ?? last
@@ -659,7 +658,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'compactIfNeeded-missing', tokens })
       return null
     }
-    if (small && typeof compaction.compactRegion !== 'function') {
+    if (!big && typeof compaction.compactRegion !== 'function') {
       record({ at: new Date().toISOString(), kind: 'skip', sessionId, why: 'compactRegion-missing', tokens })
       return null
     }
@@ -889,7 +888,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
             step: 'measured',
             sessionId: id,
             tokens,
-            soft: config.softTokens,
+            keepUnder: config.keepUnder,
             trigger: config.triggerTokens,
             hasSession: session !== null,
             nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : -1,

@@ -203,7 +203,6 @@ export function createStore(options = {}) {
     const value = raw !== null && typeof raw === 'object' ? raw : {}
     const trigger = Number(value.triggerTokens)
     const cooldown = Number(value.cooldownMs)
-    const soft = Number(value.softTokens)
     const chunk = Number(value.chunkTokens)
     const keep = Number(value.keepRecent)
     const under = Number(value.keepUnder)
@@ -211,11 +210,10 @@ export function createStore(options = {}) {
     return {
       enabled: value.enabled === true,
       triggerTokens: Number.isFinite(trigger) && trigger > 0 ? Math.trunc(trigger) : 400000,
-      softTokens: Number.isFinite(soft) && soft > 0 ? Math.trunc(soft) : 300000,
       chunkTokens: Number.isFinite(chunk) && chunk >= 2000 ? Math.trunc(chunk) : 20000,
       keepRecent: Number.isFinite(keep) && keep >= 2 ? Math.trunc(keep) : 8,
       foldEveryTurn: value.foldEveryTurn === true,
-      keepUnder: Number.isFinite(under) && under >= 20000 ? Math.trunc(under) : 0,
+      keepUnder: Number.isFinite(under) && under > 0 ? Math.trunc(under) : 0,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : 5000,
       mode: value.mode === 'shelve' ? 'shelve' : 'host',
       maxSlices: Number.isFinite(Number(value.maxSlices)) && Number(value.maxSlices) >= 1 ? Math.min(Math.trunc(Number(value.maxSlices)), 8) : 3,
@@ -566,8 +564,6 @@ export function createStore(options = {}) {
       if (typeof patch.sleep.enabled === 'boolean') merged.enabled = patch.sleep.enabled
       const trigger = Number(patch.sleep.triggerTokens)
       if (Number.isFinite(trigger) && trigger > 0) merged.triggerTokens = Math.trunc(trigger)
-      const soft = Number(patch.sleep.softTokens)
-      if (Number.isFinite(soft) && soft > 0) merged.softTokens = Math.trunc(soft)
       const chunk = Number(patch.sleep.chunkTokens)
       if (Number.isFinite(chunk) && chunk >= 2000) merged.chunkTokens = Math.trunc(chunk)
       const keep = Number(patch.sleep.keepRecent)

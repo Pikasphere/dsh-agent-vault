@@ -209,9 +209,9 @@ function harness(options = {}) {
   assert.equal(state.last.shadowedTokenCount, 5000)
 }
 
-// small sweep: between soft and hard thresholds, fold a tail span instead
+// continuous mode below the hard threshold: fold a tail span instead
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.kind, 'small')
@@ -230,16 +230,16 @@ function harness(options = {}) {
   assert.ok(row.span !== null && row.span.nodes > 1)
 }
 
-// below the soft threshold nothing happens at all
+// below the trigger and with no keep-under target, nothing happens at all
 {
-  const h = harness({ tokens: 400, settings: { softTokens: 500, triggerTokens: 1000 } })
+  const h = harness({ tokens: 400, settings: { keepUnder: 400, triggerTokens: 1000 } })
   assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
   assert.equal(h.surfaceCalls.length, 0)
 }
 
 // a refused region is accounted, not thrown
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, minFoldTokens: 100 }, regionThrows: true })
+  const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, minFoldTokens: 100 }, regionThrows: true })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.error instanceof Error, true)
@@ -250,14 +250,14 @@ function harness(options = {}) {
 
 // a slice below minFoldTokens waits for the next idle
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100000 } })
+  const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100000 } })
   assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
   assert.equal(h.surfaceCalls.length, 0)
 }
 
 // the fold watermark moves forward and blocks rewriting the same prefix
 {
-  const h = harness({ tokens: 700, settings: { softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
   assert.equal((await h.sleep.maybeCompact({ id: 'session-a' }))?.attempted, true)
   const first = h.surfaceCalls[0]
   const mark = h.sleep.state().foldStartSeq['session-a']
@@ -275,7 +275,7 @@ function harness(options = {}) {
 
 // shelve mode: archive into the journal first, then replace the span with a stub
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.ok, true)
@@ -309,7 +309,7 @@ function harness(options = {}) {
 
 // shelve refuses when the session is not bound (no memory to write into)
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, minFoldTokens: 100 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minFoldTokens: 100 } })
   h.store.bindingOf = () => ''
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, false)
@@ -321,7 +321,7 @@ function harness(options = {}) {
 // the call would be folded while its result stays in the surface, and the next
 // model request dies with "tool result has no matching call"
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', softTokens: 500, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
   const pending = h.nodes[h.nodes.length - 1 - 8]
   h.events.set(pending, {
     type: 'assistant/message',
@@ -358,7 +358,7 @@ function harness(options = {}) {
 
 // without keepUnder the same session is simply below threshold
 {
-  const h = harness({ tokens: 90000, toolResults: false, settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve' } })
+  const h = harness({ tokens: 90000, toolResults: false, settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve' } })
   assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
   assert.equal(h.writes.length, 0)
 }
@@ -369,7 +369,7 @@ function harness(options = {}) {
     tokens: 30000,
     nodes: 120,
     toolResults: false,
-    settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500 },
+    settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500 },
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'folds even though the session is tiny')
@@ -379,7 +379,7 @@ function harness(options = {}) {
 
 // foldEveryTurn off: the same tiny session is left alone, cooldown or not
 {
-  const h = harness({ tokens: 30000, nodes: 120, toolResults: false, settings: { softTokens: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve', keepRecent: 4 } })
+  const h = harness({ tokens: 30000, nodes: 120, toolResults: false, settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 0, mode: 'shelve', keepRecent: 4 } })
   assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null)
   assert.equal(h.writes.length, 0)
 }
@@ -416,7 +416,7 @@ function harness(options = {}) {
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, softTokens: 300000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, chunkTokens: 20000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

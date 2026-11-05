@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-beta.12 — 2026-11-05
+
+删掉软阈值折叠：只留两条路径。
+
+- 之前有三条：`tokens ≥ softTokens` 折一小片、`tokens > keepUnder` 持续折、`tokens ≥ triggerTokens` 折一大片。第一条和第二条在同一个 idle 上抢同一件事，只是把一次活拆成两个设置。
+- 现在：**持续折叠**（`keepUnder` 目标，或 `foldEveryTurn` 无目标）+ **硬阈值应急**（`triggerTokens`）。没有 `softTokens` 这个设置项了。
+- 设置迁移：`softTokens` 从 `settings.json` 里移除，`keepUnder` 设为 120000（这台机器）。
+- 顺带放宽了 `keepUnder` 的下限（原先 >20000 才生效，测试里的小数值会被忽略）。
+
 ## 2.1.0-beta.11 — 2026-11-05
 
 每轮必折（foldEveryTurn）；beta.10 的 keepUnder 保留。
