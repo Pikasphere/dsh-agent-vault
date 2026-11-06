@@ -640,11 +640,19 @@ function registerJournalTools(register, store, journals) {
 
 // ── token measurement ───────────────────────────────────────────────────────
 
+/**
+ * Token-meter tracing, off unless `DSH_VAULT_TRACE=1`.
+ *
+ * It used to run on every measurement and fall back to the process cwd, which
+ * parked a `vault-measure.log` inside the plugin directory (216 lines in a day)
+ * — a debug aid nobody asked for, written on the hot path.
+ */
 function measureTrace(step, extra) {
+  if (process.env.DSH_VAULT_TRACE !== '1') return
   try {
-    const target = path.join(process.env.TEMP ?? process.env.TMP ?? '.', 'vault-measure.log')
-    fs.appendFileSync(target, `${new Date().toISOString()} ${step} ${JSON.stringify(extra)}
-`)
+    const dir = process.env.TEMP ?? process.env.TMP ?? ''
+    if (dir === '') return
+    fs.appendFileSync(path.join(dir, 'vault-measure.log'), `${new Date().toISOString()} ${step} ${JSON.stringify(extra)}\n`)
   } catch {
     /* tracing must never break the caller */
   }
