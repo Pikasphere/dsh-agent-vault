@@ -8,3 +8,6 @@ Thumbs.db
 .idea/
 .vscode/
 .shots/
+
+# Test temp dirs written when TEMP is a Windows path on Linux
+/E:/
