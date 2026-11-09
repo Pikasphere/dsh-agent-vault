@@ -3608,10 +3608,35 @@ window.__ModuleLoader__.load({
             .join('')
         }
 
-        const mount = () => {
+        /**
+         * Where the section goes. DSH renames its own CSS-module classes and can
+         * restructure the sidebar between releases (`regionArea` moved once
+         * already), and a missed anchor used to be silent: the section never
+         * mounted while the stylesheet below still hid every bound conversation,
+         * so the conversations disappeared from the whole UI. Each candidate is
+         * (anchor to insert before, container to observe).
+         */
+        const anchorCandidates = () => {
+          const out = []
           const area = document.querySelector('[class*="regionArea"]')
-          const root = area?.parentElement
-          if (!area || !root) return
+          if (area?.parentElement) out.push({ before: area, root: area.parentElement })
+          const row = document.querySelector('[data-row-key^="session:"]')
+          if (row !== null) {
+            let node = row.parentElement
+            for (let depth = 0; depth < 4 && node !== null; depth += 1, node = node.parentElement) {
+              if (node.parentElement !== null) out.push({ before: null, root: node.parentElement })
+            }
+          }
+          const aside = document.querySelector('aside')
+          if (aside !== null) out.push({ before: null, root: aside })
+          return out
+        }
+
+        const mount = () => {
+          const candidates = anchorCandidates()
+          if (candidates.length === 0) return
+          const { before: area, root } = candidates[0]
+          if (!root) return
           let host = document.getElementById('am-sidebar-agents')
           if (host === null) {
             host = document.createElement('div')
@@ -3739,7 +3764,8 @@ window.__ModuleLoader__.load({
               openAgentMenu(event)
             })
           }
-          if (host.parentElement !== root || host.nextElementSibling !== area) root.insertBefore(host, area)
+          if (host.parentElement !== root) root.insertBefore(host, area ?? root.firstChild)
+          else if (area !== null && host.nextElementSibling !== area) root.insertBefore(host, area)
           if (observedRoot !== root) {
             observer?.disconnect()
             observedRoot = root
@@ -3755,7 +3781,10 @@ window.__ModuleLoader__.load({
             const payload = await request('/state')
             if (stopped) return
             const state = payload.state
-            const ids = state?.hideBoundSessions === false ? [] : (state?.bindings ?? []).map(item => item.sessionId)
+            // Only hide conversations we are able to list ourselves: an unmounted
+            // section plus this stylesheet would remove them from the UI entirely.
+            const mounted = document.getElementById('am-sidebar-agents') !== null
+            const ids = !mounted || state?.hideBoundSessions === false ? [] : (state?.bindings ?? []).map(item => item.sessionId)
             const css = ids
               .filter(id => typeof id === 'string' && id !== '')
               .map(id => `[data-row-key="session:${id}"]{display:none!important}`)
