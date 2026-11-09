@@ -3669,6 +3669,24 @@ window.__ModuleLoader__.load({
             host.id = 'am-sidebar-agents'
             host.className = 'am-side-agents'
             lastListSignature = ''
+            /**
+             * The shell hands wheel gestures between the navigation and the
+             * section scroller below it. This block now lives inside that
+             * section, so a wheel over the list was being spent on the shell's
+             * own scroller and the list never moved. Claim the event only while
+             * the list still has room in that direction, and let it through at
+             * the ends so one gesture continues into the shell list.
+             */
+            host.addEventListener('wheel', event => {
+              const list = event.target instanceof Element ? event.target.closest('.am-side-agents-list') : null
+              if (list === null) return
+              const delta = event.deltaY
+              if (delta === 0) return
+              const top = list.scrollTop <= 0
+              const bottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 1
+              if ((delta < 0 && top) || (delta > 0 && bottom)) return
+              event.stopPropagation()
+            }, { capture: true, passive: true })
             host.addEventListener('click', event => {
               const target = event.target.closest('[data-action]')
               if (target === null) return
