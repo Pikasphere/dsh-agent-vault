@@ -597,7 +597,10 @@ window.__ModuleLoader__.load({
 .am-divider{height:1px;background:var(--dsw-alias-border-l1);margin:4px 0}
 .am-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .am-usage-title{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.am-side-agents{flex:none;display:flex;flex-direction:column;padding:2px 0;margin:6px 0 8px}
+/* The sidebar's scroll region is a 4px / 1fr / padding grid in DSH 0.2.2+, so an
+   auto-placed child lands in the 4px rail column (measured: width 4px). Pin it to
+   the content column; harmless where the parent is not a grid. */
+.am-side-agents{grid-column:2;min-width:0;flex:none;display:flex;flex-direction:column;padding:2px 0;margin:6px 0 8px}
 /* The shell rearranged its sidebar grid in 0.2.2: keep the section visible
    even when the new parent is a grid row with a fixed track. */
 #am-sidebar-agents{display:flex!important;visibility:visible!important;opacity:1!important;height:auto!important;max-height:none!important;min-height:38px!important;overflow:visible!important}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-beta.20 — 2026-11-09
+
+修 DSH 0.2.2 侧栏改版后「智能体对话」区块不可见。
+
+- 现象：升级到 0.2.2-rc.1 后，侧栏只剩一条 4px 宽的细条，智能体分组和会话全看不见。
+- 原因：`sidebar` 的滚动区从 flex 换成了 `grid-template-columns: 4px minmax(0,1fr) padding`（`P1oHKa_scrollArea`），我们插入的区块是自动放置的子项，落进了第一列——那个 4px 的装饰栏。客户端诊断实测 `host.width = 4`。
+- 修复：`.am-side-agents{grid-column:2}`，并把 `min-width:0` 补上。父级不是 grid 时该声明无副作用。
+- 顺带把客户端布局诊断留在 `index/client-diag.jsonl`（`diag.client` op），以后再遇到「看不见」可以直接量尺寸。
+
 ## 2.1.0-beta.19 — 2026-11-09
 
 修 DSH 0.2.2-rc.1 升级后「智能体对话」消失、连带看不到对话。
