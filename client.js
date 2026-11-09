@@ -598,6 +598,9 @@ window.__ModuleLoader__.load({
 .am-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 .am-usage-title{font-weight:600;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .am-side-agents{flex:none;display:flex;flex-direction:column;padding:2px 0;margin:6px 0 8px}
+/* The shell rearranged its sidebar grid in 0.2.2: keep the section visible
+   even when the new parent is a grid row with a fixed track. */
+#am-sidebar-agents{display:flex!important;visibility:visible!important;opacity:1!important;height:auto!important;max-height:none!important;min-height:38px!important;overflow:visible!important}
 .am-side-agents.is-collapsed .am-side-agents-list,.am-side-agents.is-collapsed .am-side-view{display:none}
 .am-side-agents-head{box-sizing:border-box;display:flex;align-items:center;gap:6px;height:38px;margin:0 0 6px;padding-left:6px;color:var(--dsw-alias-label-tertiary);overflow:hidden}
 .am-side-agents-title{font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
@@ -3158,6 +3161,7 @@ window.__ModuleLoader__.load({
         let bannerSessionId = ''
         let observer = null
         let observedRoot = null
+        let layoutReported = false
         const collapsed = new Set()
         let lastListSignature = ''
         let searchQuery = ''
@@ -3775,6 +3779,32 @@ window.__ModuleLoader__.load({
           }
           if (host.parentElement !== root) root.insertBefore(host, area ?? root.firstChild)
           else if (area !== null && host.nextElementSibling !== area) root.insertBefore(host, area)
+          if (!layoutReported) {
+            layoutReported = true
+            const describe = node => {
+              if (node === null || node === undefined) return null
+              const style = getComputedStyle(node)
+              const rect = node.getBoundingClientRect()
+              return {
+                tag: node.tagName,
+                cls: String(node.className ?? '').slice(0, 120),
+                display: style.display,
+                position: style.position,
+                height: Math.round(rect.height),
+                width: Math.round(rect.width),
+                overflow: style.overflow,
+                visibility: style.visibility,
+                opacity: style.opacity,
+                gridArea: style.gridArea,
+              }
+            }
+            reportDiag({
+              stage: 'layout',
+              host: describe(host),
+              parent: describe(host.parentElement),
+              grandparent: describe(host.parentElement?.parentElement ?? null),
+            })
+          }
           if (observedRoot !== root) {
             observer?.disconnect()
             observedRoot = root
