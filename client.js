@@ -3625,8 +3625,18 @@ window.__ModuleLoader__.load({
          */
         const anchorCandidates = () => {
           const out = []
+          // 0.2.2 turned the sidebar scroller into a grid with four explicit
+          // rows (`4px 1fr 2px` columns, `8px max-content 2px max-content`
+          // rows): the panel list owns row 2, the workspace browser row 4, and
+          // the row between them is a 2px spacer. A third child of that grid
+          // auto-places into a new implicit row BELOW the workspace browser, so
+          // the section has to live inside the workspace region's own flex
+          // column instead of before it.
           const area = document.querySelector('[class*="regionArea"]')
-          if (area?.parentElement) out.push({ before: area, root: area.parentElement })
+          if (area !== null) {
+            const first = area.firstElementChild
+            out.push({ before: first, root: area })
+          }
           const row = document.querySelector('[data-row-key^="session:"]')
           if (row !== null) {
             let node = row.parentElement
