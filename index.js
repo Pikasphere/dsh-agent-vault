@@ -1202,6 +1202,20 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       })
     case 'journal.read':
       return journals.read({ id: args.id, entry: args.entry })
+    case 'diag.client': {
+      // The browser half cannot log anywhere the operator can read; keep a
+      // bounded tail of its self-reports next to the rest of the index.
+      try {
+        const file = path.join(store.root, 'index', 'client-diag.jsonl')
+        fs.mkdirSync(path.dirname(file), { recursive: true })
+        fs.appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...args })}\n`)
+        const lines = fs.readFileSync(file, 'utf8').trim().split('\n')
+        if (lines.length > 200) fs.writeFileSync(file, `${lines.slice(-100).join('\n')}\n`)
+      } catch {
+        /* diagnostics are never worth failing a request over */
+      }
+      return { ok: true }
+    }
     case 'journal.write': {
       const written = journals.write({
         id: args.id,

@@ -3634,7 +3634,16 @@ window.__ModuleLoader__.load({
 
         const mount = () => {
           const candidates = anchorCandidates()
-          if (candidates.length === 0) return
+          if (candidates.length === 0) {
+            reportDiag({
+              stage: 'mount',
+              message: 'no sidebar anchor',
+              regionArea: document.querySelector('[class*="regionArea"]') !== null,
+              aside: document.querySelector('aside') !== null,
+              host: document.getElementById('am-sidebar-agents') !== null,
+            })
+            return
+          }
           const { before: area, root } = candidates[0]
           if (!root) return
           let host = document.getElementById('am-sidebar-agents')
@@ -3776,6 +3785,24 @@ window.__ModuleLoader__.load({
           }
         }
 
+        /**
+         * Client-side failures used to be swallowed by `catch {}`, which is
+         * exactly how a missing sidebar section stayed invisible for a whole
+         * release. Report the shape of the DOM along with the error so the host
+         * can log it (index/client-diag.jsonl) and the next fix has evidence.
+         */
+        const reportDiag = payload => {
+          try {
+            void fetch(`${API}/op`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ op: 'diag.client', args: payload }),
+            }).catch(() => {})
+          } catch {
+            /* diagnostics must never break the UI they describe */
+          }
+        }
+
         const sync = async () => {
           try {
             const payload = await request('/state')
@@ -3846,8 +3873,17 @@ window.__ModuleLoader__.load({
             } else if (banner !== null) {
               banner.remove()
             }
-          } catch {
-            /* the API may not be mounted yet */
+          } catch (error) {
+            /* The API may not be mounted yet — but if it keeps failing, the
+               section never appears and nothing else says why. */
+            reportDiag({
+              stage: 'sync',
+              message: String(error?.message ?? error),
+              regionArea: document.querySelector('[class*="regionArea"]') !== null,
+              aside: document.querySelector('aside') !== null,
+              host: document.getElementById('am-sidebar-agents') !== null,
+              url: location.href.split('?')[0],
+            })
           }
         }
         void sync()
