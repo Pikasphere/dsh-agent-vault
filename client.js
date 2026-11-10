@@ -3574,8 +3574,14 @@ window.__ModuleLoader__.load({
           ])
           if (signature === lastListSignature) return
           lastListSignature = signature
+          // Re-rendering replaces every row, and an innerHTML write puts the
+          // list back at the top: the 5s sync changes the signature whenever a
+          // session's running flag or timestamp moves, so the list snapped to
+          // the top every few seconds while the user was reading it.
+          const keepScroll = list.scrollTop
           if (visible.length === 0) {
             list.innerHTML = `<div class="am-side-empty">${escape(t('sideSearchEmpty'))}</div>`
+            list.scrollTop = keepScroll
             return
           }
           list.innerHTML = visible
@@ -3613,6 +3619,7 @@ window.__ModuleLoader__.load({
               )
             })
             .join('')
+          list.scrollTop = keepScroll
         }
 
         /**
@@ -3808,8 +3815,15 @@ window.__ModuleLoader__.load({
               openAgentMenu(event)
             })
           }
+          // Re-inserting a node resets the scroll of its subtree, so a mount fix
+          // triggered by a React re-render also threw the list back to the top.
+          const keepListScroll = host.querySelector('.am-side-agents-list')?.scrollTop ?? 0
           if (host.parentElement !== root) root.insertBefore(host, area ?? root.firstChild)
           else if (area !== null && host.nextElementSibling !== area) root.insertBefore(host, area)
+          if (keepListScroll > 0) {
+            const list = host.querySelector('.am-side-agents-list')
+            if (list !== null) list.scrollTop = keepListScroll
+          }
           if (!layoutReported) {
             layoutReported = true
             const describe = node => {
