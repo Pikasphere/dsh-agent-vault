@@ -36,7 +36,7 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // What the folded span is replaced with. 'silent' leaves a zero-width marker
   // so the model sees a shorter conversation instead of a wall of notices, and
   // folds are archived so `agent_recall` can still reach the原文.
-  stubStyle: 'silent',
+  stubStyle: 'digest',
   // 'host' asks the compaction service (unreachable from a profile plugin);
   // 'shelve' archives the slice into the agent's journal and replaces it with
   // a pointer stub, which needs no service and cannot fail on size.
@@ -100,7 +100,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       minSavedTokens: Number.isFinite(minSaved) && minSaved >= 0 ? Math.trunc(minSaved) : SLEEP_DEFAULTS.minSavedTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
-      stubStyle: raw.stubStyle === 'full' || raw.stubStyle === 'compact' || raw.stubStyle === 'silent' ? raw.stubStyle : SLEEP_DEFAULTS.stubStyle,
+      stubStyle: ['full', 'compact', 'digest', 'silent'].includes(raw.stubStyle) ? raw.stubStyle : SLEEP_DEFAULTS.stubStyle,
       maxSlices: Number.isFinite(maxSlices) && maxSlices >= 1 ? Math.min(Math.trunc(maxSlices), 8) : SLEEP_DEFAULTS.maxSlices,
       bigChunkTokens: Number.isFinite(bigChunk) && bigChunk >= 5000 ? Math.trunc(bigChunk) : SLEEP_DEFAULTS.bigChunkTokens,
       fallbackShelve: raw.fallbackShelve !== false,
@@ -478,6 +478,75 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
    * 1.9M-token session). The archive is written before the surface changes, so
    * an interrupted run leaves the history untouched rather than half-lost.
    */
+  /** Lines that repeat in every session and say nothing about the work. */
+  const BOILERPLATE = [
+    'Current runtime context',
+    'Current working directory',
+    'Current DSH file policy',
+    'Current DeepSeek Harness',
+    'Approval prompts are disabled',
+    'Browser time zone',
+    'Tokens prefixed with @',
+    'Time sampled while preparing',
+    'Elapsed since the preceding',
+    '【已归档】',
+    '【已折叠】',
+    '[#',
+    '#am-',
+    '<agent_memory',
+  ]
+
+  function isBoilerplate(text) {
+    const head = String(text ?? '').trimStart()
+    if (head === '') return true
+    return BOILERPLATE.some(mark => head.startsWith(mark))
+  }
+
+  /** One readable line: collapse whitespace, drop markup, cut at a char budget. */
+  function oneLine(text, max) {
+    let line = String(text ?? '')
+    const cut = line.indexOf(String.fromCharCode(10))
+    if (cut !== -1) line = line.slice(0, cut)
+    line = line.replace(/[`*_#>]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (line === '') return ''
+    return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+  }
+
+  /** What the folded slice did, in the fewest words that still identify it. */
+  function digestOf(session, seqs) {
+    const items = []
+    for (const seq of seqs) {
+      const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
+      const text = eventText(event)
+      if (text === '' || isBoilerplate(text)) continue
+      items.push({ type: String(event?.type ?? ''), text })
+    }
+    const user = items.find(item => item.type === 'user/message')
+    const assistant = [...items].reverse().find(item => item.type === 'assistant/message')
+    if (assistant === undefined && user === undefined) {
+      const counts = new Map()
+      for (const item of items) {
+        const name = item.type === 'tool/result' || item.type === 'tool/call' ? 'tool' : item.type || 'event'
+        counts.set(name, (counts.get(name) ?? 0) + 1)
+      }
+      const summary = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([name, count]) => `${name}×${count}`).join('、')
+      return { intent: '', result: '', fallback: summary, kind: 'counts' }
+    }
+    return {
+      intent: oneLine(user?.text, 22),
+      result: oneLine(assistant?.text, 26),
+      fallback: '',
+      kind: assistant === undefined ? 'intent' : user === undefined ? 'result' : 'intent+result',
+    }
+  }
+
+  function formatDigest(digest, span, ids) {
+    const body = [digest.intent, digest.result].filter(part => part !== '')
+    const label = body.length > 0 ? body.join(' → ') : digest.fallback || `${span.nodes} 个节点`
+    const note = ids.length > 0 ? ` · ${ids[0]}${ids.length > 1 ? `+${ids.length - 1}` : ''}` : ''
+    return `〔折 ${span.start}–${span.end}：${label}${note}〕`
+  }
+
   function shelveMessages(session, span, agentId, sessionId, seqs) {
     const parts = []
     for (const seq of seqs) {
@@ -610,10 +679,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // session index covers end to end, so writing every slice into the journal
     // would only pollute it (1,133 such notes by 2026-11-05) and duplicate what
     // `agent_recall` can already reach.
-    const stubStyle = config.stubStyle === 'full' || config.stubStyle === 'compact' ? config.stubStyle : 'silent'
+    const stubStyle = ['full', 'compact', 'digest'].includes(config.stubStyle) ? config.stubStyle : 'silent'
     // A silent stub carries no readable text, so the slice has to be archived:
     // the journal/index is then the only way back to what it replaced.
-    const archive = config.archive !== false || stubStyle === 'silent'
+    // Both 'silent' and 'digest' leave only a pointer behind, so the slice has to
+    // be archived: the journal/index is then the way back to what it replaced.
+    const archive = config.archive !== false || stubStyle === 'silent' || stubStyle === 'digest'
     let written = null
     if (archive) {
       try {
@@ -630,9 +701,12 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // attention to the gap instead of the work. 'silent' keeps the node the
     // host requires but leaves it empty; the pointer lives in the system
     // prompt once, and the details in the journal.
+    const digest = stubStyle === 'digest' ? digestOf(session, seqs) : null
     const stub = stubStyle === 'silent'
       ? '\u200b'
-      : stubStyle === 'compact'
+      : stubStyle === 'digest'
+        ? formatDigest(digest, span, ids)
+        : stubStyle === 'compact'
         ? `〔归档 ${span.start}–${span.end}${ids.length > 0 ? ` → ${ids.join('、')}` : ''} #am-${stamp}〕`
         : archive
           ? `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
@@ -678,6 +752,8 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     record({
       at: new Date().toISOString(), kind: 'shelve', ok: true, sessionId, agentId,
       deep: config.deep === true,
+      stubStyle,
+      ...(digest === null ? {} : { digestKind: digest.kind, digestChars: stub.length }),
       span: { start: span.start, end: span.end, nodes: span.nodes },
       archived: ids,
       stubChars: stub.length,

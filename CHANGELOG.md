@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0-beta.25 — 2026-11-12
+
+桩从「一行提示」升级为「一行摘要」：折叠后模型仍能看出这一段讲了什么。
+
+- 新增 `stubStyle: 'digest'`（默认）。桩长成 `〔折 16551–16586：用户意图 → 助手结论 · j-xxxx〕`，约 30 字；`silent`（零宽）与 `full`（整句提示）仍在，`compact` 保留。
+- 摘取规则：跳过 `Current runtime context` / `Current working directory` / `<agent_memory` 等每会话重复的样板行；取区间内最后一条用户消息的意图、最后一条助手消息的结论；没有对话内容时退化为节点类型计数（如 `tool×12`）。
+- `digest` 与 `silent` 一样强制归档：桩里只有指针，原文在 journal/索引里。
+- 记账增加 `stubStyle`、`digestKind`、`digestChars`。
+
 ## 2.1.0-beta.24 — 2026-11-10
 
 折叠后的桩不再占用上下文：会话里只留一个零宽字符，指针改由系统提示承担一次。

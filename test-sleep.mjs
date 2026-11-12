@@ -493,7 +493,7 @@ function harness(options = {}) {
 // silent stubs: the node stays (the host requires a replacement) but carries
 // no readable text, and the slice is archived so it stays reachable.
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1, archive: false } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1, archive: false, stubStyle: 'silent' } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(h.appended.length, 1)
@@ -505,10 +505,25 @@ function harness(options = {}) {
   assert.equal(h.appended.length, 1)
 }
 
+// digest stubs: one line that says what the slice was about, not just that it went away
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  const text = h.appended[0].data.content[0].text
+  assert.ok(text.startsWith('〔折 '), `digest stub ${text}`)
+  assert.ok(text.length <= 90, `digest stays short (${text.length})`)
+  assert.ok(!text.includes('Current runtime context'), 'runtime boilerplate is skipped')
+  assert.ok(h.writes.length >= 1, 'a digest stub archives the slice')
+  const row = h.sleep.history(10)[0]
+  assert.equal(row.stubStyle, 'digest')
+  assert.ok(typeof row.digestChars === 'number')
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, chunkTokens: 60000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 3000, mode: 'host', stubStyle: 'silent', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, chunkTokens: 60000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 3000, mode: 'host', stubStyle: 'digest', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })
