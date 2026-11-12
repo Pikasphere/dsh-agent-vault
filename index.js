@@ -208,6 +208,7 @@ function buildPrompt(store, sessionId) {
     '- Two more surfaces exist: `agent_room` for discussion rooms (a shared transcript several agents post into, each message attributed to its agent) and `agent_journal` for your private journal (detailed, diary-like, readable and writable by this agent only). Use the room when the user asks you to discuss something with other agents, and keep the journal for detail the short memory cannot hold.',
     '- You cannot read the memory yourself. The user decides when a memory is loaded into a session; when one is loaded it appears below as `<agent_memory>`.',
     '- `agent_recall` searches the material above (journal, memory log, knowledge, and the conversations this agent owned); `agent_alias` maintains the alias table it folds into queries, for names people say but never write.',
+    '- Earlier turns of this conversation may have been folded away to keep the context small. The folded text is archived and searchable: when you need a detail from the beginning, call `agent_recall` with `source: \'session\'` (or `journal`) instead of guessing.',
   ]
   let active
   try {

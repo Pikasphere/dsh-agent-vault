@@ -216,6 +216,7 @@ export function createStore(options = {}) {
       keepUnder: Number.isFinite(under) && under > 0 ? Math.trunc(under) : 0,
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : 5000,
       mode: value.mode === 'shelve' ? 'shelve' : 'host',
+      stubStyle: value.stubStyle === 'full' || value.stubStyle === 'compact' || value.stubStyle === 'silent' ? value.stubStyle : 'silent',
       maxSlices: Number.isFinite(Number(value.maxSlices)) && Number(value.maxSlices) >= 1 ? Math.min(Math.trunc(Number(value.maxSlices)), 8) : 3,
       bigChunkTokens: Number.isFinite(Number(value.bigChunkTokens)) && Number(value.bigChunkTokens) >= 5000 ? Math.trunc(Number(value.bigChunkTokens)) : 200000,
       fallbackShelve: value.fallbackShelve !== false,
@@ -575,6 +576,7 @@ export function createStore(options = {}) {
       const minFold = Number(patch.sleep.minFoldTokens)
       if (Number.isFinite(minFold) && minFold > 0) merged.minFoldTokens = Math.trunc(minFold)
       if (patch.sleep.mode === 'host' || patch.sleep.mode === 'shelve') merged.mode = patch.sleep.mode
+      if (patch.sleep.stubStyle === 'full' || patch.sleep.stubStyle === 'compact' || patch.sleep.stubStyle === 'silent') merged.stubStyle = patch.sleep.stubStyle
       const slices = Number(patch.sleep.maxSlices)
       if (Number.isFinite(slices) && slices >= 1) merged.maxSlices = Math.min(Math.trunc(slices), 8)
       if (typeof patch.sleep.fallbackShelve === 'boolean') merged.fallbackShelve = patch.sleep.fallbackShelve

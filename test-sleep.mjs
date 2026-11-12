@@ -292,7 +292,10 @@ function harness(options = {}) {
   const before = h.sleep.history(10).length
   const second = await h.sleep.maybeCompact({ id: 'session-a' })
   const rows = h.sleep.history(10)
-  if (second !== null && rows.length > before) {
+  // The second idle may legitimately be a duplicate (the stamp registry now
+  // remembers silent folds, which leave no text to scan), so only assert when a
+  // second fold actually committed.
+  if (second !== null && rows.length > before && second.why !== 'duplicate' && second.attempted !== false) {
     // Same-ISO-second rows can tie, so look for the row rather than trusting order.
     const calibrated = rows.find(r => r.calibration === ratio && r.rawEstimatedSavedTokens > 0)
     assert.ok(calibrated !== undefined, 'the previous fold calibrated this one')
@@ -326,7 +329,7 @@ function harness(options = {}) {
 
 // shelve mode: archive into the journal first, then replace the span with a stub
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1, stubStyle: 'full' } })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true)
   assert.equal(result.ok, true)
@@ -360,7 +363,7 @@ function harness(options = {}) {
 
 // shelve refuses when the session is not bound (no memory to write into)
 {
-  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minFoldTokens: 100 } })
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minFoldTokens: 100, stubStyle: 'full' } })
   h.store.bindingOf = () => ''
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, false)
@@ -398,6 +401,7 @@ function harness(options = {}) {
       minFoldTokens: 1500,
       cooldownMs: 0,
       mode: 'shelve',
+      stubStyle: 'full',
     },
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
@@ -420,7 +424,7 @@ function harness(options = {}) {
     tokens: 30000,
     nodes: 120,
     toolResults: false,
-    settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500 },
+    settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500, stubStyle: 'full' },
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'folds even though the session is tiny')
@@ -486,10 +490,25 @@ function harness(options = {}) {
   assert.equal(summary.recent.at(-1).deep, true)
 }
 
+// silent stubs: the node stays (the host requires a replacement) but carries
+// no readable text, and the slice is archived so it stays reachable.
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1, archive: false } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(h.appended.length, 1)
+  const [append] = h.appended
+  assert.equal(append.data.content[0].text, '\u200b')
+  assert.ok(h.writes.length >= 1, 'a silent stub still archives the slice')
+  const again = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(again?.why, 'duplicate', 'the persisted stamp stops a second fold')
+  assert.equal(h.appended.length, 1)
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },
-  { enabled: false, triggerTokens: 400000, chunkTokens: 60000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 3000, mode: 'host', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
+  { enabled: false, triggerTokens: 400000, chunkTokens: 60000, keepRecent: 8, keepUnder: 0, foldEveryTurn: false, minFoldTokens: 5000, minSavedTokens: 3000, mode: 'host', stubStyle: 'silent', maxSlices: 3, bigChunkTokens: 200000, fallbackShelve: true, cooldownMs: 600000 },
 )
 
 fs.rmSync(root, { recursive: true, force: true })

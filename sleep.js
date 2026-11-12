@@ -33,6 +33,10 @@ export const SLEEP_DEFAULTS = Object.freeze({
   // cannot go near zero; and it must not go far above the median or folding
   // stops happening at all.
   minSavedTokens: 3000,
+  // What the folded span is replaced with. 'silent' leaves a zero-width marker
+  // so the model sees a shorter conversation instead of a wall of notices, and
+  // folds are archived so `agent_recall` can still reach the原文.
+  stubStyle: 'silent',
   // 'host' asks the compaction service (unreachable from a profile plugin);
   // 'shelve' archives the slice into the agent's journal and replaces it with
   // a pointer stub, which needs no service and cannot fail on size.
@@ -96,6 +100,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       minFoldTokens: Number.isFinite(minFold) && minFold > 0 ? Math.trunc(minFold) : SLEEP_DEFAULTS.minFoldTokens,
       minSavedTokens: Number.isFinite(minSaved) && minSaved >= 0 ? Math.trunc(minSaved) : SLEEP_DEFAULTS.minSavedTokens,
       mode: raw.mode === 'shelve' ? 'shelve' : raw.mode === 'host' ? 'host' : SLEEP_DEFAULTS.mode,
+      stubStyle: raw.stubStyle === 'full' || raw.stubStyle === 'compact' || raw.stubStyle === 'silent' ? raw.stubStyle : SLEEP_DEFAULTS.stubStyle,
       maxSlices: Number.isFinite(maxSlices) && maxSlices >= 1 ? Math.min(Math.trunc(maxSlices), 8) : SLEEP_DEFAULTS.maxSlices,
       bigChunkTokens: Number.isFinite(bigChunk) && bigChunk >= 5000 ? Math.trunc(bigChunk) : SLEEP_DEFAULTS.bigChunkTokens,
       fallbackShelve: raw.fallbackShelve !== false,
@@ -149,6 +154,18 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
   function watermarks() {
     const table = readState().foldStartSeq
     return table !== null && typeof table === 'object' ? table : {}
+  }
+
+  /** Stamps of every fold this profile committed, newest last. */
+  function shelvedStamps() {
+    const list = readState().shelved
+    return Array.isArray(list) ? list.filter(item => typeof item === 'string') : []
+  }
+
+  function markShelved(stamp) {
+    const list = shelvedStamps().filter(item => item !== stamp)
+    list.push(stamp)
+    writeState({ shelved: list.slice(-400) })
   }
 
   function foldStartOf(sessionId) {
@@ -525,6 +542,9 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
    * the log is what survived the crash.
    */
   function alreadyShelved(session, stamp) {
+    // A silent stub leaves no text to find, so the persisted stamp list is what
+    // keeps a retry from archiving and replacing the same slice twice.
+    if (shelvedStamps().includes(stamp)) return true
     let events = []
     try {
       if (typeof session?.snapshotEvents === 'function') events = session.snapshotEvents()
@@ -590,7 +610,10 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // session index covers end to end, so writing every slice into the journal
     // would only pollute it (1,133 such notes by 2026-11-05) and duplicate what
     // `agent_recall` can already reach.
-    const archive = config.archive !== false
+    const stubStyle = config.stubStyle === 'full' || config.stubStyle === 'compact' ? config.stubStyle : 'silent'
+    // A silent stub carries no readable text, so the slice has to be archived:
+    // the journal/index is then the only way back to what it replaced.
+    const archive = config.archive !== false || stubStyle === 'silent'
     let written = null
     if (archive) {
       try {
@@ -602,9 +625,18 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
     }
     const ids = written === null ? [] : written.map(item => item.id)
-    const stub = archive
-      ? `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
-      : `【已折叠】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已移出上下文。原文仍在会话 ${sessionId} 的 seq ${span.start}–${span.end}，需要细节时用 agent_recall 的 session 来源检索，不要凭印象补写。 #am-${stamp}`
+    // A notice per fold costs a line for every slice the session ever folded
+    // (136 of them in one 25k-event conversation) and drags the model's
+    // attention to the gap instead of the work. 'silent' keeps the node the
+    // host requires but leaves it empty; the pointer lives in the system
+    // prompt once, and the details in the journal.
+    const stub = stubStyle === 'silent'
+      ? '\u200b'
+      : stubStyle === 'compact'
+        ? `〔归档 ${span.start}–${span.end}${ids.length > 0 ? ` → ${ids.join('、')}` : ''} #am-${stamp}〕`
+        : archive
+          ? `【已归档】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已存入记忆：${ids.join('、')}。要原始细节请用 agent_recall 检索这些编号或关键词；不要凭印象补写。 #am-${stamp}`
+          : `【已折叠】第 ${span.start}–${span.end} 段（${span.nodes} 个节点）已移出上下文。原文仍在会话 ${sessionId} 的 seq ${span.start}–${span.end}，需要细节时用 agent_recall 的 session 来源检索，不要凭印象补写。 #am-${stamp}`
     try {
       session.append(
         'user/message',
@@ -635,6 +667,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       return { attempted: true, ok: false, error }
     }
     setFoldStart(sessionId, span.start)
+    markShelved(stamp)
     // Two independent numbers on purpose: `shadowedTokenCount` is what the fold
     // archived (content side), `tokensBefore/After` is what the meter reports on
     // the rebuilt surface. They do not agree, so record both — tuning the
