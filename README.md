@@ -74,8 +74,8 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
     - id: agent-memory
       name: "dsh-agent-vault"
       config:
-        memoryDir: "D:\\dsh\\agent-memory"   # 记忆与注册表根目录，默认 ~/.dsh/agent-memory
-        knowledgeDir: "E:\\Agent-knowledge"  # 知识库目录，默认 <memoryDir>/knowledge
+        memoryDir: "~/.dsh/agent-memory"   # 记忆与注册表根目录，默认 ~/.dsh/agent-memory
+        knowledgeDir: "~/Agent-knowledge"  # 知识库目录，默认 <memoryDir>/knowledge
         memoryLimit: 4000                    # 记忆上限字数，500-20000
         entryLimit: 48000                    # 单条知识上限字数，2000-200000
 ```
@@ -216,7 +216,7 @@ Linux + AMD 显卡上就是这样跑起来的（实测 load 59 ms、单条推理
 |---|---|
 | 记忆库目录 | `<memoryDir>`，例如 `%USERPROFILE%\.dsh\agent-memory` |
 | 知识库目录 | 实际的 `knowledge/`（设置里改过就跟着走） |
-| 插件目录 | 插件自己的安装位置，例如 `E:\Projects\dsh-plugins\dsh-agent-vault` |
+| 插件目录 | 插件自己的安装位置，例如 `~/.dsh/profiles/web/node_modules/dsh-agent-vault` |
 
 按钮不是让页面直接调 `explorer`：客户端只发 `fs.reveal {target}`，target 只能是 `root` / `knowledge` / `plugin`，路径由宿主映射（Windows `explorer.exe`、macOS `open`、Linux `xdg-open`）。所以页面永远没有「打开任意路径」的能力——未知 target 一律 400。
 

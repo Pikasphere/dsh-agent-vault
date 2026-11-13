@@ -27,7 +27,7 @@
 ### 3.1 已下载
 
 ```
-C:\Users\Ephelueur\.dsh\agent-memory\models\bge-small-zh-v1.5\
+~/.dsh/agent-memory/models/bge-small-zh-v1.5/
   config.json                 716 B
   tokenizer.json              439 KB
   tokenizer_config.json       367 B

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1 — 2026-11-13
+
+发行包里不再出现本机盘符路径。
+
+- README 的配置示例原来写的是 `D:\dsh\agent-memory` / `E:\Agent-knowledge`，改成 `~/.dsh/agent-memory` 与 `~/Agent-knowledge`；插件目录示例改成安装后的真实相对位置。
+- 设置页目录占位符 `D:\notes\agent-knowledge` → `~/notes/agent-knowledge`。
+- 文档与 CHANGELOG 里的 `C:\Users\...`、`E:\Projects\...` 一并换成 `~/...` 或「跟安装位置走」这类中性表述。
+
 ## 2.1.0 — 2026-11-12
 
 第一个正式版。2.0.5 之后最要紧的变化：**上下文由我们自己看住**——不再等宿主压到窗口边缘，而是在会话空闲时按阈值主动折叠，并把折叠掉的内容留在可检索的记忆里。
@@ -282,7 +290,7 @@ shelve 的指针桩把会话写坏了：打开时 `stored session ... is corrupt
 
 - **根因**：桩用 `session.append('user/message', { role, content })` 落盘，缺了 v4 当场要求的两个字段——`id`（已识别消息）和 `source.kind`（生产者归属，且不能是 `plugin`）。写入端只做物理行准入，不校验消息身份，所以写的时候一切正常，**直到下次打开会话才整体崩掉**（接着还会报 `lacks an identified message`）。
 - **修法**：桩改为 `{ id: randomUUID(), role: 'user', source: { kind: 'user' }, content }`。`kind: 'user'` 与宿主自己 `createUserMessage` 的产物一致，任何读取端都认得。
-- 已原位修复被它写坏的 3 个会话（`196a4c81`、`b6a436d8`、`cf046ef3`）：补 `id` + `source`，zstd 按原帧边界重打包（未受影响的帧字节不变），并用宿主自己的 format catalog（`validation: 'current'` + installed Session）验证通过；原件备份在 `E:\Projects\.tmp-session-repair\backup\`。
+- 已原位修复被它写坏的 3 个会话（`196a4c81`、`b6a436d8`、`cf046ef3`）：补 `id` + `source`，zstd 按原帧边界重打包（未受影响的帧字节不变），并用宿主自己的 format catalog（`validation: 'current'` + installed Session）验证通过；原件备份在临时备份目录。
 - `test-sleep.mjs` 增加桩消息 id/source 的断言。
 
 ## 2.1.0-alpha.21 — 2026-11-02
@@ -485,7 +493,7 @@ probe 现在会写 `seen: "status-idle"` / `seen: "turn-end"`，下一个版本�
 
 设置页新增「目录」卡片，三个目录一键在文件管理器里打开；顺手修掉「对话入索引」开关存不住的问题。宿主侧改了，需完全重启 DSH。
 
-- **目录卡片**（设置页）：记忆库目录、知识库目录、插件目录，各带一行路径和「打开」按钮。插件目录跟着安装位置走（现在是 `E:\Projects\dsh-plugins\dsh-agent-vault`），换了目录不用改代码。
+- **目录卡片**（设置页）：记忆库目录、知识库目录、插件目录，各带一行路径和「打开」按钮。插件目录跟着安装位置走（跟安装位置走），换了目录不用改代码。
 - **按钮走宿主，不走页面**：客户端只发 `fs.reveal {target}`，target 只能是 `root` / `knowledge` / `plugin`；路径由宿主映射（`reveal.js` → `explorer.exe` / `open` / `xdg-open`），页面拿不到「打开任意路径」的能力。未知 target 回 400，目录不存在回 404。
 - 修 bug：设置页的「对话入索引」开关调 `settings.save {transcripts}`，但宿主 op 只转发 `knowledgeDir` 和 `hideBoundSessions`——开关看着能点、刷新后又变回去。现在 `settings.save` 一并转发 `transcripts` / `sessionsRoot` / `transcriptExclude`。
 - 测试：新增 `test-reveal.mjs`（三个平台的命令、空/非法路径不 spawn、spawn 抛错返回 false）；`test-host.mjs` 补 `fs.reveal` 的三个目标、非法 target、以及 `transcripts` 开关是否真的落盘。现在 `npm test` 跑 14 个脚本。
@@ -1013,7 +1021,7 @@ probe 现在会写 `seen: "status-idle"` / `seen: "turn-end"`，下一个版本�
 
 ### 包名
 
-- npm 包名改为 **`dsh-agent-vault`**（`dsh-agent-memory` 已被他人占用，无法发布）。Loader 条目 id 仍是 `agent-memory`；仓库目录同步改为 `E:\Projects\dsh-agent-vault`。
+- npm 包名改为 **`dsh-agent-vault`**（`dsh-agent-memory` 已被他人占用，无法发布）。Loader 条目 id 仍是 `agent-memory`；仓库目录同步改为 `dsh-agent-vault`。
 
 ### 对话归属
 

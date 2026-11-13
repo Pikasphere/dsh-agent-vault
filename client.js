@@ -81,7 +81,7 @@ window.__ModuleLoader__.load({
         dirTitle: '知识库目录',
         dirHint:
           '所有智能体共用这一个目录，条目直接放在目录下（不再按智能体分文件夹）。改完立即生效，旧的按智能体分文件夹的内容会自动合并进来。',
-        dirPlaceholder: '例如 D:\\notes\\agent-knowledge',
+        dirPlaceholder: '例如 ~/notes/agent-knowledge',
         dirSave: '保存目录',
         dirsTitle: '目录',
         dirsHint: '在系统文件管理器里打开对应目录；按钮走宿主，页面上不会拿到任意路径。',
@@ -329,7 +329,7 @@ window.__ModuleLoader__.load({
         dirTitle: 'Knowledge directory',
         dirHint:
           'Every agent shares this one directory; entries sit directly in it instead of per-agent folders. Changes apply immediately, and any older per-agent folders are folded in automatically.',
-        dirPlaceholder: 'e.g. D:\\notes\\agent-knowledge',
+        dirPlaceholder: 'e.g. ~/notes/agent-knowledge',
         dirSave: 'Save directory',
         dirsTitle: 'Folders',
         dirsHint: 'Open them in the system file manager. The button goes through the host, so the page never sees a free-form path.',
