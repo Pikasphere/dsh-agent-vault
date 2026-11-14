@@ -402,4 +402,13 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
 }
 
 
+// Recency is stated on the row: a hit's age must travel with it.
+{
+  journals.write({ id: agent.id, title: '新鲜笔记', text: '归档信号 昨天刚测过' })
+  const fresh = await recall.search({ id: agent.id, query: '归档信号' })
+  assert.equal(typeof fresh.results[0]?.ageDays, 'number', 'every row carries ageDays')
+  assert.equal(fresh.results[0].ageDays, 0, 'a note written now is zero days old')
+  assert.equal(fresh.results[0].stale, undefined, 'fresh rows are not marked stale')
+}
+
 console.log('ALL RECALL TESTS PASSED')

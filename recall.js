@@ -75,6 +75,13 @@ export const MODES = ['hybrid', 'lexical']
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
 
 /** One tool/panel row; `why` only exists for expanded hits. */
+/** How old a hit is, in whole days; undefined when the timestamp is unusable. */
+function ageDaysOf(at) {
+  const time = Date.parse(String(at ?? ''))
+  if (Number.isNaN(time)) return undefined
+  return Math.max(0, Math.floor((Date.now() - time) / 86400000))
+}
+
 function resultOf(entry, score, via, why, tokens) {
   const row = {
     id: entry.id,
@@ -84,6 +91,14 @@ function resultOf(entry, score, via, why, tokens) {
     preview: snippet(entry.text, tokens ?? []),
     score: round(score),
     via,
+  }
+  // Recency is part of the meaning of a record: a 6-day-old note that says
+  // "compaction is failing" describes a state that may be long gone. Stating
+  // the age on the row makes that hard to miss — reading `at` was not enough.
+  const age = ageDaysOf(entry.at)
+  if (age !== undefined) {
+    row.ageDays = age
+    if (age >= 30) row.stale = true
   }
   if (typeof entry.sessionId === 'string' && entry.sessionId !== '') row.sessionId = entry.sessionId
   if (why !== undefined) row.why = why

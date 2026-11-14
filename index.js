@@ -446,9 +446,10 @@ function registerTools(ctx, store, rooms, journals, recall) {
           'Use it when the short memory or a knowledge search did not turn up something you remember writing down. ' +
           'Checkpoints are never returned: they are authoritative state injected whole, not recallable material. ' +
           'A `session` result carries `hit` (seq, role, at, text): the single message the match came from. ' +
-          'Every result is a record with its own `at` — evidence about the past, never the current state of the task: ' +
-          'read it, then check the live files or tools before acting on it. `chunks` means several blocks of one ' +
-          'conversation were folded into that row.',
+          'Every result is a record with its own `at` and `ageDays` (`stale` past 30 days) — evidence about the past, ' +
+          'never the current state of the task: a note saying "X is broken" only says it was broken when written. ' +
+          'Read the date first, then check the live files or tools before acting, and say so if the record is old. ' +
+          '`chunks` means several blocks of one conversation were folded into that row.',
         parameters: {
           type: 'object',
           properties: {
