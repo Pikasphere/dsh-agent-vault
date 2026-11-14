@@ -127,6 +127,7 @@ window.__ModuleLoader__.load({
         journalReadOnly: '日志是追加式的，已有条目只读；要补充就新建一条。',
         sessionsTab: '对话',
         sessionsHint: '这里按智能体收拢它的对话。已绑定的对话会从左侧工作区列表里隐藏，只能从这里或搜索找到；选择工作区会立即切过去。',
+        sessionsAgent: '当前智能体',
         sessionsTitle: '它的对话',
         sessionsEmpty: '这个智能体还没有对话。选一个工作区，点「新建对话」开始。',
         sessionsWorkspace: '工作区',
@@ -376,6 +377,7 @@ window.__ModuleLoader__.load({
         journalReadOnly: 'The journal is append-only, so an existing entry is read-only; add a new one instead.',
         sessionsTab: 'Sessions',
         sessionsHint: 'Each agent keeps its own conversations here. Bound conversations are hidden from the workspace list on the left; find them here or through search. Picking a workspace switches to it right away.',
+        sessionsAgent: 'Agent',
         sessionsTitle: 'Its conversations',
         sessionsEmpty: 'This agent has no conversation yet. Pick a workspace and press New conversation.',
         sessionsWorkspace: 'Workspace',
@@ -960,7 +962,7 @@ window.__ModuleLoader__.load({
       }, [reload])
 
       const call = useCallback(
-        async (op, args) => {
+        async (op, args, options) => {
           setBusy(op)
           setNotice('')
           try {
@@ -968,6 +970,9 @@ window.__ModuleLoader__.load({
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ op, args: args ?? {} }),
+              // A full reindex embeds thousands of rows (~60s); the default
+              // 15s abort turned that into "signal is aborted without reason".
+              timeout: options?.timeout ?? 15000,
             })
             applyState(payload.state)
             setFailure('')
@@ -1105,6 +1110,9 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (!vault || tab !== 'sessions') return undefined
         let live = true
+        // A previous agent's list must not linger while the new one loads:
+        // that looked exactly like "switching agents does nothing".
+        setSessionsInfo({ sessions: [], workspaces: [] })
         Promise.all([
           request('/op', {
             method: 'POST',
@@ -1485,7 +1493,7 @@ window.__ModuleLoader__.load({
       }
 
       const rebuildIndex = async () => {
-        const rebuilt = await call('memory.reindex', {})
+        const rebuilt = await call('memory.reindex', {}, { timeout: 600000 })
         if (rebuilt !== undefined) setIndexVersion(current => current + 1)
       }
 
@@ -1990,6 +1998,7 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'am-split' },
           h('p', { className: 'am-note' }, t('sessionsHint')),
+          h('p', { className: 'am-note-dim' }, `${t('sessionsAgent')}: ${vault?.name ?? ''}`),
           h(
             'div',
             { className: 'am-card' },
