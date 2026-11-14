@@ -445,7 +445,10 @@ function registerTools(ctx, store, rooms, journals, recall) {
           'Search this conversation\'s agent material by keyword: its own journal notes, its memory audit log, and the shared knowledge base. ' +
           'Use it when the short memory or a knowledge search did not turn up something you remember writing down. ' +
           'Checkpoints are never returned: they are authoritative state injected whole, not recallable material. ' +
-          'A `session` result carries `hit` (seq, role, at, text): the single message the match came from.',
+          'A `session` result carries `hit` (seq, role, at, text): the single message the match came from. ' +
+          'Every result is a record with its own `at` — evidence about the past, never the current state of the task: ' +
+          'read it, then check the live files or tools before acting on it. `chunks` means several blocks of one ' +
+          'conversation were folded into that row.',
         parameters: {
           type: 'object',
           properties: {
@@ -1075,6 +1078,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return recall.search({
         id: vault.id,
         query: args.query,
+        includeArchives: true,
         limit: args.limit,
         source: args.source,
         since: args.since,

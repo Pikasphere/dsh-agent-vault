@@ -851,6 +851,7 @@ window.__ModuleLoader__.load({
       const [sessionsWorkspace, setSessionsWorkspace] = useState('')
       const [sessionsVersion, setSessionsVersion] = useState(0)
       // Recall tab: results are index-only, so they never touch the prompt.
+      const recallSeq = useRef(0)
       const [recallData, setRecallData] = useState(null)
       const [recallQuery, setRecallQuery] = useState('')
       const [recallSource, setRecallSource] = useState('')
@@ -1086,6 +1087,17 @@ window.__ModuleLoader__.load({
         // A different agent may live in other workspaces; let the fetch pick
         // the most recent one instead of keeping the previous agent's choice.
         setSessionsWorkspace('')
+      }, [vault?.id])
+
+      useEffect(() => {
+        // A recall result belongs to the agent it was run for: switching agents
+        // must never leave the previous agent's hits on screen. Invalidate any
+        // answer still in flight, then re-run the same query when there is one.
+        recallSeq.current += 1
+        setRecallData(null)
+        setRecallDetail(null)
+        if (recallQuery.trim() !== '') void runRecall()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [vault?.id])
 
       useEffect(() => {
@@ -1392,6 +1404,7 @@ window.__ModuleLoader__.load({
           setRecallDetail(null)
           return
         }
+        const run = ++recallSeq.current
         const found = await call('memory.recall', {
           id: vault.id,
           query: text,
@@ -1399,6 +1412,8 @@ window.__ModuleLoader__.load({
           source: recallSource === '' ? undefined : recallSource,
           since: recallSince === '' ? undefined : recallSince,
         })
+        // A slower answer for the agent we just left must not land on screen.
+        if (run !== recallSeq.current) return
         setRecallData(found ?? null)
         setRecallDetail(null)
       }
@@ -2123,7 +2138,6 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'am-row' },
             h('span', { className: 'am-label' }, t('recall')),
-            h('span', { className: 'am-badge' }, '2.0 alpha'),
             h('span', { style: { flex: 1 } }),
             h(
               'button',

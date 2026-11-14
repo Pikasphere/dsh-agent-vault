@@ -272,6 +272,42 @@ export function createRecall(options = {}) {
    * relevance, which does trade top-1 accuracy for spread; it ships off because
    * the measurement in `eval/dupe-rate.mjs` found nothing to spread out.
    */
+  /**
+   * One row per conversation. A long session is many entries (1200-character
+   * blocks), so the same title repeats with different snippets — the reader
+   * sees "several conversations" that are one, and the model is tempted to
+   * treat each snippet as a separate fact. Rows arrive score-sorted, so the
+   * first row of a conversation is its best chunk; the rest are counted.
+   */
+  function groupSessions(rows) {
+    const seen = new Map()
+    const out = []
+    for (const row of rows) {
+      // Only conversation entries repeat; a journal note that happens to carry a
+      // `sessionId` is still its own document and must stay visible.
+      const sessionId = row?.entry?.src === 'session' ? row?.entry?.sessionId : undefined
+      if (typeof sessionId !== 'string' || sessionId === '') {
+        out.push(row)
+        continue
+      }
+      const known = seen.get(sessionId)
+      if (known === undefined) {
+        const grouped = { ...row, chunks: 1 }
+        seen.set(sessionId, grouped)
+        out.push(grouped)
+        continue
+      }
+      known.chunks += 1
+    }
+    return out
+  }
+
+  /** Tell the reader that a session hit stands for several folded blocks. */
+  function withChunks(result, chunks) {
+    if (typeof chunks !== 'number' || chunks < 2) return result
+    return { ...result, chunks }
+  }
+
   function diversify(rows, settings) {
     if (rows.length < 3) return rows
     const threshold = settings.dedupe
@@ -375,7 +411,8 @@ export function createRecall(options = {}) {
         // Folded archives are the long tail of a session: keep them lexically
         // searchable but out of the vector layer, or one long conversation adds
         // megabytes of chunks to every index rebuild.
-        archive: entry.meta?.archive === true,
+        // Older folds recorded only `meta.span`; newer ones also set `archive`.
+        archive: entry.meta?.archive === true || entry.meta?.span !== undefined,
         sessionId: String(entry.meta?.sessionId ?? ''),
       }),
     )
@@ -600,7 +637,13 @@ export function createRecall(options = {}) {
     const mode = MODES.includes(input.mode) ? input.mode : settings.mode
     const hybrid = mode === 'hybrid' && vectors !== null
     const tokens = tokenize(query)
+    // Folded archives are verbatim conversation spans, and the session layer
+    // already indexes those spans end to end. Returning both shows the same
+    // material twice — once as a raw dump — so archives stay out of recall
+    // unless the caller asks for them (the panel's "read the raw fold" view).
+    const withArchives = input.includeArchives === true
     const entries = collect(agentId, source).filter(entry => {
+      if (!withArchives && entry.archive === true) return false
       if (since === 0) return true
       const time = Date.parse(entry.at)
       return Number.isFinite(time) && time >= since
@@ -609,8 +652,14 @@ export function createRecall(options = {}) {
     // citation counts of what it returns (a filtered search sees fewer citers).
     // That is honest: in-degree is a property of the corpus you are searching.
     const refs = settings.heat > 0 ? citeCounts(entries) : null
+    // A folded archive is a verbatim copy of a conversation span, and the
+    // session layer already indexes that span end to end: ranking both equally
+    // shows the same material twice and invites quoting a raw dump as a fact.
+    const ARCHIVE_BOOST = 0.55
     const boost = (src, entry) =>
-      (DEFAULT_BOOST[src] ?? 1) * (refs === null ? 1 : heatOf(entry, settings, refs.get(String(entry?.id ?? '')) ?? 0))
+      (DEFAULT_BOOST[src] ?? 1) *
+      (entry?.archive === true ? ARCHIVE_BOOST : 1) *
+      (refs === null ? 1 : heatOf(entry, settings, refs.get(String(entry?.id ?? '')) ?? 0))
     const when = entry => (settings.heat > 0 ? referenceTime(entry) : entry?.at)
     const rows = rank(entries, query, { boost, at: when })
 
@@ -714,14 +763,14 @@ export function createRecall(options = {}) {
       .sort((a, b) => b.score - a.score)
 
     if (!graph) {
-      const page = diversify(ranked, settings).slice(0, limit)
+      const page = diversify(groupSessions(ranked), settings).slice(0, limit)
       recordExposure(page)
       return {
         query,
         mode,
         total: ranked.length,
         expand: 0,
-        results: page.map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
+        results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens), row.chunks)),
       }
     }
 
@@ -731,14 +780,14 @@ export function createRecall(options = {}) {
     const seeds = ranked.filter(row => row.via !== 'semantic').slice(0, SEED_COUNT)
     const extras = expandGraph(seeds, entries).filter(row => !effective.scores.has(entryKey(row.entry)))
     const final = [...ranked, ...extras].sort((a, b) => b.score - a.score)
-    const page = diversify(final, settings).slice(0, limit)
+    const page = diversify(groupSessions(final), settings).slice(0, limit)
     recordExposure(page)
     return {
       query,
       mode,
       total: final.length,
       expand: 1,
-      results: page.map(row => withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens)),
+      results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens), row.chunks)),
     }
   }
 
