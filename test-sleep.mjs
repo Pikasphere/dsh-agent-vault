@@ -520,6 +520,20 @@ function harness(options = {}) {
   assert.ok(typeof row.digestChars === 'number')
 }
 
+// digest never nests a fold marker and never quotes tool-call scaffolding
+{
+  const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100, maxSlices: 1 } })
+  for (const seq of h.nodes) {
+    h.events.set(seq, { type: 'user/message', data: { content: [{ type: 'text', text: '〔折 1–2：上一次的桩 · j-old〕' + 'x'.repeat(60) }] } })
+  }
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true, `attempted expected: ${JSON.stringify(result)}`)
+  const text = h.appended[0].data.content[0].text
+  const markers = (text.match(/〔折/g) ?? []).length
+  assert.equal(markers, 1, `digest must not nest stubs: ${text}`)
+  assert.ok(text.length <= 46, `digest stays under the budget (${text.length}): ${text}`)
+}
+
 // defaults stay conservative
 assert.deepEqual(
   { ...SLEEP_DEFAULTS },

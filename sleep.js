@@ -502,14 +502,22 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     return BOILERPLATE.some(mark => head.startsWith(mark))
   }
 
-  /** One readable line: collapse whitespace, drop markup, cut at a char budget. */
+  /** Text that is itself a fold marker: summarising it again nests stubs. */
+  function isStubText(text) {
+    const head = String(text ?? '').trimStart()
+    return head.startsWith('〔折') || head.startsWith('#am-')
+  }
+
+  /** One readable line: skip tool-call scaffolding, drop markup, cut at a budget. */
   function oneLine(text, max) {
-    let line = String(text ?? '')
-    const cut = line.indexOf(String.fromCharCode(10))
-    if (cut !== -1) line = line.slice(0, cut)
-    line = line.replace(/[`*_#>]/g, ' ').replace(/\s+/g, ' ').trim()
-    if (line === '') return ''
-    return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+    const lines = String(text ?? '').split(String.fromCharCode(10))
+    const line = lines
+      .map(part => part.trim())
+      .find(part => part !== '' && !part.startsWith('(call ') && !part.startsWith('(result ') && !isStubText(part))
+    if (line === undefined) return ''
+    const collapsed = line.replace(/[`*_#>]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (collapsed === '') return ''
+    return collapsed.length > max ? `${collapsed.slice(0, max - 1).trimEnd()}…` : collapsed
   }
 
   /** What the folded slice did, in the fewest words that still identify it. */
@@ -518,7 +526,7 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     for (const seq of seqs) {
       const event = typeof session?.eventAt === 'function' ? session.eventAt(seq) : undefined
       const text = eventText(event)
-      if (text === '' || isBoilerplate(text)) continue
+      if (text === '' || isBoilerplate(text) || isStubText(text)) continue
       items.push({ type: String(event?.type ?? ''), text })
     }
     const user = items.find(item => item.type === 'user/message')
@@ -544,7 +552,13 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     const body = [digest.intent, digest.result].filter(part => part !== '')
     const label = body.length > 0 ? body.join(' → ') : digest.fallback || `${span.nodes} 个节点`
     const note = ids.length > 0 ? ` · ${ids[0]}${ids.length > 1 ? `+${ids.length - 1}` : ''}` : ''
-    return `〔折 ${span.start}–${span.end}：${label}${note}〕`
+    const head = `〔折 ${span.start}–${span.end}：`
+    const tail = `${note}〕`
+    // A stub is a signpost, not a summary: cap the whole line so a long slice
+    // cannot push it back over the 40-character budget it exists to respect.
+    const room = Math.max(8, 46 - head.length - tail.length)
+    const clipped = label.length > room ? `${label.slice(0, room - 1).trimEnd()}…` : label
+    return `${head}${clipped}${tail}`
   }
 
   function shelveMessages(session, span, agentId, sessionId, seqs) {
