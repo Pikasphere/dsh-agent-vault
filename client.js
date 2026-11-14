@@ -186,6 +186,7 @@ window.__ModuleLoader__.load({
         ctxFailed: '操作失败',
         ctxTip: '右键对话可归档、强归档、取消归档或新建对话；Ctrl / Shift 点击可多选',
         recall: '回忆',
+        recallAgentHint: '回忆属于智能体：切换这里就换一个库',
         recallHint: '在当前智能体的日志、记忆审计和共享知识库里按词检索。只查索引，不进提示词，不额外消耗 token。',
         recallPlaceholder: '找什么？一句话或几个关键词',
         recallSearch: '检索',
@@ -434,6 +435,7 @@ window.__ModuleLoader__.load({
         ctxFailed: 'Action failed',
         ctxTip: 'Right-click a conversation to archive, strong-archive, cancel the archive, or start a new one; Ctrl / Shift click multi-selects',
         recall: 'Recall',
+        recallAgentHint: 'Recall is per agent: switching here switches the store',
         recallHint: 'Keyword search over this agent’s journal, its memory audit log and the shared knowledge base. Index-only: it never enters the prompt and costs no tokens.',
         recallPlaceholder: 'What are you looking for?',
         recallSearch: 'Search',
@@ -1096,7 +1098,7 @@ window.__ModuleLoader__.load({
         recallSeq.current += 1
         setRecallData(null)
         setRecallDetail(null)
-        if (recallQuery.trim() !== '') void runRecall()
+        if (recallQuery.trim() !== '') void runRecall(vault?.id)
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [vault?.id])
 
@@ -1396,8 +1398,12 @@ window.__ModuleLoader__.load({
         await call('vault.activate', { id: checked ? vault.id : '' })
       }
 
-      const runRecall = async () => {
-        if (!vault) return
+      // `agentId` is passed in rather than read from `vault`: the switch effect
+      // fires before the next data poll, and a closure over the previous
+      // `vault` is exactly how this page used to stay pinned to one agent.
+      const runRecall = async agentId => {
+        const target = agentId ?? (vault?.id ?? '')
+        if (target === '') return
         const text = recallQuery.trim()
         if (text === '') {
           setRecallData(null)
@@ -1406,7 +1412,7 @@ window.__ModuleLoader__.load({
         }
         const run = ++recallSeq.current
         const found = await call('memory.recall', {
-          id: vault.id,
+          id: target,
           query: text,
           limit: 25,
           source: recallSource === '' ? undefined : recallSource,
@@ -2138,6 +2144,17 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'am-row' },
             h('span', { className: 'am-label' }, t('recall')),
+            h(
+              'select',
+              {
+                className: 'am-input',
+                style: { width: 170 },
+                title: t('recallAgentHint'),
+                value: selectedId,
+                onChange: event => setSelectedId(event.target.value),
+              },
+              (data?.vaults ?? []).map(item => h('option', { key: item.id, value: item.id }, item.name)),
+            ),
             h('span', { style: { flex: 1 } }),
             h(
               'button',
@@ -2156,7 +2173,7 @@ window.__ModuleLoader__.load({
               placeholder: t('recallPlaceholder'),
               onChange: event => setRecallQuery(event.target.value),
               onKeyDown: event => {
-                if (event.key === 'Enter') void runRecall()
+                if (event.key === 'Enter') void runRecall(vault?.id)
               },
             }),
             h(
@@ -2164,7 +2181,7 @@ window.__ModuleLoader__.load({
               {
                 className: 'am-btn am-btn-sm am-btn-primary',
                 disabled: busy !== '' || recallQuery.trim() === '',
-                onClick: () => void runRecall(),
+                onClick: () => void runRecall(vault?.id),
               },
               t('recallSearch'),
             ),
