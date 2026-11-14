@@ -1,0 +1,35 @@
+name: publish
+
+# Publishing goes through npm's Trusted Publisher (OIDC): no token, no 2FA
+# prompt, and npm attaches a provenance statement to the tarball. The npm side
+# must list this repository and this workflow file once, by hand.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # The onnxruntime-node postinstall fetches CUDA providers from NuGet and
+      # fails on a redirect; the package already ships its CPU library.
+      - run: npm ci --ignore-scripts
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm test
+
+      - run: npm publish --provenance --access public
