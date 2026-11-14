@@ -1088,9 +1088,6 @@ window.__ModuleLoader__.load({
       }, [vault?.id, tab, journalVersion])
 
       useEffect(() => {
-      }, [tab])
-
-      useEffect(() => {
         // A different agent may live in other workspaces; let the fetch pick
         // the most recent one instead of keeping the previous agent's choice.
         setSessionsWorkspace('')
@@ -1185,10 +1182,13 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (tab !== 'recall') return undefined
         let live = true
+        // The list belongs to the agent on screen, not to the global active
+        // one: without the id it always showed the same agent's conversations.
+        setSessionList(null)
         request('/op', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ op: 'memory.sessions', args: {} }),
+          body: JSON.stringify({ op: 'memory.sessions', args: { id: vault?.id ?? '' } }),
         })
           .then(payload => {
             if (live) setSessionList(payload.value?.sessions ?? [])
@@ -1199,7 +1199,7 @@ window.__ModuleLoader__.load({
         return () => {
           live = false
         }
-      }, [tab, indexVersion])
+      }, [tab, indexVersion, vault?.id])
 
       useEffect(() => {
         if (tab !== 'recall') return undefined
