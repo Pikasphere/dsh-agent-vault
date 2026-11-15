@@ -546,12 +546,21 @@ export function createRecall(options = {}) {
     )
   }
 
-  function collect(agentId, source) {
+  /**
+   * Session text is scoped to the conversation it came from: a journal note
+   * belongs to the agent and is readable from any of its conversations, but a
+   * transcript belongs to exactly one. `sessionId === ''` means "the agent's
+   * sessions" and exists only for the panel and for reindex.
+   */
+  function collect(agentId, source, sessionId = '') {
     const entries = []
     if (source === '' || source === 'journal') entries.push(...journalEntries(agentId))
     if (source === '' || source === 'log') entries.push(...logEntries(agentId))
     if (source === '' || source === 'knowledge') entries.push(...knowledgeEntries())
-    if (source === '' || source === 'session') entries.push(...sessionEntries(agentId))
+    if (source === '' || source === 'session') {
+      const sessions = sessionEntries(agentId)
+      entries.push(...(sessionId === '' ? sessions : sessions.filter(entry => entry.sessionId === sessionId)))
+    }
     return entries
   }
 
@@ -561,14 +570,33 @@ export function createRecall(options = {}) {
    * per agent (and re-embed ~100 rows whenever two agents alternate), so callers
    * sync this union first and then score a single agent's rows from it.
    */
-  function vectorEntries(settings) {
-    const wanted = Array.isArray(settings?.vectorSources) ? settings.vectorSources : RECALL_DEFAULTS.vectorSources
+  function vectorEntries() {
     const entries = []
     for (const vault of store.state().vaults) {
       entries.push(...journalEntries(vault.id), ...logEntries(vault.id))
-      if (wanted.includes('session')) entries.push(...sessionEntries(vault.id))
     }
     return entries
+  }
+
+  /**
+   * One vector file per conversation, under index/sessions/<id>/. Keeping
+   * transcripts out of the shared file is what makes "conversation text is
+   * readable only from that conversation" true at the storage level too — and
+   * it means a search in one conversation never re-embeds another's rows.
+   */
+  const sessionStores = new Map()
+  function vectorsForSession(sessionId) {
+    if (sessionId === '') return null
+    const cached = sessionStores.get(sessionId)
+    if (cached !== undefined) return cached
+    const created = createVectors({
+      rootDir: path.join(root, 'index', 'sessions', sessionId),
+      embedder,
+      model: options.model,
+      sources: ['session'],
+    })
+    sessionStores.set(sessionId, created)
+    return created
   }
 
   /**
@@ -677,7 +705,8 @@ export function createRecall(options = {}) {
     // material twice — once as a raw dump — so archives stay out of recall
     // unless the caller asks for them (the panel's "read the raw fold" view).
     const withArchives = input.includeArchives === true
-    const entries = collect(agentId, source).filter(entry => {
+    const sessionId = String(input.sessionId ?? '')
+    const entries = collect(agentId, source, sessionId).filter(entry => {
       if (!withArchives && entry.archive === true) return false
       if (since === 0) return true
       const time = Date.parse(entry.at)
@@ -706,9 +735,23 @@ export function createRecall(options = {}) {
     let sims = new Map()
     if (hybrid && query !== '') {
       vectors.setTitleWeight(settings.titleWeight)
-      vectors.setSources(settings.vectorSources)
-      await vectors.sync(vectorEntries(settings))
-      sims = await vectors.score(collect(agentId, ''), query)
+      await vectors.sync(vectorEntries())
+      sims = await vectors.score(collect(agentId, '', sessionId), query)
+      if (sessionId !== '' && settings.vectorSources.includes('session')) {
+        const scoped = collect(agentId, 'session', sessionId)
+        if (scoped.length > 0) {
+          const store = vectorsForSession(sessionId)
+          if (store !== null) {
+            vectors.setSources(['journal', 'log'])
+            await store.sync(scoped)
+            const extra = await store.score(scoped, query)
+            for (const [key, value] of extra) {
+              const previous = sims.get(key)
+              if (previous === undefined || value > previous) sims.set(key, value)
+            }
+          }
+        }
+      }
     }
 
     const byKey = new Map(entries.map(entry => [entryKey(entry), entry]))

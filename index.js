@@ -485,6 +485,7 @@ function registerTools(ctx, store, rooms, journals, recall) {
             ok: true,
             ...(await recall.search({
               id: bound,
+              sessionId: String(exec?.agent?.id ?? ''),
               query: args?.query,
               limit: args?.limit,
               source: args?.source,
@@ -1078,6 +1079,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       const vault = store.resolveVault({ id: args.id })
       return recall.search({
         id: vault.id,
+        sessionId: String(args.sessionId ?? ''),
         query: args.query,
         includeArchives: true,
         limit: args.limit,
