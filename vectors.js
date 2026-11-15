@@ -36,6 +36,8 @@ import { entryKey } from './graph.js'
 // peaked at 0.471 — above the 0.45 floor — so it would only leak. See
 // `eval/knowledge-eval.mjs` and README "知识库为什么不走语义".
 export const VECTOR_SOURCES = ['journal', 'log']
+/** Every source the vector store is able to embed; the config picks a subset. */
+export const EMBEDDABLE_SOURCES = ['journal', 'log', 'session']
 
 /**
  * Characters per chunk. The ratio measured on this vault is ~1.9 chars per
@@ -100,7 +102,11 @@ export function chunksOf(entry, chunkChars = CHUNK_CHARS) {
   return pieces.map(piece => piece.trim()).filter(piece => piece !== '').map(withTitle)
 }
 
-export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS, titleWeight = 0 } = {}) {
+export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS, titleWeight = 0, sources = VECTOR_SOURCES } = {}) {
+  // Which layers are embedded is a setting, not a constant: conversations are
+  // the biggest layer and the noisiest, so they are opt-in (measured cost and
+  // quality live in docs/embedding-conversations.md).
+  let sourceSet = new Set((Array.isArray(sources) ? sources : VECTOR_SOURCES).filter(src => EMBEDDABLE_SOURCES.includes(src)))
   const dir = path.join(rootDir, 'index')
   const binPath = path.join(dir, 'vectors.bin')
   const metaPath = path.join(dir, 'vectors.json')
@@ -180,7 +186,7 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     // stable order the `changed` check below fires on every call and rewrites
     // 300 KB per query just because two agents were visited in another order.
     const wanted = entries
-      .filter(entry => VECTOR_SOURCES.includes(entry.src) && entry.archive !== true && sourceText(entry).trim() !== '')
+      .filter(entry => sourceSet.has(entry.src) && entry.archive !== true && sourceText(entry).trim() !== '')
       .sort((a, b) => entryKey(a).localeCompare(entryKey(b)))
     const current = load()
     const known = new Map() // entry key -> {hash, chunkRows:[Float32Array], titleRow: Float32Array|null}
@@ -387,5 +393,13 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     }
   }
 
-  return { status, sync, score, similarities, rebuild, setTitleWeight, VECTOR_SOURCES, chunkChars }
+  /** Change which layers are embedded; the next sync drops the rows it no longer wants. */
+  function setSources(list) {
+    const next = (Array.isArray(list) ? list : VECTOR_SOURCES).filter(src => EMBEDDABLE_SOURCES.includes(src))
+    const sorted = [...next].sort().join(',')
+    if (sorted === [...sourceSet].sort().join(',')) return
+    sourceSet = new Set(next)
+  }
+
+  return { status, sync, score, similarities, rebuild, setTitleWeight, setSources, VECTOR_SOURCES, chunkChars }
 }

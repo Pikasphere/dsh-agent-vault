@@ -64,6 +64,13 @@ export const RECALL_DEFAULTS = {
   lexicalWeight: 0.6,
   semanticWeight: 0.4,
   minCosine: 0.45,
+  // Conversation rows are long, chatty and often off-topic for a query that is
+  // really about the agent's own notes, so they clear a higher bar before a
+  // semantic-only hit is allowed in (docs/embedding-conversations.md).
+  sessionMinCosine: 0.55,
+  // Which layers the vector index covers. Conversations are opt-in: embedding
+  // them multiplies the row count and adds noise (measured in the same doc).
+  vectorSources: ['journal', 'log'],
   rrfK: 20,
   titleWeight: 0,
   heat: 0.25,
@@ -208,6 +215,17 @@ export function createRecall(options = {}) {
     if (!MODES.includes(merged.mode)) merged.mode = RECALL_DEFAULTS.mode
     const minCosine = Number(merged.minCosine)
     merged.minCosine = Number.isFinite(minCosine) ? Math.min(Math.max(minCosine, 0), 1) : RECALL_DEFAULTS.minCosine
+    const sessionFloor = Number(merged.sessionMinCosine)
+    merged.sessionMinCosine = Number.isFinite(sessionFloor)
+      ? Math.min(Math.max(sessionFloor, 0), 1)
+      : RECALL_DEFAULTS.sessionMinCosine
+    const allowed = ['journal', 'log', 'session']
+    const sources = Array.isArray(merged.vectorSources)
+      ? [...new Set(merged.vectorSources.filter(src => allowed.includes(src)))]
+      : [...RECALL_DEFAULTS.vectorSources]
+    // journal and log are always embedded: they are the agent's own record and
+    // cost little. A config that names neither keeps the default pair.
+    merged.vectorSources = sources.length === 0 ? [...RECALL_DEFAULTS.vectorSources] : sources
     const rrfK = Number(merged.rrfK)
     merged.rrfK = Number.isFinite(rrfK) ? Math.min(Math.max(Math.round(rrfK), 1), 200) : RECALL_DEFAULTS.rrfK
     const titleWeight = Number(merged.titleWeight)
@@ -543,10 +561,12 @@ export function createRecall(options = {}) {
    * per agent (and re-embed ~100 rows whenever two agents alternate), so callers
    * sync this union first and then score a single agent's rows from it.
    */
-  function vectorEntries() {
+  function vectorEntries(settings) {
+    const wanted = Array.isArray(settings?.vectorSources) ? settings.vectorSources : RECALL_DEFAULTS.vectorSources
     const entries = []
     for (const vault of store.state().vaults) {
       entries.push(...journalEntries(vault.id), ...logEntries(vault.id))
+      if (wanted.includes('session')) entries.push(...sessionEntries(vault.id))
     }
     return entries
   }
@@ -686,7 +706,8 @@ export function createRecall(options = {}) {
     let sims = new Map()
     if (hybrid && query !== '') {
       vectors.setTitleWeight(settings.titleWeight)
-      await vectors.sync(vectorEntries())
+      vectors.setSources(settings.vectorSources)
+      await vectors.sync(vectorEntries(settings))
       sims = await vectors.score(collect(agentId, ''), query)
     }
 
@@ -738,8 +759,12 @@ export function createRecall(options = {}) {
       const semanticRank = new Map()
       if (hybrid) {
         ;[...entries]
-          .map(entry => ({ key: entryKey(entry), cosine: cosineOf(entryKey(entry)) }))
-          .filter(item => item.cosine >= settings.minCosine)
+          .map(entry => ({
+            key: entryKey(entry),
+            cosine: cosineOf(entryKey(entry)),
+            floor: entry.src === 'session' ? settings.sessionMinCosine : settings.minCosine,
+          }))
+          .filter(item => item.cosine >= item.floor)
           .sort((a, b) => b.cosine - a.cosine)
           .forEach((item, index) => semanticRank.set(item.key, index + 1))
       }
@@ -756,7 +781,8 @@ export function createRecall(options = {}) {
         const base = reason.get(key) ?? null
         if (lexical !== undefined && base !== null) {
           const cosine = cosineOf(key)
-          fusedReason.set(key, cosine >= settings.minCosine ? { ...base, why: { ...(base.why ?? {}), cosine: round(cosine) } } : base)
+          const floor = byKey.get(key)?.src === 'session' ? settings.sessionMinCosine : settings.minCosine
+          fusedReason.set(key, cosine >= floor ? { ...base, why: { ...(base.why ?? {}), cosine: round(cosine) } } : base)
         } else if (semantic !== undefined) {
           fusedReason.set(key, { via: 'semantic', why: { cosine: round(cosineOf(key)) } })
         } else {

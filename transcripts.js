@@ -292,7 +292,28 @@ export function createTranscripts({ rootDir, store, sessionsRoot, exclude }) {
    * invisible to recall (this session: 203k chars, only 5% indexed), and the
    * whole point of keeping the log is being able to search it later.
    */
+  // Injected context is not conversation: the runtime snapshot, the folded-span
+  // notices, the pointer stubs our own folds leave behind, and the memory block
+  // all arrive as user messages. Indexing them teaches recall to match on
+  // boilerplate that says nothing about what was actually discussed.
+  const NOISE = [
+    'Current runtime context',
+    'Time sampled while preparing turn',
+    'Browser time zone for this request',
+    '<agent_memory',
+    '【已折叠】',
+    '#am-',
+    'The user loaded this memory into the session',
+    '<compact',
+  ]
+
+  function isNoise(text) {
+    const head = String(text ?? '').slice(0, 400)
+    return NOISE.some(marker => head.includes(marker))
+  }
+
   function chunkEntries(entry, messages) {
+    messages = messages.filter(message => !isNoise(message.text))
     if (messages.length === 0) {
       return [{
         id: entry.sessionId,

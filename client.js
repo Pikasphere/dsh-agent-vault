@@ -267,6 +267,8 @@ window.__ModuleLoader__.load({
         recallModeLexical: '仅关键词',
         recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
         recallModeSaved: '排序模式已保存',
+        recallSessionVectors: '对话也进语义索引',
+        recallSessionVectorsHint: '把会话内容也做向量化。会话是最吵的一层，行数会翻倍、命中质量会降，所以默认关闭；打开后会话内容的语义相似度要过更高的门槛（0.55）才单独入选。改动后需要重建索引。',
         recallTuning: '排序微调',
         recallTuningSave: '保存',
         recallHeat: '热度加权',
@@ -517,6 +519,8 @@ window.__ModuleLoader__.load({
         recallModeLexical: 'Keywords only',
         recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
         recallModeSaved: 'Ranking mode saved',
+        recallSessionVectors: 'Embed conversations too',
+        recallSessionVectorsHint: 'Vectorise conversation text as well. Conversations are the noisiest layer — twice the rows and weaker hits — so it stays off by default; when on, a conversation row needs a higher cosine (0.55) to enter on similarity alone. Rebuild the index after changing it.',
         recallTuning: 'Rank tuning',
         recallTuningSave: 'Save',
         recallHeat: 'Heat',
@@ -1504,6 +1508,13 @@ window.__ModuleLoader__.load({
        */
       const tuning = tuningDraft ?? indexData?.settings ?? { heat: 0.25, dedupe: 0, mmr: 0 }
 
+      const toggleSessionVectors = async checked => {
+        const next = checked ? ['journal', 'log', 'session'] : ['journal', 'log']
+        const saved = await call('recall.save', { recall: { vectorSources: next } }, { timeout: 600000 })
+        if (saved === undefined) return
+        setIndexVersion(current => current + 1)
+      }
+
       const saveTuning = async () => {
         const saved = await call('recall.save', {
           recall: {
@@ -2371,6 +2382,16 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'am-card' },
             h(
+                Switch,
+                {
+                  checked: (indexData?.settings?.vectorSources ?? ['journal', 'log']).includes('session'),
+                  label: t('recallSessionVectors'),
+                  hint: t('recallSessionVectorsHint'),
+                  disabled: busy !== '',
+                  onChange: checked => void toggleSessionVectors(checked),
+                },
+              ),
+              h(
               'div',
               { className: 'am-row' },
               h('span', { className: 'am-label' }, t('recallTuning')),

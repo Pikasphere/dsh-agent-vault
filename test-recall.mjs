@@ -285,7 +285,7 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   const explicit = await recall.search({ id: agent.id, query: 'anything', mode: 'hybrid' })
   assert.equal(explicit.mode, 'hybrid', 'an explicit mode overrides the setting')
   store.saveSettings({ recall: { mode: 'hybrid' } })
-  assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, rrfK: 20, titleWeight: 0, heat: 0.25, dedupe: 0, mmr: 0 })
+  assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, sessionMinCosine: 0.55, vectorSources: ['journal', 'log'], rrfK: 20, titleWeight: 0, heat: 0.25, dedupe: 0, mmr: 0 })
 }
 
 // ── access counters (2.0.0-beta.4) ──────────────────────────────────────────

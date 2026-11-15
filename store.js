@@ -224,6 +224,13 @@ export function createStore(options = {}) {
     }
   }
 
+  /** Which layers the vector index covers; conversations are opt-in. */
+  function vectorSourcesOf(value) {
+    const allowed = ['journal', 'log', 'session']
+    const list = Array.isArray(value) ? [...new Set(value.filter(src => allowed.includes(src)))] : []
+    return list.length === 0 ? ['journal', 'log'] : list
+  }
+
   function settings() {
     const raw = readJson(files.settings, {})
     const recallRaw = raw.recall && typeof raw.recall === 'object' ? raw.recall : {}
@@ -232,6 +239,8 @@ export function createStore(options = {}) {
       lexicalWeight: clampWeight(recallRaw.lexicalWeight, 0.6),
       semanticWeight: clampWeight(recallRaw.semanticWeight, 0.4),
       minCosine: clampWeight(recallRaw.minCosine, 0.45),
+      sessionMinCosine: clampWeight(recallRaw.sessionMinCosine, 0.55),
+      vectorSources: vectorSourcesOf(recallRaw.vectorSources),
       rrfK: clampRrfK(recallRaw.rrfK, 20),
       // Upper bound 0.5 on purpose: past the midpoint the title outvotes the
       // body, and the measured evidence (one interval just above zero on 45
@@ -590,6 +599,10 @@ export function createStore(options = {}) {
       if (patch.recall.lexicalWeight !== undefined) merged.lexicalWeight = clampWeight(patch.recall.lexicalWeight, merged.lexicalWeight)
       if (patch.recall.semanticWeight !== undefined) merged.semanticWeight = clampWeight(patch.recall.semanticWeight, merged.semanticWeight)
       if (patch.recall.minCosine !== undefined) merged.minCosine = clampWeight(patch.recall.minCosine, merged.minCosine)
+      if (patch.recall.sessionMinCosine !== undefined) {
+        merged.sessionMinCosine = clampWeight(patch.recall.sessionMinCosine, merged.sessionMinCosine)
+      }
+      if (patch.recall.vectorSources !== undefined) merged.vectorSources = vectorSourcesOf(patch.recall.vectorSources)
       if (patch.recall.rrfK !== undefined) merged.rrfK = clampRrfK(patch.recall.rrfK, merged.rrfK)
       if (patch.recall.titleWeight !== undefined) {
         const weight = clampWeight(patch.recall.titleWeight, merged.titleWeight)
