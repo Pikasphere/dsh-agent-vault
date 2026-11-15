@@ -411,4 +411,18 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   assert.equal(fresh.results[0].stale, undefined, 'fresh rows are not marked stale')
 }
 
+// A strong archive must take the conversation's vectors with it: the
+// transcript is hidden from the workspace, so a searchable copy would outlive
+// the thing it mirrors.
+{
+  const dir = path.join(store.root, 'index', 'sessions', 'session-gone')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'vectors.bin'), Buffer.alloc(8))
+  const removed = recall.forgetSession('session-gone')
+  assert.equal(removed.removed, true)
+  assert.equal(fs.existsSync(dir), false, 'vector dir deleted')
+  assert.equal(recall.forgetSession('session-gone').removed, false, 'second call is a no-op')
+  assert.equal(recall.forgetSession('').removed, false, 'empty id is a no-op')
+}
+
 console.log('ALL RECALL TESTS PASSED')

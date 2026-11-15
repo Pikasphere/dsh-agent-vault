@@ -1268,7 +1268,10 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
         await registry.archiveSession(sessionId, { stopActivity: true })
       }
       archives.setLevel(sessionId, level, meta)
-      return { sessionId, level }
+      // A strong archive hides the conversation for good, so its transcript
+      // vectors must not stay searchable behind it.
+      const forgotten = recall.forgetSession(sessionId)
+      return { sessionId, level, forgotten: forgotten.removed }
     }
     case 'agent.newSession': {
       const agentId = String(args.id ?? '')

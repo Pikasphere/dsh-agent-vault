@@ -579,6 +579,29 @@ export function createRecall(options = {}) {
   }
 
   /**
+   * Drop a conversation's vectors. Called when the conversation is strongly
+   * archived: the transcript is gone from the workspace, so keeping a
+   * second, searchable copy of it would quietly outlive the archive itself.
+   * Only the index is deleted — the session log and journal stay untouched.
+   */
+  function forgetSession(sessionId) {
+    const key = String(sessionId ?? '')
+    if (key === '') return { removed: false }
+    sessionStores.delete(key)
+    const dir = path.join(root, 'index', 'sessions', key)
+    let removed = false
+    try {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true })
+        removed = true
+      }
+    } catch {
+      return { removed: false }
+    }
+    return { removed }
+  }
+
+  /**
    * One vector file per conversation, under index/sessions/<id>/. Keeping
    * transcripts out of the shared file is what makes "conversation text is
    * readable only from that conversation" true at the storage level too — and
@@ -1104,6 +1127,7 @@ export function createRecall(options = {}) {
     state,
     prepare,
     touch,
+    forgetSession,
     SOURCES,
   }
 }
