@@ -275,6 +275,55 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   assert.equal(scoped.sessionMap('session-unknown').turns.length, 0)
 }
 
+// ── since: a mixed-date block must not resurrect older text ─────────────────
+{
+  const messages = [
+    { seq: 10, role: 'user', at: '2026-05-20T10:00:00.000Z', text: '五月的结论：琥珀色是缓存没刷新' },
+    { seq: 11, role: 'assistant', at: '2026-05-20T10:01:00.000Z', text: '对，琥珀色就是缓存里的旧值' },
+    { seq: 12, role: 'user', at: '2026-06-02T10:00:00.000Z', text: '六月又出现了，这次是杜松盒子的问题' },
+    { seq: 13, role: 'assistant', at: '2026-06-02T10:01:00.000Z', text: '杜松盒子这次是别的原因' },
+  ]
+  const stub = {
+    entries: () => [{
+      id: 'session-y',
+      src: 'session',
+      sessionId: 'session-y',
+      at: '2026-06-02T10:01:00.000Z',
+      title: '混合日期块',
+      text: messages.map(item => `${item.role === 'user' ? '用户' : '助手'}：${item.text}`).join('\n'),
+      span: [10, 13],
+    }],
+    messagesOf: () => messages,
+    all: () => messages,
+    list: () => [],
+    root: '',
+  }
+  const mixed = createRecall({ rootDir: store.root, store, journals, vectors: false, transcripts: stub })
+  const mayOnly = await mixed.search({ id: 'demo-agent', query: '琥珀色 缓存', source: 'session', since: '2026-06-01T00:00:00.000Z' })
+  assert.equal(mayOnly.results.length, 0, 'may text inside a june block is not resurrected')
+  const june = await mixed.search({ id: 'demo-agent', query: '杜松盒子', source: 'session', since: '2026-06-01T00:00:00.000Z' })
+  assert.equal(june.results.length, 1, 'the june message still matches')
+  assert.equal(june.results[0].hit?.seq, 12, 'the hit stays inside the filtered range')
+  const may = await mixed.search({ id: 'demo-agent', query: '琥珀色', source: 'session', since: '2026-05-01T00:00:00.000Z' })
+  assert.equal(may.results.length, 1, 'a may floor still finds the may text')
+}
+
+// ── knowledge edited in place is re-read ────────────────────────────────────
+{
+  const file = path.join(knowledgeDir, 'inplace.md')
+  const body = (text) => `# 原地编辑\n\n${text}\n`
+  fs.writeFileSync(file, body('旧内容：琥珀色来自缓存'))
+  const first = await recall.search({ id: agent.id, query: '琥珀色', source: 'knowledge' })
+  assert.equal(first.results.length, 1)
+  // Same directory, same filename, same size: only the file's mtime and text
+  // change, which a directory stamp would not notice.
+  fs.writeFileSync(file, body('新内容：杜松盒子来自别名'))
+  const fresh = await recall.search({ id: agent.id, query: '杜松盒子', source: 'knowledge' })
+  assert.equal(fresh.results.length, 1, 'in-place edit is visible to a running instance')
+  const stale = await recall.search({ id: agent.id, query: '琥珀色', source: 'knowledge' })
+  assert.equal(stale.results.length, 0, 'the old body is gone')
+}
+
 // ── ranking mode: settings are the default, an explicit argument wins ───────
 {
   assert.equal(recall.state().mode, 'hybrid', 'defaults to hybrid')

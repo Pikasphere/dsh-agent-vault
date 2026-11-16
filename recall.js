@@ -506,15 +506,36 @@ export function createRecall(options = {}) {
     return entries
   }
 
+  /**
+   * Fingerprint of every knowledge file, not of the directory: editing an
+   * existing entry in place changes the file's mtime but never the folder's,
+   * so a directory stamp served the old body forever in a long-running process.
+   */
+  function knowledgeStamp(dir) {
+    let names = []
+    try {
+      names = fs.readdirSync(dir).filter(name => name.endsWith('.md')).sort()
+    } catch {
+      return ''
+    }
+    const parts = []
+    for (const name of names) {
+      const stat = statOf(path.join(dir, name))
+      if (stat === null) continue
+      parts.push(`${name}:${stat.size}:${stat.mtimeMs}`)
+    }
+    return parts.join('|')
+  }
+
   function knowledgeEntries() {
     const dir = store.knowledgeRoot()
-    const stat = statOf(dir)
+    const stamp = knowledgeStamp(dir)
     const known = cache.get('knowledge')
-    if (stat === null) {
+    if (stamp === '') {
       cache.delete('knowledge')
       return []
     }
-    if (known !== undefined && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.entries
+    if (known !== undefined && known.stamp === stamp) return known.entries
     const entries = store.allKnowledge().map(entry =>
       decorate({
         id: entry.id,
@@ -526,7 +547,7 @@ export function createRecall(options = {}) {
         sessionId: '',
       }),
     )
-    cache.set('knowledge', { ...stat, entries })
+    cache.set('knowledge', { stamp, entries })
     return entries
   }
 
@@ -648,6 +669,32 @@ export function createRecall(options = {}) {
     return best
   }
 
+  /**
+   * A block can span several turns: its `at` is the newest message while older
+   * text sits inside it. Filtering the block by that newest stamp lets a query
+   * match May's conclusion after the caller asked for June. Rebuild the block
+   * from the messages actually in range, and drop it when none are.
+   */
+  function trimToSince(entry, since) {
+    if (entry.src === 'session' && transcripts !== null && Array.isArray(entry.span)) {
+      const low = Number(entry.span[0])
+      const high = Number(entry.span[1])
+      const kept = transcripts
+        .messagesOf(entry.sessionId)
+        .filter(message => message.seq >= low && message.seq <= high && Date.parse(message.at) >= since)
+      if (kept.length === 0) return null
+      return {
+        ...entry,
+        at: String(kept[kept.length - 1].at ?? entry.at),
+        text: kept
+          .map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.text}`)
+          .join(String.fromCharCode(10)),
+      }
+    }
+    const time = Date.parse(entry.at)
+    return Number.isFinite(time) && time >= since ? entry : null
+  }
+
   /** Attach `hit` to a session row so a big session can be traced to one message. */
   function withHit(row, entry, tokens, since = 0) {
     if (entry.src !== 'session' || transcripts === null || tokens.length === 0) return row
@@ -740,12 +787,10 @@ export function createRecall(options = {}) {
     // unless the caller asks for them (the panel's "read the raw fold" view).
     const withArchives = input.includeArchives === true
     const sessionId = String(input.sessionId ?? '')
-    const entries = collect(agentId, source, sessionId).filter(entry => {
-      if (!withArchives && entry.archive === true) return false
-      if (since === 0) return true
-      const time = Date.parse(entry.at)
-      return Number.isFinite(time) && time >= since
-    })
+    const collected = collect(agentId, source, sessionId).filter(
+      entry => withArchives || entry.archive !== true,
+    )
+    const entries = since === 0 ? collected : collected.map(entry => trimToSince(entry, since)).filter(entry => entry !== null)
     // Heat is computed over the entries in play, so a source filter changes the
     // citation counts of what it returns (a filtered search sees fewer citers).
     // That is honest: in-degree is a property of the corpus you are searching.
