@@ -1065,7 +1065,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
     case 'binding.set':
       return store.setBinding({ sessionId: args.sessionId, agentId: args.agentId })
     case 'binding.list':
-      return store.listBindings()
+      return store.listBindings({ limit: 50 })
     case 'memory.save':
       return store.writeMemory({ id: args.id, content: args.content, note: 'panel', sessionId: args.sessionId })
     case 'memory.aliases':

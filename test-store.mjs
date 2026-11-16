@@ -153,5 +153,24 @@ assert.equal(fs.existsSync(path.join(knowledgeDir, agent.id)), false)
 assert.equal(fs.existsSync(path.join(memoryRoot, 'memory', `${agent.id}.md`)), false)
 console.log('delete ok')
 
+// A truncated binding list is how the oldest conversations get orphaned: their
+// binding still resolves, but the owner map built from the list no longer has
+// them, so they drop out of recall. The internal default must be the full set.
+{
+  const wide = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bindings-'))
+  const bound = createStore({ rootDir: wide })
+  const made = bound.createAgent({ name: 'binder' })
+  for (let index = 0; index < 51; index += 1) {
+    bound.setBinding({ sessionId: `session-${String(index).padStart(3, '0')}`, agentId: made.id })
+  }
+  const all = bound.listBindings()
+  assert.equal(all.length, 51, `internal list returns every binding, got ${all.length}`)
+  assert.equal(bound.listBindings({ limit: 50 }).length, 50)
+  assert.equal(all[0].sessionId, 'session-000', 'the oldest binding is still listed')
+  assert.equal(bound.state().bindings.length, 50, 'the panel payload stays paginated')
+  assert.equal(bound.bindingOf('session-000'), made.id, 'and the old session still resolves')
+  fs.rmSync(wide, { recursive: true, force: true })
+}
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL STORE TESTS PASSED')

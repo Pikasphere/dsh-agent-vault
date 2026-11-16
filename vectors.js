@@ -102,7 +102,7 @@ export function chunksOf(entry, chunkChars = CHUNK_CHARS) {
   return pieces.map(piece => piece.trim()).filter(piece => piece !== '').map(withTitle)
 }
 
-export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS, titleWeight = 0, sources = VECTOR_SOURCES } = {}) {
+export function createVectors({ rootDir, embedder = null, model = '', chunkChars = CHUNK_CHARS, titleWeight = 0, sources = VECTOR_SOURCES, fs: injectedFs = fs } = {}) {
   // Which layers are embedded is a setting, not a constant: conversations are
   // the biggest layer and the noisiest, so they are opt-in (measured cost and
   // quality live in docs/embedding-conversations.md).
@@ -114,7 +114,6 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
   let lastError = ''
   let titleBlend = Math.max(0, Math.min(0.5, Number(titleWeight) || 0))
   let memory = null // {model, dim, builtAt, keys:string[], meta:[], rows:Float32Array, at:Map<entryKey, number[]>}
-  let writing = Promise.resolve()
 
   function readMeta() {
     try {
@@ -152,6 +151,13 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     const dim = Number(meta.dim) || 0
     const entries = Array.isArray(meta.entries) ? meta.entries : []
     if (dim <= 0 || entries.length * dim * 4 !== bin.length) return null
+    // A bin/meta pair is replaced by two renames, so a crash in between can
+    // leave new rows beside old names. Same shape means the length check above
+    // cannot see it, and every hit would silently be attributed to the wrong
+    // note. The digest makes that state detectable instead of plausible.
+    if (typeof meta.sha256 === 'string' && meta.sha256 !== '') {
+      if (digest(bin) !== meta.sha256) return null
+    }
     const rows = new Float32Array(bin.buffer, bin.byteOffset, entries.length * dim)
     memory = indexMemory({
       builtAt: meta.builtAt ?? '',
@@ -163,24 +169,53 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
     return memory
   }
 
+  function digest(buffer) {
+    return crypto.createHash('sha256').update(buffer).digest('hex')
+  }
+
+  // Injectable for tests: a disk fault in the middle of a write is the one
+  // failure mode that has to be provable, and it cannot be produced on a
+  // healthy filesystem.
+  const io = injectedFs
+
   function write(keys, metas, vectors) {
     const dim = vectors[0]?.length ?? 0
     const flat = new Float32Array(keys.length * dim)
     for (let i = 0; i < vectors.length; i += 1) flat.set(vectors[i], i * dim)
-    fs.mkdirSync(dir, { recursive: true })
+    io.mkdirSync(dir, { recursive: true })
+    const bytes = Buffer.from(flat.buffer, flat.byteOffset, flat.byteLength)
     const tempBin = `${binPath}.${process.pid}.tmp`
-    fs.writeFileSync(tempBin, Buffer.from(flat.buffer, flat.byteOffset, flat.byteLength))
-    fs.renameSync(tempBin, binPath)
+    io.writeFileSync(tempBin, bytes)
+    io.renameSync(tempBin, binPath)
     const builtAt = new Date().toISOString()
-    const meta = { version: 2, model: modelName, dim, builtAt, entries: metas }
+    const meta = { version: 2, model: modelName, dim, builtAt, sha256: digest(bytes), entries: metas }
     const tempMeta = `${metaPath}.${process.pid}.tmp`
-    fs.writeFileSync(tempMeta, `${JSON.stringify(meta, null, 2)}\n`, 'utf8')
-    fs.renameSync(tempMeta, metaPath)
+    io.writeFileSync(tempMeta, `${JSON.stringify(meta, null, 2)}\n`, 'utf8')
+    io.renameSync(tempMeta, metaPath)
     memory = indexMemory({ builtAt, dim, keys, meta: metas, rows: flat })
   }
 
   /** Only entries whose text (or chunk split) changed get re-embedded. */
-  async function sync(entries, options = {}) {
+  let syncing = Promise.resolve()
+
+  /**
+   * One sync at a time, and a failed sync must not poison the queue: the old
+   * `writing = writing.then(...)` kept a rejected promise forever, so a single
+   * transient disk error turned every later call into the same stale error.
+   */
+  function sync(entries, options = {}) {
+    const next = syncing.then(
+      () => syncInner(entries, options),
+      () => syncInner(entries, options),
+    )
+    syncing = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
+  }
+
+  async function syncInner(entries, options = {}) {
     const size = options.chunkChars ?? chunkChars
     // Sorted by key so an unchanged corpus produces an unchanged file: without a
     // stable order the `changed` check below fires on every call and rewrites
@@ -268,10 +303,8 @@ export function createVectors({ rootDir, embedder = null, model = '', chunkChars
       current.keys.length !== keys.length ||
       pending.length > 0 ||
       current.keys.some((key, i) => key !== keys[i])
-    if (changed) {
-      writing = writing.then(() => write(keys, metas, vectors))
-      await writing
-    }
+    // sync() is serialised, so the write needs no chain of its own.
+    if (changed) await write(keys, metas, vectors)
     const entryCount = new Set(keys.map(key => key.slice(0, key.lastIndexOf('#')))).size
     const before = current === null ? 0 : new Set(current.keys.map(key => key.slice(0, key.lastIndexOf('#')))).size
     const chunkRows = metas.filter(meta => Number(meta.chunk) !== -1).length

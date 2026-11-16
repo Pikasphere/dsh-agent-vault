@@ -783,10 +783,20 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     return { attempted: true, ok: true, archived: ids }
   }
 
+  /**
+   * Sessions with a turn in flight. The pre-step hook schedules a fold a couple
+   * of seconds later, and by then the agent may be running again — folding a
+   * live surface moves messages under the turn that is reading them. The status
+   * stream is the only reliable signal, so it is tracked here and re-checked at
+   * the moment of the change, not only when the job was scheduled.
+   */
+  const busy = new Set()
+
   async function maybeCompact(agent) {
     // `measureTokens` is injected as a ONE-argument function (sessionId).
     const sessionId = String(agent?.id ?? '')
     if (sessionId === '') return null
+    if (busy.has(sessionId)) return null
     const config = settings()
     if (config.debug) record({ at: new Date().toISOString(), kind: 'enter-maybe', sessionId, enabled: config.enabled })
     if (!config.enabled) return null
@@ -991,6 +1001,11 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         () =>
           ctx.on('agent/status', payload => {
             const status = payload?.status
+            const which = String(payload?.agent?.id ?? '')
+            if (which !== '') {
+              if (status === 'idle') busy.delete(which)
+              else busy.add(which)
+            }
             if (status !== 'idle') return
             probe(String(payload?.agent?.id ?? ''), { seen: 'status-idle' })
             void maybeCompact(payload?.agent)

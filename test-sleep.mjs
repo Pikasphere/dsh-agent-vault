@@ -69,9 +69,13 @@ function harness(options = {}) {
       },
     },
   }
+  const handlers = new Map()
   const ctx = {
     get: name => services[name],
-    on: () => () => {},
+    on: (name, handler) => {
+      handlers.set(name, handler)
+      return () => {}
+    },
     effect: fn => fn(),
   }
   const store = {
@@ -99,6 +103,11 @@ function harness(options = {}) {
   return {
     sleep,
     store,
+    handlers,
+    emitStatus: (agent, status) => {
+      const handler = handlers.get('agent/status')
+      if (handler !== undefined) handler({ agent, status })
+    },
     calls,
     surfaceCalls,
     writes,
@@ -532,6 +541,21 @@ function harness(options = {}) {
   const markers = (text.match(/〔折/g) ?? []).length
   assert.equal(markers, 1, `digest must not nest stubs: ${text}`)
   assert.ok(text.length <= 46, `digest stays under the budget (${text.length}): ${text}`)
+}
+
+// A fold scheduled two seconds after pre-step must re-check that the agent is
+// idle: a turn that started meanwhile would see its surface move underneath it.
+{
+  const h = harness({ tokens: 700, settings: { triggerTokens: 500, cooldownMs: 0 } })
+  h.sleep.attach()
+  h.emitStatus({ id: 'session-a' }, 'running')
+  assert.equal(await h.sleep.maybeCompact({ id: 'session-a' }), null, 'a running agent is not folded')
+  assert.equal(h.calls.length, 0)
+  h.emitStatus({ id: 'session-a' }, 'idle')
+  // The idle handler starts the fold itself, so wait for it instead of racing it.
+  await new Promise(resolve => setTimeout(resolve, 50))
+
+  assert.equal(h.calls.length, 1, 'idle unlocks folding again')
 }
 
 // defaults stay conservative

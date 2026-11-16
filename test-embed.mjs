@@ -278,5 +278,41 @@ const rewritten = await cutVectors.sync(cutEntries(), { chunkChars: 200 })
 assert.ok(rewritten.embedded > 0, 'a different chunkChars rebuilds the note')
 fs.rmSync(cutScratch, { recursive: true, force: true })
 
+// The bin and its metadata are replaced by two renames. If the process dies
+// between them and the row count happens to match, every name would silently
+// point at someone else's vector — similarity 1.0 to the wrong note. The digest
+// in the metadata turns that state into "stale, rebuild" instead.
+{
+  const torn = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-vectors-torn-'))
+  const store = createVectors({ rootDir: torn, embedder: fakeEmbedder, model: 'm' })
+  const notes = [{ id: 'a', src: 'journal', title: 'alpha', text: '归档 alpha' }]
+  await store.sync(notes)
+  assert.equal(store.status().count, 1, 'baseline row written')
+  // Same length, same dim: only the digest can tell the pair apart.
+  const bin = path.join(torn, 'index', 'vectors.bin')
+  const swapped = Buffer.from(fs.readFileSync(bin))
+  swapped[0] = swapped[0] ^ 0xff
+  fs.writeFileSync(bin, swapped)
+  const reopened = createVectors({ rootDir: torn, embedder: fakeEmbedder, model: 'm' })
+  assert.equal(reopened.status().count, 0, 'a mismatched pair is treated as stale, not as truth')
+  fs.rmSync(torn, { recursive: true, force: true })
+}
+
+// One rejected write must not poison the queue: after the fault clears, the
+// next sync has to succeed rather than replay the same stale error forever.
+{
+  const flaky = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-vectors-queue-'))
+  let failures = 1
+  const brokenFs = { ...fs, renameSync: (from, to) => { if (failures > 0) { failures -= 1; throw new Error('disk hiccup') } return fs.renameSync(from, to) } }
+  const store = createVectors({ rootDir: flaky, embedder: fakeEmbedder, model: 'm', fs: brokenFs })
+  const notes = [{ id: 'a', src: 'journal', title: 'alpha', text: '归档 alpha' }]
+  let failed = false
+  try { await store.sync(notes) } catch { failed = true }
+  assert.ok(failed, 'the first sync reports the disk error')
+  const recovered = await store.sync(notes)
+  assert.ok(recovered.count === 1, 'the queue recovers once the disk works again')
+  fs.rmSync(flaky, { recursive: true, force: true })
+}
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL EMBED TESTS PASSED')

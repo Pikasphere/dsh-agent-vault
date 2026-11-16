@@ -542,6 +542,10 @@ export function createRecall(options = {}) {
         text: entry.text,
         tags: [],
         sessionId: entry.sessionId,
+        // Kept so a hit can be pinned to the block it came from instead of the
+        // best-matching message anywhere in the session.
+        ...(Array.isArray(entry.span) ? { span: entry.span } : {}),
+        ...(Number.isFinite(Number(entry.round)) ? { round: Number(entry.round) } : {}),
       }),
     )
   }
@@ -627,10 +631,17 @@ export function createRecall(options = {}) {
    * scroll to a message, so a hit carries the message's role/seq/preview and the
    * caller decides what to do with it — never the message's whole session.
    */
-  function bestMessage(sessionId, tokens) {
+  function bestMessage(sessionId, tokens, span, since) {
     const messages = transcripts === null ? [] : transcripts.messagesOf(sessionId)
+    const low = Array.isArray(span) && Number.isFinite(Number(span[0])) ? Number(span[0]) : -Infinity
+    const high = Array.isArray(span) && Number.isFinite(Number(span[1])) ? Number(span[1]) : Infinity
     let best = null
     for (const message of messages) {
+      // The evidence must come from the block that matched, not from anywhere
+      // in the session: a hit quoted from an older turn reads as if it were
+      // part of the hit, and `since` would be violated by the attachment.
+      if (message.seq < low || message.seq > high) continue
+      if (since > 0 && !(Date.parse(message.at) >= since)) continue
       const score = scoreEntry({ title: '', text: message.text, tags: [] }, tokens)
       if (score > 0 && (best === null || score > best.score)) best = { message, score }
     }
@@ -638,10 +649,10 @@ export function createRecall(options = {}) {
   }
 
   /** Attach `hit` to a session row so a big session can be traced to one message. */
-  function withHit(row, entry, tokens) {
+  function withHit(row, entry, tokens, since = 0) {
     if (entry.src !== 'session' || transcripts === null || tokens.length === 0) return row
     if (typeof entry.sessionId !== 'string' || entry.sessionId === '') return row
-    const best = bestMessage(entry.sessionId, tokens)
+    const best = bestMessage(entry.sessionId, tokens, entry.span, since)
     if (best === null) return row
     return {
       ...row,
@@ -877,7 +888,7 @@ export function createRecall(options = {}) {
         mode,
         total: ranked.length,
         expand: 0,
-        results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens), row.chunks)),
+        results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens, since), row.chunks)),
       }
     }
 
@@ -894,7 +905,7 @@ export function createRecall(options = {}) {
       mode,
       total: final.length,
       expand: 1,
-      results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens), row.chunks)),
+      results: page.map(row => withChunks(withHit(resultOf(row.entry, row.score, row.via, row.why, tokens), row.entry, tokens, since), row.chunks)),
     }
   }
 

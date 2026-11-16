@@ -1470,9 +1470,15 @@ window.__ModuleLoader__.load({
       }
 
       const toggleSession = async (sessionId, include) => {
-        await call('memory.transcript', { sessionId, include })
+        // The op validates the session against a vault; without the selected id
+        // the host falls back to the default agent, so toggling a conversation
+        // that belongs to any other agent either fails or lands on the wrong
+        // one — while the checkbox below would still flip.
+        if (!vault) return
+        const written = await call('memory.transcript', { id: vault.id, sessionId, include })
+        if (written === undefined) return
         setSessionList(current =>
-          current === null ? current : current.map(item => (item.sessionId === sessionId ? { ...item, included: include } : item)),
+          current === null ? current : current.map(item => (item.sessionId === sessionId ? { ...item, included: written.included ?? include } : item)),
         )
         setIndexVersion(current => current + 1)
       }

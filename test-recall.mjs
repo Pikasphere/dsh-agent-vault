@@ -425,4 +425,31 @@ for (const row of (await recall.search({ id: agent.id, query: 'dsh-agent-vault',
   assert.equal(recall.forgetSession('').removed, false, 'empty id is a no-op')
 }
 
+// A hit's evidence must come from the block that matched, and must respect a
+// `since` filter. Scanning the whole session attached an answer from years ago
+// to a hit about today, which reads as a citation of something it is not.
+{
+  const messages = [
+    { seq: 1, role: 'assistant', at: '2020-01-01T00:00:00.000Z', text: '上下文 归档 旧结论' },
+    { seq: 900, role: 'user', at: '2026-06-01T00:00:00.000Z', text: '上下文 归档 新结论' },
+  ]
+  const scoped = createRecall({
+    rootDir: store.root,
+    store,
+    journals,
+    transcripts: {
+      entries: () => [
+        { id: 'session-1#900', src: 'session', at: '2026-06-01T00:00:00.000Z', title: '会话', tags: [], text: '上下文 归档 新结论', sessionId: 'session-1', span: [900, 900] },
+      ],
+      messagesOf: () => messages,
+    },
+    vectors: false,
+    embedder: null,
+  })
+  const found = await scoped.search({ id: agent.id, query: '上下文 归档', source: 'session' })
+  assert.equal(found.results[0]?.hit?.seq, 900, 'evidence stays inside the matched block')
+  const cut = await scoped.search({ id: agent.id, query: '上下文 归档', source: 'session', since: '2026-01-01T00:00:00.000Z' })
+  assert.equal(cut.results[0]?.hit?.seq, 900, 'recent evidence survives the since filter')
+}
+
 console.log('ALL RECALL TESTS PASSED')

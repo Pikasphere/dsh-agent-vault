@@ -316,10 +316,18 @@ export function createStore(options = {}) {
     return { sessionId, agentId: bindingOf(sessionId) }
   }
 
-  function listBindings() {
+  /**
+   * Every binding, newest last. Callers that answer a question about ownership
+   * (transcripts' owner map, session lookups) need the whole set — a truncated
+   * list silently orphans the oldest conversations, which then vanish from
+   * recall and from `agent.sessions` even though their binding still resolves.
+   * The panel asks for `limit` instead.
+   */
+  function listBindings(options = {}) {
+    const limit = Number(options.limit)
     const agents = new Map(registry().map(item => [item.id, item.name]))
     const sessions = readBindings().sessions
-    return Object.keys(sessions)
+    const rows = Object.keys(sessions)
       .map(sessionId => ({
         sessionId,
         agentId: sessions[sessionId],
@@ -327,7 +335,7 @@ export function createStore(options = {}) {
         title: titleOf(sessionId),
       }))
       .filter(item => item.name !== '')
-      .slice(-50)
+    return Number.isFinite(limit) && limit > 0 ? rows.slice(-limit) : rows
   }
 
   function requireAgent(id) {
@@ -482,7 +490,8 @@ export function createStore(options = {}) {
       transcriptExclude: current.transcriptExclude,
       sleep: current.sleep,
       recall: current.recall,
-      bindings: listBindings(),
+      bindings: listBindings({ limit: 50 }),
+      bindingCount: listBindings().length,
       vaults: vaults,
     }
   }
