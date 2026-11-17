@@ -134,11 +134,23 @@ function fakeRes() {
   }
 }
 
+// The kernel admits the route before the handler runs and passes the Peer as
+// the third argument; the handler no longer re-authenticates on its own.
+const peer = { id: 'test-peer' }
+
 async function call(method, route, body) {
   const res = fakeRes()
-  await registered.routes[0].handler(fakeReq(method, `/api/agent-memory${route}`, body), res)
+  await registered.routes[0].handler(fakeReq(method, `/api/agent-memory${route}`, body), res, peer)
   const payload = res.out.body === '' ? undefined : JSON.parse(res.out.body)
   return { status: res.out.status, payload }
+}
+
+// No admitted Peer means the kernel already denied the request; the handler
+// refuses rather than serving memory to an unknown caller.
+{
+  const res = fakeRes()
+  await registered.routes[0].handler(fakeReq('GET', '/api/agent-memory/state'), res)
+  assert.equal(res.out.status, 401, 'an unauthenticated call is rejected')
 }
 
 const initial = await call('GET', '/state')
@@ -454,13 +466,16 @@ assert.equal(bad.payload.error.code, 'bad-op')
 const missing = await call('GET', '/nowhere')
 assert.equal(missing.status, 404)
 
+// Host/Origin trust is the kernel's route policy now: `WebRoute.auth`
+// defaults to required and the handler only sees an admitted Peer. The
+// plugin's own contract is the absence of that Peer.
 const forbiddenRes = fakeRes()
 await registered.routes[0].handler(
   { method: 'GET', url: '/api/agent-memory/state', headers: { host: 'evil.example.com' } },
   forbiddenRes,
 )
-assert.equal(forbiddenRes.out.status, 403)
-console.log('errors + trust fence ok')
+assert.equal(forbiddenRes.out.status, 401)
+console.log('errors + admission contract ok')
 
 // ── discussion rooms + private journal over HTTP ────────────────────────────
 const room = await call('POST', '/op', { op: 'room.create', args: { name: '测试室' } })

@@ -45,6 +45,8 @@ DSH 的会话本身是无状态的。跨任务时，你需要自己把上下文�
 
 DSH 插件以 profile 包的形式安装。任选一种：
 
+> **DSH 版本要求（2.1.17 起）**：`engines.dsh: ">=0.2.2-rc.3"`。面板的 `/api/agent-memory` 路由依赖「内核先准入、handler 收到 Peer」的契约（`WebRoute.auth` 默认 `required`）；装在更早的 DSH 上会 401。
+
 > **版本提示**：npm 的 `latest` 从 **2.0.0** 起指向 2.0（召回层、侧栏右键菜单）。仍在 1.3.3 上的，按 [从 1.3.x 升级到 2.0.0](docs/migrate-1.3-to-2.0.md) 走一遍即可，磁盘上只会多出 `checkpoints/` 与 `index/`。1.2.0 / 1.3.0 漏打包了 `archive.js`（`index.js` 却静态导入它），装完会报 `ERR_MODULE_NOT_FOUND`，不要用这两个版本。要从源码改代码，用目录或 `link:` 安装。
 
 ### 方式一：从目录安装

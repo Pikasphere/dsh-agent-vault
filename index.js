@@ -1008,47 +1008,15 @@ async function readJson(req) {
   }
 }
 
-function loopbackName(host) {
-  const name = String(host ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/:\d+$/, '')
-  return name === '127.0.0.1' || name === 'localhost' || name === '::1'
-}
-
-/** Structural fallback for compositions that mount no `connection` service. */
-function structuralRejection(req) {
-  const host = String(req.headers?.host ?? '')
-  if (!loopbackName(host)) return 403
-  const origin = req.headers?.origin ?? req.headers?.referer
-  if (typeof origin === 'string' && origin !== '' && !origin.startsWith('dsh-app://')) {
-    try {
-      if (new URL(origin).host !== host) return 403
-    } catch {
-      return 403
-    }
-  }
-  return undefined
-}
-
 /**
- * Never weaker than the kernel's own `/api` admission: a longer prefix wins
- * dispatch, so these routes run before that check unless they repeat it.
+ * The kernel admits a Web route before its handler runs (`WebRoute.auth`
+ * defaults to `required`) and hands the admitted Peer as the handler's third
+ * argument, so this plugin does not re-authenticate. 0.2.2-rc.3 replaced
+ * `connection.requestRejection` with `connection.admit`, which performs a full
+ * credential exchange: running it on an already-admitted request throws, and
+ * that turned every panel call into a 503 — how the plugin went blank after
+ * the upgrade.
  */
-function rejectionFor(ctx, req) {
-  const connection = ctx.get('connection')
-  if (connection === undefined) return structuralRejection(req)
-  try {
-    if (typeof connection.requestRejection === 'function') {
-      return connection.requestRejection(req)
-    }
-    if (typeof connection.admit === 'function') {
-      const admission = connection.admit(req)
-      return admission && typeof admission === 'object' ? admission.rejection : undefined
-    }
-  } catch {
-    return 503
-  }
-  return structuralRejection(req)
-}
-
 async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args) {
   switch (op) {
     case 'state':
@@ -1337,12 +1305,9 @@ function registerApi(ctx, store, rooms, journals, archives, recall, reveal, slee
   // must pend on the service instead of reading it once at apply time.
   ctx.inject(['webServer'], scoped => {
     const server = scoped.webServer
-    const handler = async (req, res) => {
-      const rejection = rejectionFor(ctx, req)
-      if (rejection !== undefined) {
-        json(res, rejection, {
-          error: { code: rejection === 401 ? 'unauthorized' : rejection === 503 ? 'unavailable' : 'forbidden' },
-        })
+    const handler = async (req, res, peer) => {
+      if (peer === undefined) {
+        json(res, 401, { error: { code: 'unauthorized', message: 'this route requires an admitted peer' } })
         return
       }
       const url = new URL(req.url ?? '/', 'http://localhost')
@@ -1375,6 +1340,6 @@ function registerApi(ctx, store, rooms, journals, archives, recall, reveal, slee
         return json(res, status, { error: { code, message: String(error?.message ?? error) } })
       }
     }
-    scoped.effect(() => server.register({ kind: 'prefix', path: API_BASE, handler }), 'agent-memory: api routes')
+    scoped.effect(() => server.register({ kind: 'prefix', path: API_BASE, handler, auth: 'required' }), 'agent-memory: api routes')
   })
 }
