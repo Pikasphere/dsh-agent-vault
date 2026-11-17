@@ -3653,6 +3653,9 @@ window.__ModuleLoader__.load({
           const list = host.querySelector('.am-side-agents-list')
           const signature = JSON.stringify([
             sectionOpen,
+            // Without this the switch repainted nothing: every row is derived
+            // from the same sessions, so the signature must name the mode too.
+            compactAll,
             [...collapsed],
             query,
             sortMode,
