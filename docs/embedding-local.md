@@ -124,7 +124,7 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 
 **为什么不是加权和**：先按 `0.6*norm(lex) + 0.4*cos` 实现过，实测 top-1 只有 33.3%（vs 纯词法 25%）。原因是量纲：词法最大项恒被归一化成 1.0→占 0.6，而余弦常在 0.5–0.65→只占 0.2–0.26，只要某条有词法命中，正确但只靠语义的条目永远翻不上来。改成 RRF 后同一评测集 top-1 41.7%、MRR 0.528。RRF 只比名次，不存在这个量纲陷阱，且对分数的绝对值不敏感（词法分数是 `rank.js` 的经验加权，本来就不该被当成概率）。
 
-参数进 `settings.json`：`recall: {mode:"hybrid"|"lexical", lexicalWeight:0.6, semanticWeight:0.4, minCosine:0.45, rrfK:20}`。默认 `hybrid`；`mode:"lexical"` 保留为回归开关。`weights`、`minCosine`、`rrfK` 均可按次覆盖（评测脚本用，见 `recall.search` 的 `input.weights` / `input.minCosine` / `input.rrfK`）。这些默认值不是手定的，来源见 §7.1。
+参数进 `settings.json`：`recall: {mode:"hybrid"|"fallback"|"lexical", lexicalWeight:0.6, semanticWeight:0.4, minCosine:0.45, rrfK:20}`。默认 `hybrid`；`mode:"lexical"` 保留为回归开关。`weights`、`minCosine`、`rrfK` 均可按次覆盖（评测脚本用，见 `recall.search` 的 `input.weights` / `input.minCosine` / `input.rrfK`）。这些默认值不是手定的，来源见 §7.1。
 
 ### 6.4 失败与降级
 
@@ -144,7 +144,7 @@ memory.reindex  → 全量：清 vectors，逐条嵌入，写 vectors.bin + vect
 - 模型名 / 维度 / 已嵌条数 / 最近建库时间 / 是否降级及原因（数据由 `memory.model {action:"status"}` 提供）；
 - 「准备向量」/「同步向量」按钮走同一个 `memory.model {action:"prepare"}`；模型缺失时按钮禁用并显示 `node scripts/fetch-model.mjs`（下载放在 CLI，不在界面里做进度条——24 MB 的下载中断与校验逻辑已经写在脚本里，重造一遍没有收益）。
 
-搜索框旁出现 `mode` 切换（hybrid / lexical），用来看「这句话语义找到了什么」，也方便把一次可疑的召回退回纯词法复现。
+搜索框旁出现 `mode` 切换（hybrid / fallback / lexical），用来看「这句话语义找到了什么」，也方便把一次可疑的召回退回纯词法复现。
 
 ## 7. 评测（先于实现）
 

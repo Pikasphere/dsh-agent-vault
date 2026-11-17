@@ -77,7 +77,15 @@ export const RECALL_DEFAULTS = {
   dedupe: 0,
   mmr: 0,
 }
-export const MODES = ['hybrid', 'lexical']
+/**
+ * `hybrid` fuses both channels by rank; `lexical` never loads the model;
+ * `fallback` asks lexical first and only reaches for semantics when lexical has
+ * nothing to offer. The third one exists because the round-2 held-out set
+ * measured hybrid trading top-1 for tail recall (58.4 % vs 66.2 % top-1, but
+ * 80.5 % vs 76.6 % hit@5): fallback keeps the lexical order untouched and still
+ * recovers the cross-lingual questions lexical cannot answer at all.
+ */
+export const MODES = ['hybrid', 'lexical', 'fallback']
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
 
@@ -806,33 +814,6 @@ export function createRecall(options = {}) {
     const when = entry => (settings.heat > 0 ? referenceTime(entry) : entry?.at)
     const rows = rank(entries, query, { boost, at: when })
 
-    /**
-     * Semantic similarity is computed over the agent's whole journal layer (not
-     * the current filter), then looked up per candidate: filtering must not
-     * change a vector, only which rows show up.
-     */
-    let sims = new Map()
-    if (hybrid && query !== '') {
-      vectors.setTitleWeight(settings.titleWeight)
-      await vectors.sync(vectorEntries())
-      sims = await vectors.score(collect(agentId, '', sessionId), query)
-      if (sessionId !== '' && settings.vectorSources.includes('session')) {
-        const scoped = collect(agentId, 'session', sessionId)
-        if (scoped.length > 0) {
-          const store = vectorsForSession(sessionId)
-          if (store !== null) {
-            vectors.setSources(['journal', 'log'])
-            await store.sync(scoped)
-            const extra = await store.score(scoped, query)
-            for (const [key, value] of extra) {
-              const previous = sims.get(key)
-              if (previous === undefined || value > previous) sims.set(key, value)
-            }
-          }
-        }
-      }
-    }
-
     const byKey = new Map(entries.map(entry => [entryKey(entry), entry]))
     const scores = new Map()
     const reason = new Map()
@@ -870,6 +851,38 @@ export function createRecall(options = {}) {
      * `minCosine` still gates semantic-only rows: below it a document may be a
      * lexical hit but never enters on similarity alone.
      */
+    // One channel at a time in fallback: a lexical or alias hit means the
+    // ranking is already decided, so the model is never loaded for a query the
+    // keywords can answer. Hybrid always runs both.
+    const useSemantic = vectors !== null && (hybrid || (mode === 'fallback' && scores.size === 0))
+
+    /**
+     * Semantic similarity is computed over the agent's whole journal layer (not
+     * the current filter), then looked up per candidate: filtering must not
+     * change a vector, only which rows show up.
+     */
+    let sims = new Map()
+    if (useSemantic && query !== '') {
+      vectors.setTitleWeight(settings.titleWeight)
+      await vectors.sync(vectorEntries())
+      sims = await vectors.score(collect(agentId, '', sessionId), query)
+      if (sessionId !== '' && settings.vectorSources.includes('session')) {
+        const scoped = collect(agentId, 'session', sessionId)
+        if (scoped.length > 0) {
+          const store = vectorsForSession(sessionId)
+          if (store !== null) {
+            vectors.setSources(['journal', 'log'])
+            await store.sync(scoped)
+            const extra = await store.score(scoped, query)
+            for (const [key, value] of extra) {
+              const previous = sims.get(key)
+              if (previous === undefined || value > previous) sims.set(key, value)
+            }
+          }
+        }
+      }
+    }
+
     const RRF_K = settings.rrfK
     let fusedCache = null
     function fuse() {
@@ -879,7 +892,7 @@ export function createRecall(options = {}) {
         .sort((a, b) => b[1] - a[1])
         .forEach(([key], index) => lexicalRank.set(key, index + 1))
       const semanticRank = new Map()
-      if (hybrid) {
+      if (useSemantic) {
         ;[...entries]
           .map(entry => ({
             key: entryKey(entry),
@@ -919,7 +932,7 @@ export function createRecall(options = {}) {
       return typeof value === 'number' ? value : 0
     }
 
-    const effective = hybrid ? fuse() : { scores, reason }
+    const effective = useSemantic ? fuse() : { scores, reason }
     const ranked = [...effective.scores.entries()]
       .map(([key, score]) => ({ entry: byKey.get(key), score, ...(effective.reason.get(key) ?? { via: 'lexical' }) }))
       .filter(row => row.entry !== undefined)

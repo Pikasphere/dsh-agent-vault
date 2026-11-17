@@ -121,7 +121,7 @@ dsh plugin --profile <你的 profile> add /path/to/dsh-agent-vault
 | `agent_knowledge_write` | 新增或按 `entry` 修订已有条目 |
 | `agent_room` | `action`: `list` / `read` / `say` / `join` / `leave`，参与讨论室 |
 | `agent_journal` | `action`: `list` / `search` / `read` / `write`，读写**自己的**私有日志 |
-| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库、自己相关的会话原文；`mode` 选 `hybrid`（默认，词法 + 语义）或 `lexical` |
+| `agent_recall` | 按关键词检索*可召回材料*：自己的日志笔记、自己的记忆审计、共享知识库、自己相关的会话原文；`mode` 选 `hybrid`（默认，词法 + 语义融合）、`fallback`（词法优先，词法无结果才用语义）或 `lexical` |
 | `agent_alias` | 维护别名表：`list` / `set` / `delete`，让「说得出口但写不出来」叫法也能被检索到 |
 
 工具通过调用会话的绑定解析智能体；显式传 `id` 时优先。`agent_journal` 与 `agent_recall` 永远只作用于调用方的智能体，**不接受其他智能体 id**，这就是隔离的实现方式。
@@ -329,7 +329,8 @@ op 侧对应 `memory.aliases`（读表）与 `memory.alias {key, targets}`（写
 - **只嵌日志层**：检查点与 4K 短记忆是权威状态、整段注入提示词，嵌了反而可能把陈旧版本当检索结果；对话原文太大且未脱敏，仍走词法。向量存 `index/vectors.bin`（float32、L2 归一化）+ `index/vectors.json`（`{key, src, at, hash}`），**按内容 hash 判脏**——日志是追加写，按 mtime 会每次保存都全量重嵌。
 - **融合用 RRF，不用加权和**：先按 `0.6×归一化词法 + 0.4×余弦` 实现，改写查询集只有 33.3%（vs 纯词法 25%）；原因是量纲——词法最大项恒被归一化成 1.0（占 0.6），余弦常年在 0.5–0.65（只占 0.2–0.26），任何有词法命中的条目都压住只靠语义的正确条目。改成倒数排名融合（`0.6/(20+lexRank) + 0.4/(20+semRank)`）后同一集合 top-1 41.7%。
 - **余弦下限 0.45**：低于它的条目没有语义名次（不按相似度硬塞进来）；语义命中带 `via:"semantic"`，面板显示「语义」徽标，且**不作为图扩展的种子**（共现边与语义空间是两套结构，混用噪声相乘）。这个值是量出来的，不是拍的：见下面的「参数」一节。
-- **`mode` 参数**：`agent_recall` 与 `memory.recall` 都收 `mode: "hybrid" | "lexical"`，默认 `hybrid`；`lexical` 是回归开关，词法基线（14 条词面可对的查询）必须保持 top-1 92.9% / MRR 0.952。
+- **`mode` 参数**：`agent_recall` 与 `memory.recall` 都收 `mode: "hybrid" | "fallback" | "lexical"`，默认 `hybrid`；`lexical` 是回归开关，词法基线（14 条词面可对的查询）必须保持 top-1 92.9% / MRR 0.952。
+- **`fallback`（2.1.14）**：词法有结果就直接用词法，一条都没有才走语义。第二轮留出集上混合方案的 top-1 是 58.4%、词法 66.2%，而"词法优先"能保住词法排序、又拿回跨语言题的召回（hit@5 79.2%）。**它还不是默认**——只是把评测里的外部包装变成插件自带的模式，下一轮用新题验证后再决定。
 - **失败就退回词法**：模型缺失、ORT 加载失败、单次嵌入超时都只让这一次检索走词法，`memory.model {action:"status"}` 会报出原因；插件启动 4 秒后后台预热（`timer.unref()`），不阻塞启动。
 - **实测**：15 条与目标笔记没有字面重叠的改写查询，词法 top-1 0.0% / MRR 0.180（1 ms）→ hybrid 13.3% / 0.286（22 ms，预热后）；词法基线（14 条词面可对的查询）在 hybrid 下反而 100%（语义把唯一失手的那条翻到了第一）。脚本是 `eval/recall-paraphrase.mjs`，逐条打印排名变化与语义独有命中，可复现。完整设计与取舍见 [docs/embedding-local.md](docs/embedding-local.md)。
 

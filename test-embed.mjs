@@ -129,6 +129,17 @@ assert.ok(semanticRow.score > 0 && semanticRow.score <= 1)
 const below = await recall.search({ id: agent.id, query: '完全不相关的一句话', mode: 'hybrid' })
 assert.equal(below.results.filter(row => row.via === 'semantic').length, 0, 'minCosine filters noise')
 
+// fallback: lexical answers on its own, semantics only when it has nothing.
+{
+  const lexicalHit = await recall.search({ id: agent.id, query: '归档入口', mode: 'fallback' })
+  assert.equal(lexicalHit.mode, 'fallback')
+  assert.ok(lexicalHit.results.length >= 1, 'fallback uses lexical when it matches')
+  assert.ok(lexicalHit.results.every(row => row.via !== 'semantic'), 'no semantic row was mixed in')
+  const semanticOnly = await recall.search({ id: agent.id, query: '存档了没', mode: 'fallback' })
+  assert.ok(semanticOnly.results.length >= 1, 'fallback reaches semantics when lexical is empty')
+  assert.equal(semanticOnly.results.some(row => row.via === 'semantic'), true)
+}
+
 // mode is orthogonal to expand: lexical + expand still skips semantics.
 const lexicalGraph = await recall.search({ id: agent.id, query: '鲸鱼', mode: 'lexical', expand: 1 })
 assert.ok(lexicalGraph.results.every(row => row.via !== 'semantic'))

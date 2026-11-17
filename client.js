@@ -265,7 +265,8 @@ window.__ModuleLoader__.load({
         recallMode: '排序',
         recallModeHybrid: '混合',
         recallModeLexical: '仅关键词',
-        recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。',
+        recallModeFallback: '词法优先',
+        recallModeHint: '混合 = 关键词 + 本地向量（日志层），语义相似度低于阈值的候选会被丢弃。词法优先 = 关键词有结果就不再调用向量，只在关键词一条都找不出时才用语义。',
         recallModeSaved: '排序模式已保存',
         recallSessionVectors: '对话也进语义索引',
         recallSessionVectorsHint: '把会话内容也做向量化。会话是最吵的一层，行数会翻倍、命中质量会降，所以默认关闭；打开后会话内容的语义相似度要过更高的门槛（0.55）才单独入选。改动后需要重建索引。',
@@ -517,7 +518,8 @@ window.__ModuleLoader__.load({
         recallMode: 'Ranking',
         recallModeHybrid: 'Hybrid',
         recallModeLexical: 'Keywords only',
-        recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped.',
+        recallModeFallback: 'Lexical first',
+        recallModeHint: 'Hybrid = keywords + local vectors over the journal layer; candidates below the cosine floor are dropped. Lexical first = keywords when they match, vectors only when they match nothing.',
         recallModeSaved: 'Ranking mode saved',
         recallSessionVectors: 'Embed conversations too',
         recallSessionVectorsHint: 'Vectorise conversation text as well. Conversations are the noisiest layer — twice the rows and weaker hits — so it stays off by default; when on, a conversation row needs a higher cosine (0.55) to enter on similarity alone. Rebuild the index after changing it.',
@@ -2355,7 +2357,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'am-row' },
               h('span', { className: 'am-label' }, t('recallMode')),
-              ...['hybrid', 'lexical'].map(mode =>
+              ...['hybrid', 'fallback', 'lexical'].map(mode =>
                 h(
                   'button',
                   {
@@ -2364,7 +2366,7 @@ window.__ModuleLoader__.load({
                     disabled: busy !== '' || semanticBusy,
                     onClick: () => void switchRecallMode(mode),
                   },
-                  t(mode === 'hybrid' ? 'recallModeHybrid' : 'recallModeLexical'),
+                  t(mode === 'hybrid' ? 'recallModeHybrid' : mode === 'fallback' ? 'recallModeFallback' : 'recallModeLexical'),
                 ),
               ),
               h('span', { style: { flex: 1 } }),

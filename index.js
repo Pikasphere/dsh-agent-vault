@@ -469,9 +469,9 @@ function registerTools(ctx, store, rooms, journals, recall) {
             },
             mode: {
               type: 'string',
-              enum: ['hybrid', 'lexical'],
+              enum: ['hybrid', 'lexical', 'fallback'],
               description:
-                'Ranking mode. `hybrid` (default) blends lexical scores with local-embedding cosine over the journal layer; `lexical` is the pure keyword ranking and never loads the model.',
+                'Ranking mode. `hybrid` (default) blends lexical scores with local-embedding cosine over the journal layer; `lexical` is the pure keyword ranking and never loads the model; `fallback` keeps the lexical order when it has hits and only searches semantically when lexical returns nothing (cheapest way to recover a query phrased in another language).',
             },
           },
         },
