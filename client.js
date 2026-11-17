@@ -156,6 +156,8 @@ window.__ModuleLoader__.load({
         sideShowArchived: '显示归档对话',
         sideGroup: '分组',
         sideCollapseAll: '全部收起',
+        sideCompactAll: '只显示智能体名',
+        sideCompactOff: '显示对话',
         sideExpandAll: '全部展开',
         archiveWeak: '归档',
         archiveStrong: '强归档',
@@ -409,6 +411,8 @@ window.__ModuleLoader__.load({
         sideShowArchived: 'Archived conversations',
         sideGroup: 'Groups',
         sideCollapseAll: 'Collapse all',
+        sideCompactAll: 'Agents only',
+        sideCompactOff: 'Show conversations',
         sideExpandAll: 'Expand all',
         archiveWeak: 'archived',
         archiveStrong: 'strong archive',
@@ -620,6 +624,7 @@ window.__ModuleLoader__.load({
 .am-side-agents-title:hover{color:var(--dsw-alias-label-secondary)}
 .am-side-agents-count{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
 .am-side-agents-actions{margin-left:auto;display:flex;align-items:center;gap:4px;flex:none}
+.am-side-compact-btn.is-on{color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-bg-l2)}
 .am-side-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;font-family:inherit;font-size:13px;line-height:1}
 .am-side-icon-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .am-side-agents-toggle svg{transition:transform .15s var(--ds-ease-in-out)}
@@ -3241,12 +3246,16 @@ window.__ModuleLoader__.load({
         let sortMode = 'recent'
         let showArchived = true
         let viewOpen = false
+        // One switch for "agents only": every conversation row hidden, names
+        // only. Persisted, because this is a working style, not a one-off.
+        let compactAll = false
         const prefsKey = 'agent-memory:sidebar'
         try {
           const saved = JSON.parse(window.localStorage.getItem(prefsKey) ?? '{}')
           if (saved?.sort === 'recent' || saved?.sort === 'name') sortMode = saved.sort
           if (typeof saved?.showArchived === 'boolean') showArchived = saved.showArchived
           if (typeof saved?.sectionOpen === 'boolean') sectionOpen = saved.sectionOpen
+          if (typeof saved?.compactAll === 'boolean') compactAll = saved.compactAll
         } catch {
           /* storage can be unavailable in hardened compositions */
         }
@@ -3254,7 +3263,7 @@ window.__ModuleLoader__.load({
           String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
         const savePrefs = () => {
           try {
-            window.localStorage.setItem(prefsKey, JSON.stringify({ sort: sortMode, showArchived, sectionOpen }))
+            window.localStorage.setItem(prefsKey, JSON.stringify({ sort: sortMode, showArchived, sectionOpen, compactAll }))
           } catch {
             /* ignore */
           }
@@ -3279,6 +3288,8 @@ window.__ModuleLoader__.load({
             '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 5h11M2.5 11h11"/><circle cx="10.5" cy="5" r="1.7"/><circle cx="5.5" cy="11" r="1.7"/></svg>',
           add:
             '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>',
+          compact:
+            '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.2 8 3l4 3.2M4 9.8 8 13l4-3.2"/></svg>',
           chevron:
             '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
         }
@@ -3496,7 +3507,7 @@ window.__ModuleLoader__.load({
           const agentId = ctxAgentId
           const agent = lastAgents.find(item => item.agentId === agentId)
           if (agent === undefined) return
-          const open = !collapsed.has(agentId)
+          const open = !compactAll && !collapsed.has(agentId)
           openContextMenu(event, [
             { head: agent.name },
             { label: t('ctxNewSession'), hint: t('ctxNewSessionHint'), run: () => void createSessionForAgent(agentId) },
@@ -3538,6 +3549,7 @@ window.__ModuleLoader__.load({
             `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('sidebarAgents'))}</button>` +
             `<span class="am-side-agents-count" title="0">0</span>` +
             `<span class="am-side-agents-actions">` +
+            `<button type="button" class="am-side-icon-btn am-side-compact-btn" data-action="compact-all" aria-pressed="false" title="${escape(t('sideCompactAll'))}" aria-label="${escape(t('sideCompactAll'))}">${ICON.compact}</button>` +
             `<button type="button" class="am-side-icon-btn" data-action="search" title="${escape(t('sideSearch'))}" aria-label="${escape(t('sideSearch'))}">${ICON.search}</button>` +
             `<button type="button" class="am-side-icon-btn" data-action="view" title="${escape(t('sideView'))}" aria-label="${escape(t('sideView'))}">${ICON.view}</button>` +
             `<button type="button" class="am-side-icon-btn" data-action="add-agent" title="${escape(t('sideAddAgent'))}" aria-label="${escape(t('sideAddAgent'))}">${ICON.add}</button>` +
@@ -3578,6 +3590,14 @@ window.__ModuleLoader__.load({
 
         const renderSection = host => {
           ensureChrome(host)
+          const compactButton = host.querySelector('[data-action="compact-all"]')
+          if (compactButton !== null) {
+            compactButton.setAttribute('aria-pressed', compactAll ? 'true' : 'false')
+            compactButton.classList.toggle('is-on', compactAll)
+            const label = compactAll ? t('sideCompactOff') : t('sideCompactAll')
+            compactButton.setAttribute('title', label)
+            compactButton.setAttribute('aria-label', label)
+          }
           const query = searchQuery.trim().toLowerCase()
           const matches = session =>
             String(session.title ?? '').toLowerCase().includes(query) ||
@@ -3655,7 +3675,7 @@ window.__ModuleLoader__.load({
           }
           list.innerHTML = visible
             .map(agent => {
-              const open = !collapsed.has(agent.agentId)
+              const open = !compactAll && !collapsed.has(agent.agentId)
               const initial = Array.from(agent.name || '?')[0] || '?'
               const rows = open
                 ? `<div class="am-side-sessions">` +
@@ -3806,13 +3826,22 @@ window.__ModuleLoader__.load({
                 showArchived = !showArchived
                 savePrefs()
                 renderSection(host)
+              } else if (action === 'compact-all') {
+                compactAll = !compactAll
+                if (compactAll) collapsed.clear()
+                savePrefs()
+                renderSection(host)
               } else if (action === 'collapse-all') {
                 for (const agent of lastAgents) collapsed.add(agent.agentId)
+                compactAll = false
                 viewOpen = false
+                savePrefs()
                 renderSection(host)
               } else if (action === 'expand-all') {
                 collapsed.clear()
+                compactAll = false
                 viewOpen = false
+                savePrefs()
                 renderSection(host)
               } else if (action === 'add-agent') {
                 openCreateAgent()
@@ -3825,6 +3854,17 @@ window.__ModuleLoader__.load({
                 if (agentId === '') return
                 closeContextMenu()
                 ctxAgentId = ''
+                // Expanding one agent while "agents only" is on should open that
+                // agent and keep the rest closed: the switch is global, so it
+                // has to yield to a deliberate single-agent action.
+                if (compactAll) {
+                  compactAll = false
+                  collapsed.clear()
+                  for (const agent of lastAgents) if (agent.agentId !== agentId) collapsed.add(agent.agentId)
+                  savePrefs()
+                  renderSection(host)
+                  return
+                }
                 if (collapsed.has(agentId)) collapsed.delete(agentId)
                 else collapsed.add(agentId)
                 renderSection(host)
