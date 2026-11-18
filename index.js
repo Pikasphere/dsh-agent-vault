@@ -1111,6 +1111,15 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return recall.reindex()
     case 'memory.index':
       return recall.state()
+    case 'sleep.probe': {
+      // Run the fold decision once and report the outcome: folding that keeps
+      // declining used to look identical to folding that never ran.
+      if (sleep === undefined || sleep === null) throw new MemoryError('no-sleep', 'sleep is not attached')
+      const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+      if (sessionId === '') throw new MemoryError('bad-request', 'sessionId is required')
+      const result = await sleep.maybeCompact({ id: sessionId })
+      return { result: result ?? null, recent: sleep.history(5) }
+    }
     case 'memory.model': {
       const action = typeof args.action === 'string' ? args.action : 'status'
       if (action === 'prepare') return recall.prepare()

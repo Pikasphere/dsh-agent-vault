@@ -671,7 +671,19 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       config.minFoldTokens,
       config.deep === true ? null : foldStartOf(sessionId),
     )
-    if (span === null) return { attempted: false, why: 'no-span' }
+    if (span === null) {
+      record({
+        at: new Date().toISOString(),
+        kind: 'skip',
+        sessionId,
+        why: 'no-span',
+        tokens: tokensBefore,
+        deep: config.deep === true,
+        nodes: Array.isArray(session?.surface?.nodes) ? session.surface.nodes.length : 0,
+        watermark: foldStartOf(sessionId),
+      })
+      return { attempted: false, why: 'no-span' }
+    }
     const startedAt = Date.now()
     const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
     const rawEstimate = estimateSavedTokens(session, seqs)
@@ -714,7 +726,17 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         record({ at: new Date().toISOString(), kind: 'shelve', ok: false, sessionId, stage: 'journal', error: String(error?.message ?? error).slice(0, 300) })
         return { attempted: true, ok: false }
       }
-      if (written === null || written.length === 0) return { attempted: false, why: 'empty' }
+      if (written === null || written.length === 0) {
+        record({
+          at: new Date().toISOString(),
+          kind: 'skip',
+          sessionId,
+          why: 'empty',
+          tokens: tokensBefore,
+          span: { start: span.start, end: span.end, nodes: span.nodes },
+        })
+        return { attempted: false, why: 'empty' }
+      }
     }
     const ids = written === null ? [] : written.map(item => item.id)
     // A notice per fold costs a line for every slice the session ever folded
@@ -863,7 +885,20 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
           last = await shelve(sessionId, agent, sliceConfig)
           if (last && last.attempted === true) done = last
           pressure = measureTokens(sessionId)
-          if (!last || last.attempted !== true) break
+          if (!last || last.attempted !== true) {
+            // Silence is the worst failure mode: a fold that keeps declining
+            // looks exactly like folding that never runs. Record why.
+            record({
+              at: new Date().toISOString(),
+              kind: 'skip',
+              sessionId,
+              why: String(last?.why ?? 'no-span'),
+              tokens,
+              deep: sliceConfig.deep === true,
+              estimatedSavedTokens: last?.estimatedSavedTokens,
+            })
+            break
+          }
         }
         // Only a real attempt earns the cooldown: resetting it on "no span"
         // starved every later attempt for a full minute at a time.
