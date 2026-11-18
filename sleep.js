@@ -664,13 +664,20 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // A "deep" fold deliberately ignores the watermark: it is the cache-breaking
     // big compression, run rarely, and it must reach back past earlier folds or
     // the backlog can never come down.
-    const span = selectSpan(
+    let span = selectSpan(
       session,
       config.chunkTokens,
       config.keepRecent,
       config.minFoldTokens,
       config.deep === true ? null : foldStartOf(sessionId),
     )
+    if (span === null && config.deep !== true && foldStartOf(sessionId) !== null) {
+      // The watermark sits past the working set: the whole foldable tail was
+      // already folded this turn, so the clamp leaves nothing. Reach further
+      // back rather than idling — that material is older but still inside the
+      // window, and leaving it is what makes the backlog grow without bound.
+      span = selectSpan(session, config.chunkTokens, config.keepRecent, config.minFoldTokens, null)
+    }
     if (span === null) {
       record({
         at: new Date().toISOString(),
@@ -685,10 +692,36 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
       return { attempted: false, why: 'no-span' }
     }
     const startedAt = Date.now()
-    const seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
-    const rawEstimate = estimateSavedTokens(session, seqs)
-    const calibration = calibrationOf(sessionId)
-    const estimatedSavedTokens = Math.round(rawEstimate * calibration)
+    let seqs = Array.isArray(span.seqs) ? span.seqs : nodesBetween(session, span.start, span.end)
+    let rawEstimate = estimateSavedTokens(session, seqs)
+    let calibration = calibrationOf(sessionId)
+    let estimatedSavedTokens = Math.round(rawEstimate * calibration)
+    if (config.minSavedTokens > 0 && estimatedSavedTokens < config.minSavedTokens && config.deep !== true) {
+      // The watermark keeps the cached prefix intact, but it also caps how much
+      // one turn can free — and after a few quiet turns the only foldable slice
+      // is a handful of nodes worth ~2k calibrated tokens, so every turn skips
+      // and the backlog never comes down. Widen past the watermark instead of
+      // giving up: a bigger slice is the only way to clear the bar, and at this
+      // size the cache re-pay is the smaller cost.
+      const wider = selectSpan(
+        session,
+        Math.max(config.chunkTokens, config.minSavedTokens > 0 ? Math.ceil(config.minSavedTokens / Math.max(0.1, calibration)) : config.chunkTokens),
+        config.keepRecent,
+        config.minFoldTokens,
+        null,
+      )
+      if (wider !== null) {
+        const widerSeqs = Array.isArray(wider.seqs) ? wider.seqs : nodesBetween(session, wider.start, wider.end)
+        const widerRaw = estimateSavedTokens(session, widerSeqs)
+        const widerEstimated = Math.round(widerRaw * calibration)
+        if (widerEstimated > estimatedSavedTokens) {
+          span = wider
+          seqs = widerSeqs
+          rawEstimate = widerRaw
+          estimatedSavedTokens = widerEstimated
+        }
+      }
+    }
     if (config.minSavedTokens > 0 && estimatedSavedTokens < config.minSavedTokens) {
       record({
         at: new Date().toISOString(),

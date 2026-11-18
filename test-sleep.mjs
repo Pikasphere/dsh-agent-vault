@@ -322,6 +322,33 @@ function harness(options = {}) {
   }
 }
 
+// ...but a slice that is only small *because of the watermark* widens instead
+// of skipping: after a quiet turn the tail past the watermark is worth ~2k, and
+// skipping forever meant the backlog never came down (measured 2026-11-18).
+{
+  const h = harness({
+    tokens: 1200,
+    settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 100000, minSavedTokens: 500, minFoldTokens: 100, cooldownMs: 0 },
+  })
+  const statePath = path.join(root, 'index', 'sleep.json')
+  const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {}
+  const mark = h.nodes[h.nodes.length - 4]
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify({
+      ...state,
+      foldStartSeq: { ...(state.foldStartSeq ?? {}), 'session-a': mark },
+      calibration: { ...(state.calibration ?? {}), 'session-a': { ratio: 0.5, at: new Date().toISOString() } },
+    }),
+  )
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true, 'widening clears the bar instead of skipping')
+  const row = h.sleep.history(10).find(item => item.kind === 'shelve' && item.span !== undefined)
+  assert.ok(row !== undefined, 'the fold is accounted')
+  assert.ok(row.span.start < mark, 'the span reaches back past the watermark')
+  assert.notEqual(row.deep, true, 'a continuous fold stays shallow')
+}
+
 // low-gain gate: a slice that would free too little is skipped, not folded
 {
   const h = harness({ tokens: 1200, settings: { mode: 'shelve', keepUnder: 400, triggerTokens: 1000, minSavedTokens: 30000, minFoldTokens: 100 } })
