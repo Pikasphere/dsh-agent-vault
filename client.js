@@ -236,6 +236,9 @@ window.__ModuleLoader__.load({
         sleepChunkHint: '持续折叠时每片的大小；硬阈值那一刀只把它当下限，实际按「超出目标的量」切，上限 200k。',
         sleepKeepUnder: '持续压缩目标（tokens，0=关闭）',
         sleepKeepUnderHint: '每次空闲折到这么多 token 以下。开「每轮都折」时它是每轮折叠的上限；填 0 表示不限，折到没得折为止。归档只进词法检索、不进向量索引，所以不会拖慢嵌入。',
+        sleepProbe: '运行一次检查',
+        sleepProbeDone: '已折叠 / 未折叠：',
+        sleepProbeHint: '立刻对所有活跃会话跑一次折叠判定，不用等下一轮；结果同时写进 index/compaction.jsonl。',
         sleepMinSaved: '单次最少收益（tokens）',
         sleepMinSavedHint: '估算这一片折叠后模型实际少读多少 token；低于这个值就不折。实测 33k 的原始文本往往只省下 3k（工具结果早已被剪枝到 5k 字符），而每次折叠都会让整个提示缓存失效，所以小折是净亏。',
         recallSrcSession: '对话',
@@ -491,6 +494,9 @@ window.__ModuleLoader__.load({
         sleepChunkHint: 'Slice size while folding continuously. The emergency fold only treats it as a floor: it cuts how far over target you are, capped at 200k.',
         sleepKeepUnder: 'Keep context under (tokens, 0 = off)',
         sleepKeepUnderHint: 'Fold back under this many tokens on every idle. With fold-every-turn it caps each turn pass; 0 means no cap. Archives stay lexically searchable but skip the vector index, so embedding cost stays flat.',
+        sleepProbe: 'Run a check now',
+        sleepProbeDone: 'folded / skipped:',
+        sleepProbeHint: 'Runs the fold decision on every live session right away instead of waiting for the next turn; the outcome is also written to index/compaction.jsonl.',
         sleepMinSaved: 'Minimum saving per fold (tokens)',
         sleepMinSavedHint: 'Estimated tokens the model actually stops reading when this slice is folded; below it, nothing is folded. Measured: a 33k slice usually frees only ~3k (tool results are already pruned to 5k chars), while every fold invalidates the whole prompt cache, so small folds are a net loss.',
         recallSrcSession: 'conversation',
@@ -2931,6 +2937,28 @@ window.__ModuleLoader__.load({
                   `${t('sleepFailing')} ${Number(data.sleep.alert.count)} × — ${String(data.sleep.alert.error ?? '')}`,
                 )
               : null,
+            h(
+              'div',
+              { className: 'am-row' },
+              h(
+                'button',
+                {
+                  className: 'am-btn am-btn-sm',
+                  disabled: busy !== '',
+                  onClick: async () => {
+                    setBusy('sleep-probe')
+                    const probed = await call('sleep.probe', {})
+                    setBusy('')
+                    const list = Array.isArray(probed?.probes) ? probed.probes : []
+                    const folded = list.filter(item => item.attempted === true).length
+                    const idle = list.filter(item => item.attempted !== true).length
+                    setNotice(`${t('sleepProbeDone')} ${folded} / ${idle}`)
+                  },
+                },
+                t('sleepProbe'),
+              ),
+            ),
+            h('p', { className: 'am-note-dim' }, t('sleepProbeHint')),
           ),
           h(
             'div',

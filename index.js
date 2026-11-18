@@ -1113,12 +1113,44 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return recall.state()
     case 'sleep.probe': {
       // Run the fold decision once and report the outcome: folding that keeps
-      // declining used to look identical to folding that never ran.
+      // declining used to look identical to folding that never ran. Without a
+      // sessionId every live session is probed, so the caller does not have to
+      // hunt for an id first.
       if (sleep === undefined || sleep === null) throw new MemoryError('no-sleep', 'sleep is not attached')
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
-      if (sessionId === '') throw new MemoryError('bad-request', 'sessionId is required')
-      const result = await sleep.maybeCompact({ id: sessionId })
-      return { result: result ?? null, recent: sleep.history(5) }
+      if (sessionId !== '') {
+        const result = await sleep.maybeCompact({ id: sessionId })
+        return { result: result ?? null, recent: sleep.history(5) }
+      }
+      const live = []
+      try {
+        const sessions = ctx.get('sessions')
+        const listed = typeof sessions?.list === 'function' ? sessions.list() : []
+        for (const item of listed) {
+          const id = String(item?.id ?? '')
+          if (id !== '') live.push({ id, title: String(item?.title ?? '') })
+        }
+      } catch (error) {
+        throw new MemoryError('bad-request', `cannot list sessions: ${String(error?.message ?? error)}`)
+      }
+      const probes = []
+      for (const item of live) {
+        let result = null
+        try {
+          result = await sleep.maybeCompact({ id: item.id })
+        } catch (error) {
+          result = { attempted: false, error: String(error?.message ?? error).slice(0, 200) }
+        }
+        probes.push({
+          sessionId: item.id,
+          title: item.title,
+          attempted: result?.attempted === true,
+          why: result?.why ?? '',
+          ok: result?.ok ?? null,
+          error: result?.error === undefined ? '' : String(result.error).slice(0, 200),
+        })
+      }
+      return { probes, recent: sleep.history(10) }
     }
     case 'memory.model': {
       const action = typeof args.action === 'string' ? args.action : 'status'
