@@ -865,11 +865,17 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
         // `keepUnder` is the stopping line in both modes: with `foldEveryTurn`
         // it bounds how far one turn's pass goes, and 0 means "no line at all,
         // fold until nothing foldable is left".
-        // One slice per turn end. Folding repeatedly inside a single idle was
-        // measured at 60 folds in 13 minutes with a net context change of zero:
-        // each slice was too small to amortise its own cache miss.
-        const slices = 1
+        // Enough slices per idle to reach the target, and no more: with one
+        // slice an idle could not keep up with a session that grows faster than
+        // it shrinks, so every pass stayed above the hard threshold and every
+        // pass was a deep fold — the continuous mode never got a turn.
+        const slices = Math.max(1, Math.min(config.maxSlices > 0 ? config.maxSlices : 1, 5))
         for (let slice = 0; slice < slices; slice += 1) {
+          if (!always && config.keepUnder > 0 && pressure <= config.keepUnder) break
+          // Deep only while the session is still over the hard threshold: it
+          // ignores the watermark and reaches back, which is exactly what the
+          // cache cannot afford once the session is already back at a working
+          // size.
           const deep = pressure >= config.triggerTokens
           const sliceConfig = deep
             ? {

@@ -422,13 +422,37 @@ function harness(options = {}) {
       cooldownMs: 0,
       mode: 'shelve',
       stubStyle: 'full',
+      maxSlices: 1,
     },
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'continuous mode folds below the soft threshold')
-  assert.equal(h.appended.length, 1, 'one slice per turn end, not a burst')
+  assert.equal(h.appended.length, 1, 'one slice per turn end when maxSlices is 1')
   assert.equal(h.writes.length, 0, 'a small fold is a cache move, not a journal note')
   assert.ok(h.appended[0].data.content[0].text.includes('【已折叠】'), 'the stub points at the session log')
+}
+
+// a big session folds several slices per idle, bounded by maxSlices
+{
+  const h = harness({
+    tokens: 90000,
+    toolResults: false,
+    settings: {
+      softTokens: 200000,
+      triggerTokens: 325000,
+      keepUnder: 40000,
+      chunkTokens: 20000,
+      keepRecent: 4,
+      minFoldTokens: 1500,
+      cooldownMs: 0,
+      mode: 'shelve',
+      stubStyle: 'full',
+      maxSlices: 3,
+    },
+  })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(h.appended.length, 3, 'the pass keeps folding up to maxSlices')
 }
 
 // without keepUnder the same session is simply below threshold
@@ -444,7 +468,7 @@ function harness(options = {}) {
     tokens: 30000,
     nodes: 120,
     toolResults: false,
-    settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500, stubStyle: 'full' },
+    settings: { keepUnder: 200000, triggerTokens: 325000, cooldownMs: 60000, mode: 'shelve', foldEveryTurn: true, keepRecent: 4, minFoldTokens: 1500, stubStyle: 'full', maxSlices: 1 },
   })
   const result = await h.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(result?.attempted, true, 'folds even though the session is tiny')
@@ -501,7 +525,7 @@ function harness(options = {}) {
   assert.equal(summary.alert, null)
 }
 {
-  const deep = harness({ tokens: 700, toolResults: false, settings: { keepUnder: 500, triggerTokens: 600, mode: 'shelve', minFoldTokens: 500, cooldownMs: 0 } })
+  const deep = harness({ tokens: 700, toolResults: false, settings: { keepUnder: 500, triggerTokens: 600, mode: 'shelve', minFoldTokens: 500, cooldownMs: 0, maxSlices: 1 } })
   const first = await deep.sleep.maybeCompact({ id: 'session-a' })
   assert.equal(first?.ok, true)
   const summary = deep.sleep.foldSummary('session-a')
