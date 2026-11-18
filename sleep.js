@@ -390,7 +390,14 @@ export function createSleep({ ctx, store, journals, measureTokens, recordError =
     // sourceEventSeqs are exactly those nodes in surface order. Filtering by
     // numeric seq (the first implementation) dropped nodes the host still
     // considered "inside" the span and got the replacement refused.
-    const startIndexFinal = startAt
+    // Surface node 0 is the system prompt, and the host lets only a
+    // `system/message` over exactly that node rewrite it: a fold that starts
+    // there is refused with "node 0 holds the system prompt". Leave it alone and
+    // start after it — a session smaller than one budget used to fail forever
+    // (48 refusals on the same session).
+    const firstFoldable = nodeType(session, nodes[0]) === 'system/message' ? 1 : 0
+    const startIndexFinal = Math.max(startAt, firstFoldable)
+    if (startIndexFinal > endIndex) return null
     let seqs = nodes.slice(startIndexFinal, endIndex + 1)
     // Shrink rather than refuse: dropping from the tail keeps the (watermark
     // clamped) start, and the loop always terminates because the slice shrinks.

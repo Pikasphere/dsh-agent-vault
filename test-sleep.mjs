@@ -248,6 +248,17 @@ function harness(options = {}) {
   assert.equal(h.surfaceCalls.length, 0)
 }
 
+// the system prompt at surface node 0 is never folded
+{
+  const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, cooldownMs: 0, minFoldTokens: 100 } })
+  h.events.set(h.nodes[0], { type: 'system/message', data: { text: 'you are a helpful agent' } })
+  const result = await h.sleep.maybeCompact({ id: 'session-a' })
+  assert.equal(result?.attempted, true)
+  assert.equal(h.surfaceCalls.length, 1)
+  assert.notEqual(h.surfaceCalls[0].start, h.nodes[0], 'node 0 stays in the surface')
+  assert.ok(h.surfaceCalls[0].start > h.nodes[0])
+}
+
 // a refused region is accounted, not thrown
 {
   const h = harness({ tokens: 700, settings: { keepUnder: 400, triggerTokens: 1000, minFoldTokens: 100 }, regionThrows: true })
