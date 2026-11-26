@@ -162,6 +162,7 @@ export function apply(ctx, config = {}) {
       rooms,
       store,
       dispatch,
+      team,
       log: message => recordError(store, 'room/dispatch', message),
     })
   }

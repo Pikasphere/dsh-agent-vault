@@ -80,4 +80,49 @@ assert.deepEqual(degradedSay.dispatched, [])
 assert.deepEqual(degradedSay.failed, ['beta'])
 
 fs.rmSync(scratch, { recursive: true, force: true })
+
+// ── a team's room: an unaddressed message goes to the lead ────────────────
+const teamRoom = rooms.create({ name: '团队讨论室' })
+for (const member of ['alpha', 'beta', 'gamma']) rooms.join({ id: teamRoom.id, member })
+delivered.length = 0
+const leadDispatch = createRoomDispatch({
+  rooms,
+  store,
+  dispatch,
+  team: {
+    listProjects: () => [
+      { id: 'p-1', name: 'Alpha 队', lead: 'alpha', members: ['beta'], roomId: teamRoom.id, status: 'active' },
+      { id: 'p-old', name: '旧队', lead: 'gamma', members: [], roomId: teamRoom.id, status: 'archived' },
+    ],
+  },
+})
+const handed = await leadDispatch.say({
+  id: teamRoom.id,
+  text: '把登录页拆一下，周末前做完',
+  from: { kind: 'user', id: 'user', name: '我' },
+})
+assert.deepEqual(handed.dispatched, ['alpha'], 'the active project lead receives it')
+assert.equal(handed.failed.length, 0)
+assert.match(delivered[0].text, /You are the lead of team "Alpha 队"/)
+assert.match(delivered[0].text, /team_task_create \(project=p-1/)
+assert.match(delivered[0].text, /members are: alpha, beta/)
+
+// mentioning someone still routes only to them, not to the lead
+delivered.length = 0
+const mentioned = await leadDispatch.say({
+  id: teamRoom.id,
+  text: '@beta 看一下',
+  from: { kind: 'user', id: 'user', name: '我' },
+})
+assert.deepEqual(mentioned.dispatched, ['beta'])
+
+// an agent's own message never wakes anyone, lead or member
+delivered.length = 0
+await leadDispatch.say({
+  id: teamRoom.id,
+  text: '收到，拆分中',
+  from: { kind: 'agent', id: 'alpha', name: 'Alpha' },
+})
+assert.deepEqual(delivered, [])
+
 console.log('ALL ROOM DISPATCH TESTS PASSED')
