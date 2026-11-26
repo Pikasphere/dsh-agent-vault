@@ -62,6 +62,28 @@ assert.deepEqual(team.project(project.id).members, ['beta', 'gamma', 'delta'])
 await rejects(team.addMember({ project: project.id, member: 'beta', by: 'beta' }), 'not-lead')
 await rejects(team.addMember({ project: project.id, member: 'alpha', by: 'alpha' }), 'bad-member')
 
+// ── one agent, one active team ──────────────────────────────────────────────
+// The binding model keeps one active conversation per agent, so two teams would
+// wake the same conversation for both projects; the roster refuses that.
+code(() => team.createProject({ name: '第二队', lead: 'alpha' }), 'agent-busy-team')
+code(() => team.createProject({ name: '第二队', lead: 'beta', members: ['delta'] }), 'agent-busy-team')
+assert.equal(team.listProjects().length, 1, 'a refused project leaves nothing behind')
+
+// leaving the team frees the agent
+await team.removeMember({ project: project.id, member: 'delta', by: 'alpha' })
+const second = team.createProject({ name: '第二队', lead: 'delta' })
+assert.match(second.id, /^p-[a-z0-9]{4,12}$/)
+await rejects(team.addMember({ project: second.id, member: 'alpha', by: 'delta' }), 'agent-busy-team')
+
+// archiving frees every member, including the lead, and freezes new work
+const archived = await team.archiveProject({ project: second.id, by: 'delta' })
+assert.equal(archived.status, 'archived')
+assert.equal(team.listProjects().find(item => item.id === second.id).status, 'archived')
+code(() => team.createTask({ project: second.id, title: 'x', brief: 'y' }), 'project-archived')
+await rejects(team.addMember({ project: second.id, member: 'beta', by: 'delta' }), 'project-archived')
+const third = team.createProject({ name: '第三队', lead: 'delta' })
+assert.match(third.id, /^p-[a-z0-9]{4,12}$/, 'an archived project no longer occupies its members')
+
 // ── tasks and assignment ────────────────────────────────────────────────────
 
 const task = await team.createTask({ project: project.id, title: '重写查询层', brief: '按记录里的约束重写', createdBy: 'alpha' })
@@ -186,8 +208,8 @@ assert.equal(persisted.tasks.find(item => item.id === task.id).status, 'done')
 
 // ── stale recovery ──────────────────────────────────────────────────────────
 
-const stale = await reopened.createTask({ project: project.id, title: '中断的活', brief: '中途宿主停了', assignee: 'delta', createdBy: 'alpha' })
-await reopened.claimTask({ project: project.id, task: stale.id, agent: 'delta' })
+const stale = await reopened.createTask({ project: project.id, title: '中断的活', brief: '中途宿主停了', assignee: 'beta', createdBy: 'alpha' })
+await reopened.claimTask({ project: project.id, task: stale.id, agent: 'beta' })
 const tasksPath = path.join(root, 'projects', project.id, 'tasks.json')
 const doc = JSON.parse(fs.readFileSync(tasksPath, 'utf8'))
 const staleTask = doc.tasks.find(item => item.id === stale.id)
@@ -199,6 +221,34 @@ const recovered = afterRestart.project(project.id).tasks.find(item => item.id ==
 assert.equal(recovered.status, 'failed')
 assert.equal(recovered.attempts[0].state, 'failed')
 assert.equal(recovered.attempts[0].report.state, 'failed')
+
+// ── stale recovery: resume policy ───────────────────────────────────────────
+// `resume` puts the same attempt back in the queue with a recovery marker; the
+// dispatcher turns that marker into the wake message's recovery note.
+const resumeRoot = path.join(scratch, 'resume')
+const resumeTeam = createTeam({ rootDir: resumeRoot, agents: () => agents, stalePolicy: 'resume' })
+const resumeProject = resumeTeam.createProject({ name: '恢复队', lead: 'alpha', members: ['beta'] })
+const resumeTask = await resumeTeam.createTask({
+  project: resumeProject.id,
+  title: '中断的活',
+  brief: '宿主中途停了',
+  assignee: 'beta',
+  createdBy: 'alpha',
+})
+await resumeTeam.claimTask({ project: resumeProject.id, task: resumeTask.id, agent: 'beta' })
+const resumePath = path.join(resumeRoot, 'projects', resumeProject.id, 'tasks.json')
+const resumeDoc = JSON.parse(fs.readFileSync(resumePath, 'utf8'))
+resumeDoc.tasks[0].attempts[0].startedAt = '2020-01-01T00:00:00.000Z'
+fs.writeFileSync(resumePath, JSON.stringify(resumeDoc, null, 2), 'utf8')
+
+const resumed = createTeam({ rootDir: resumeRoot, agents: () => agents, stalePolicy: 'resume', staleMs: 60000 })
+const resumedTask = resumed.project(resumeProject.id).tasks.find(item => item.id === resumeTask.id)
+assert.equal(resumedTask.status, 'assigned')
+assert.equal(resumedTask.attempts[0].state, 'queued')
+assert.equal(resumedTask.attempts[0].recovered, true)
+const due = resumed.pendingDispatches()
+assert.equal(due.length, 1)
+assert.equal(due[0].recovered, true)
 
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL TEAM TESTS PASSED')

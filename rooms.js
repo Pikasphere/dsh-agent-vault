@@ -179,6 +179,39 @@ export function createRooms(options = {}) {
     }
   }
 
+  /** Attach derived facts to one stored message (its own fields stay fixed). */
+  function annotate(input = {}) {
+    const room = requireRoom(input.id)
+    const target = String(input.message ?? '')
+    const patch = input.patch !== null && typeof input.patch === 'object' ? input.patch : {}
+    let raw = ''
+    try {
+      raw = fs.readFileSync(messagesFile(room.id), 'utf8')
+    } catch {
+      return undefined
+    }
+    let changed = false
+    const lines = raw
+      .split('\n')
+      .filter(line => line.trim() !== '')
+      .map(line => {
+        try {
+          const item = JSON.parse(line)
+          if (item.id !== target) return line
+          for (const [key, value] of Object.entries(patch)) {
+            if (key === 'id' || key === 'at' || key === 'from' || key === 'text') continue
+            item[key] = value
+          }
+          changed = true
+          return JSON.stringify(item)
+        } catch {
+          return line
+        }
+      })
+    if (changed) writeAtomic(messagesFile(room.id), `${lines.join('\n')}\n`)
+    return readMessages(room.id).find(item => item.id === target)
+  }
+
   function say(input = {}) {
     const room = requireRoom(input.id)
     const text = String(input.text ?? '').replace(/\r\n/g, '\n').trim()
@@ -191,6 +224,13 @@ export function createRooms(options = {}) {
       from: { kind: String(from.kind ?? 'user'), id: String(from.id ?? ''), name: collapse(from.name) || String(from.id ?? '') },
       text,
     }
+    // Callers may attach derived facts (such as the agents a mention reached);
+    // the transcript's own fields are never overridable.
+    const extra = input.extra !== null && typeof input.extra === 'object' ? input.extra : {}
+    for (const [key, value] of Object.entries(extra)) {
+      if (key === 'id' || key === 'at' || key === 'from' || key === 'text') continue
+      message[key] = value
+    }
     fs.appendFileSync(messagesFile(room.id), `${JSON.stringify(message)}\n`, 'utf8')
     return message
   }
@@ -201,5 +241,5 @@ export function createRooms(options = {}) {
     return { cleared: room.id }
   }
 
-  return { root, dir, list, create, rename, remove, setMembers, join, leave, read, say, clear, requireRoom }
+  return { root, dir, list, create, rename, remove, setMembers, join, leave, read, say, annotate, clear, requireRoom }
 }

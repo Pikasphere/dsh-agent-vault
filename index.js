@@ -27,6 +27,7 @@ import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createTeam } from './team/store.js'
 import { createTeamDispatch } from './team/dispatch.js'
+import { createRoomDispatch } from './team/room-dispatch.js'
 import { createSleep } from './sleep.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall, DEFAULT_MODEL } from './recall.js'
@@ -138,6 +139,7 @@ export function apply(ctx, config = {}) {
     team = createTeam({
       rootDir: store.root,
       agents: () => store.state().vaults.map(agent => ({ id: agent.id, name: agent.name })),
+      stalePolicy: config.stalePolicy,
     })
   } catch (error) {
     recordError(store, 'team/init', error)
@@ -152,12 +154,24 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // Mentions in a discussion room wake the room's agents through the same
+  // session binding and inbox path the team dispatcher uses.
+  let roomDispatch
+  if (dispatch !== undefined && dispatch !== null) {
+    roomDispatch = createRoomDispatch({
+      rooms,
+      store,
+      dispatch,
+      log: message => recordError(store, 'room/dispatch', message),
+    })
+  }
+
   try {
     registerPrompt(ctx, store)
     registerTools(ctx, store, rooms, journals, recall, team, dispatch)
     registerArchiveGate(ctx, store, archives)
     sleep.attach()
-    registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch)
+    registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch, roomDispatch)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -1369,7 +1383,7 @@ async function readJson(req) {
  * that turned every panel call into a 503 — how the plugin went blank after
  * the upgrade.
  */
-async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch) {
+async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch, roomDispatch) {
   const teamStore = () => {
     if (team === undefined || team === null) throw new MemoryError('no-team', 'the team store is not available')
     return team
@@ -1562,17 +1576,23 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return rooms.setMembers({ id: args.id, members: args.members })
     case 'room.read':
       return rooms.read({ id: args.id, limit: args.limit })
-    case 'room.say':
-      return rooms.say({ id: args.id, text: args.text, from: { kind: 'user', id: 'user', name: '我' } })
+    case 'room.say': {
+      const from = { kind: 'user', id: 'user', name: '我' }
+      if (roomDispatch !== undefined && roomDispatch !== null) return roomDispatch.say({ id: args.id, text: args.text, from })
+      return rooms.say({ id: args.id, text: args.text, from })
+    }
     case 'room.clear':
       return rooms.clear({ id: args.id })
     case 'team.state':
       return {
         projects: teamStore().listProjects(),
         agents: store.state().vaults.map(item => ({ id: item.id, name: item.name })),
+        rooms: rooms.list(),
       }
     case 'team.project':
       return teamStore().project(args.id)
+    case 'team.project.archive':
+      return teamStore().archiveProject({ project: args.id, by: 'user' })
     case 'team.create':
       return teamStore().createProject({ name: args.name, lead: args.lead, members: args.members, capacity: args.capacity, roomId: args.roomId })
     case 'team.member.add':
@@ -1717,7 +1737,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
   }
 }
 
-function registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch) {
+function registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch, roomDispatch) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
@@ -1750,7 +1770,7 @@ function registerApi(ctx, store, rooms, journals, archives, recall, reveal, slee
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch)
+          const value = await handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch, roomDispatch)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })

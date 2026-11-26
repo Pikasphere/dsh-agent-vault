@@ -111,6 +111,10 @@ export function createTeam(options = {}) {
   const projectsDir = path.join(root, 'projects')
   const knownAgents = typeof options.agents === 'function' ? options.agents : () => []
   const staleMs = Number.isFinite(options.staleMs) && options.staleMs > 0 ? options.staleMs : 30 * 60 * 1000
+  // How an attempt left `running` by a stopped host comes back: `fail` asks a
+  // person to reassign it; `resume` requeues the same attempt and the wake
+  // message carries a recovery note.
+  const stalePolicy = options.stalePolicy === 'resume' ? 'resume' : 'fail'
 
   /** One promise chain per project: every mutation reads, changes and writes under the same lock. */
   const locks = new Map()
@@ -232,6 +236,32 @@ export function createTeam(options = {}) {
     return id
   }
 
+  function requireActive(project) {
+    if (project.status === 'archived') throw new MemoryError('project-archived', `project ${project.id} is archived; create a new one`)
+    return project
+  }
+
+  /** The active project an agent already belongs to, if any. One agent, one team. */
+  function projectOfAgent(agentId, exceptId = '') {
+    for (const summary of listProjects()) {
+      if (summary.id === exceptId || summary.status !== 'active') continue
+      const project = readProject(summary.id)
+      if (project.lead === agentId || project.members.includes(agentId)) return project
+    }
+    return undefined
+  }
+
+  function requireSoloAgent(agentId, exceptId = '') {
+    const other = projectOfAgent(agentId, exceptId)
+    if (other !== undefined) {
+      throw new MemoryError(
+        'agent-busy-team',
+        `${agentId} already belongs to project "${other.name}" (${other.id}); an agent may join one active team at a time`,
+      )
+    }
+    return agentId
+  }
+
   // ── projects ───────────────────────────────────────────────────────────────
 
   function createProject(input = {}) {
@@ -245,6 +275,8 @@ export function createTeam(options = {}) {
       members.push(member)
     }
     if (members.length > LIMITS.members) throw new MemoryError('bad-members', `at most ${LIMITS.members} members`)
+    requireSoloAgent(lead)
+    for (const member of members) requireSoloAgent(member)
     const roomId = typeof input.roomId === 'string' ? input.roomId.trim().slice(0, 40) : ''
     const now = soon()
     let id = newId('p')
@@ -286,6 +318,7 @@ export function createTeam(options = {}) {
           lead: project.lead,
           members: project.members,
           capacity: project.capacity,
+          roomId: typeof project.roomId === 'string' ? project.roomId : '',
           status: project.status,
           createdAt: project.createdAt,
           updatedAt: project.updatedAt,
@@ -309,10 +342,12 @@ export function createTeam(options = {}) {
     return withLock(id, () => {
       const project = readProject(id)
       requireEditor(project, input.by)
+      requireActive(project)
       const member = requireKnownAgent(input.member, 'no-member')
       if (member === project.lead) throw new MemoryError('bad-member', 'the lead is not a member')
       if (project.members.includes(member)) throw new MemoryError('bad-member', `${member} is already a member`)
       if (project.members.length >= LIMITS.members) throw new MemoryError('bad-members', `at most ${LIMITS.members} members`)
+      requireSoloAgent(member, id)
       project.members.push(member)
       saveProject(project)
       event(id, 'member.added', { member })
@@ -338,10 +373,29 @@ export function createTeam(options = {}) {
     })
   }
 
+  /**
+   * Park a project: it keeps its history but frees every member, including the
+   * lead, to join another active team. Archived projects are never reopened;
+   * create a new one instead.
+   */
+  function archiveProject(input = {}) {
+    const id = projectIdOf(input.project)
+    return withLock(id, () => {
+      const project = readProject(id)
+      requireEditor(project, input.by)
+      if (project.status === 'archived') return project
+      project.status = 'archived'
+      saveProject(project)
+      event(id, 'project.archived', { by: input.by })
+      return project
+    })
+  }
+
   // ── tasks ──────────────────────────────────────────────────────────────────
 
   function createTask(input = {}) {
     const project = readProject(projectIdOf(input.project))
+    requireActive(project)
     const title = textOf(input.title, LIMITS.title, 'bad-task')
     const brief = textOf(input.brief, LIMITS.brief, 'bad-task')
     const acceptance = collapse(input.acceptance).slice(0, LIMITS.acceptance)
@@ -386,6 +440,7 @@ export function createTeam(options = {}) {
     return withLock(id, () => {
       const project = readProject(id)
       requireEditor(project, input.by)
+      requireActive(project)
       const member = requireMember(project, requireKnownAgent(input.member, 'no-member'))
       const doc = readTasks(id)
       const task = findTask(doc, taskIdOf(input.task))
@@ -558,6 +613,7 @@ export function createTeam(options = {}) {
           attempt: attempt.id,
           member: task.assignee,
           lead: project.lead,
+          recovered: attempt.recovered === true,
         })
       }
     }
@@ -609,8 +665,11 @@ export function createTeam(options = {}) {
   }
 
   /**
-   * Mark attempts left `running` by a stopped host as failed, so a stale lock
-   * never looks like work in progress. Called once when the plugin starts.
+   * Attempts left `running` by a stopped host. `fail` (default) records a failed
+   * report and asks a person to reassign; `resume` puts the same attempt back
+   * in the queue with `recovered`, and its wake message carries a recovery note
+   * telling the worker to inspect what it already did before repeating it.
+   * Called once when the plugin starts.
    */
   function recoverStale(now = Date.now()) {
     let recovered = 0
@@ -623,18 +682,28 @@ export function createTeam(options = {}) {
           if (attempt.state !== 'running') continue
           const started = Date.parse(attempt.startedAt || attempt.createdAt || '')
           if (!Number.isFinite(started) || now - started < staleMs) continue
-          attempt.state = 'failed'
-          attempt.endedAt = soon()
-          attempt.report = {
-            state: 'failed',
-            summary: 'Recovered after the host stopped mid-attempt; assign this task again to continue.',
-            at: soon(),
+          if (stalePolicy === 'resume') {
+            attempt.state = 'queued'
+            attempt.startedAt = ''
+            attempt.endedAt = ''
+            attempt.recovered = true
+            if (attempt.report !== undefined) delete attempt.report
+            task.status = 'assigned'
+            task.updatedAt = soon()
+          } else {
+            attempt.state = 'failed'
+            attempt.endedAt = soon()
+            attempt.report = {
+              state: 'failed',
+              summary: 'Recovered after the host stopped mid-attempt; assign this task again to continue.',
+              at: soon(),
+            }
+            task.status = 'failed'
+            task.updatedAt = soon()
           }
-          task.status = 'failed'
-          task.updatedAt = soon()
           changed = true
           recovered += 1
-          event(row.id, 'attempt.stale', { task: task.id, attempt: attempt.id })
+          event(row.id, stalePolicy === 'resume' ? 'attempt.recovered' : 'attempt.stale', { task: task.id, attempt: attempt.id })
         }
       }
       if (changed) saveTasks(row.id, doc)
@@ -653,6 +722,7 @@ export function createTeam(options = {}) {
     project,
     addMember,
     removeMember,
+    archiveProject,
     createTask,
     assignTask,
     claimTask,

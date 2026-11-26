@@ -117,7 +117,7 @@ window.__ModuleLoader__.load({
         roomNamePlaceholder: '例如：架构评审',
         roomMembers: '成员（点击加入 / 移出）',
         roomEmpty: '还没有发言。',
-        roomPlaceholder: '以你的身份说一句…（Enter 发送，Shift+Enter 换行）',
+        roomPlaceholder: '以你的身份说一句…（@成员 自动派发到它的对话；Enter 发送，Shift+Enter 换行）',
         deleteRoom: '删除讨论室',
         send: '发送',
         membersUnit: '人',
@@ -161,6 +161,14 @@ window.__ModuleLoader__.load({
         teamStatusFailed: '失败',
         teamStatusDone: '完成',
         teamStatusCancelled: '已取消',
+        teamRoom: '讨论室',
+        teamRoomNone: '不绑定',
+        teamArchive: '归档',
+        teamArchiveConfirm: '归档项目 “{name}”？归档后它的成员可以加入其他团队。',
+        teamArchived: '已归档',
+        roomTeam: '团队',
+        roomDispatched: '已派发',
+        roomDispatchFailed: '未送达',
         sessionsTab: '对话',
         sessionsHint: '这里按智能体收拢它的对话。已绑定的对话会从左侧工作区列表里隐藏，只能从这里或搜索找到；选择工作区会立即切过去。',
         sessionsAgent: '当前智能体',
@@ -411,7 +419,7 @@ window.__ModuleLoader__.load({
         roomNamePlaceholder: 'e.g. Architecture review',
         roomMembers: 'Members (click to add / remove)',
         roomEmpty: 'No messages yet.',
-        roomPlaceholder: 'Say something as yourself… (Enter sends, Shift+Enter adds a line)',
+        roomPlaceholder: 'Say something as yourself… (@member dispatches it to that agent’s conversation; Enter sends, Shift+Enter adds a line)',
         deleteRoom: 'Delete room',
         send: 'Send',
         membersUnit: 'members',
@@ -455,6 +463,14 @@ window.__ModuleLoader__.load({
         teamStatusFailed: 'failed',
         teamStatusDone: 'done',
         teamStatusCancelled: 'cancelled',
+        teamRoom: 'Room',
+        teamRoomNone: 'No room',
+        teamArchive: 'Archive',
+        teamArchiveConfirm: 'Archive project "{name}"? Its members become free to join another team.',
+        teamArchived: 'archived',
+        roomTeam: 'Team',
+        roomDispatched: 'dispatched',
+        roomDispatchFailed: 'not delivered',
         sessionsTab: 'Sessions',
         sessionsHint: 'Each agent keeps its own conversations here. Bound conversations are hidden from the workspace list on the left; find them here or through search. Picking a workspace switches to it right away.',
         sessionsAgent: 'Agent',
@@ -937,6 +953,8 @@ window.__ModuleLoader__.load({
       const [roomName, setRoomName] = useState('')
       const [roomCreating, setRoomCreating] = useState(false)
       const [roomVersion, setRoomVersion] = useState(0)
+      // Projects that bind a discussion room, so the room page can name its team.
+      const [roomTeams, setRoomTeams] = useState([])
       const [journal, setJournal] = useState([])
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
@@ -1130,6 +1148,18 @@ window.__ModuleLoader__.load({
           .catch(error => {
             if (live) setFailure(String(error?.message ?? error))
           })
+        // A room may be its team's task surface; name that team in the header.
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'team.state', args: {} }),
+        })
+          .then(payload => {
+            if (!live) return
+            const projects = payload.value?.projects ?? []
+            setRoomTeams(projects.filter(item => typeof item.roomId === 'string' && item.roomId !== ''))
+          })
+          .catch(() => {})
         return () => {
           live = false
         }
@@ -2838,7 +2868,7 @@ window.__ModuleLoader__.load({
                   ),
             )
       } else if (tab === 'team') {
-        body = h(TeamPage, { t, call, busy, locale })
+        body = h(TeamPage, { t, call, busy, locale, askConfirm })
       } else {
         body = h(
           'div',
@@ -3107,6 +3137,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'am-body' }, body),
       )
 
+      const boundTeam =
+        roomData === null
+          ? null
+          : roomTeams.find(item => item.roomId === roomData.room.id && item.status === 'active') ?? null
+      const agentNameOf = id => (data?.vaults ?? []).find(item => item.id === id)?.name ?? id
       const roomMain =
         view !== 'rooms' || roomData === null
           ? null
@@ -3123,7 +3158,8 @@ window.__ModuleLoader__.load({
                   h(
                     'p',
                     { className: 'am-head-sub' },
-                    `${roomData.room.members.length} ${t('membersUnit')} · ${roomData.total} ${t('messagesUnit')}`,
+                    `${roomData.room.members.length} ${t('membersUnit')} · ${roomData.total} ${t('messagesUnit')}` +
+                      (boundTeam === null ? '' : ` · ${t('roomTeam')}：${boundTeam.name}`),
                   ),
                 ),
                 h(
@@ -3164,6 +3200,12 @@ window.__ModuleLoader__.load({
                           h('span', { className: 'am-note-dim' }, ago(message.at, locale)),
                         ),
                         h('div', { className: 'am-msg-text' }, message.text),
+                        Array.isArray(message.dispatched) && message.dispatched.length > 0
+                          ? h('div', { className: 'am-note-dim' }, `${t('roomDispatched')} → ${message.dispatched.map(agentNameOf).join('、')}`)
+                          : null,
+                        Array.isArray(message.dispatchFailed) && message.dispatchFailed.length > 0
+                          ? h('div', { className: 'am-note-dim' }, `${t('roomDispatchFailed')} ← ${message.dispatchFailed.map(agentNameOf).join('、')}`)
+                          : null,
                       ),
                     ),
               ),
@@ -3230,12 +3272,12 @@ window.__ModuleLoader__.load({
     // straight onto that conversation instead of a global switch.
     // ── team page: projects, tasks, reports ─────────────────────────────────
     function TeamPage(props) {
-      const { t, call, busy, locale } = props
+      const { t, call, busy, locale, askConfirm } = props
       const [state, setState] = useState(null)
       const [selected, setSelected] = useState('')
       const [project, setProject] = useState(null)
       const [creating, setCreating] = useState(false)
-      const [draft, setDraft] = useState({ name: '', lead: '', members: [], capacity: 3 })
+      const [draft, setDraft] = useState({ name: '', lead: '', members: [], capacity: 3, roomId: '' })
       const [taskOpen, setTaskOpen] = useState(false)
       const [taskDraft, setTaskDraft] = useState({ title: '', brief: '', acceptance: '', assignee: '' })
       const [openTask, setOpenTask] = useState('')
@@ -3265,6 +3307,7 @@ window.__ModuleLoader__.load({
 
       const agents = state?.agents ?? []
       const nameOf = id => agents.find(item => item.id === id)?.name ?? id
+      const roomNameOf = id => (state?.rooms ?? []).find(room => room.id === id)?.name ?? id
       const statusLabel = {
         open: t('teamStatusOpen'),
         assigned: t('teamStatusAssigned'),
@@ -3298,10 +3341,16 @@ window.__ModuleLoader__.load({
         }))
 
       const createProject = async () => {
-        const created = await call('team.create', { name: draft.name, lead: draft.lead, members: draft.members, capacity: draft.capacity })
+        const created = await call('team.create', {
+          name: draft.name,
+          lead: draft.lead,
+          members: draft.members,
+          capacity: draft.capacity,
+          ...(draft.roomId === '' ? {} : { roomId: draft.roomId }),
+        })
         if (!created) return
         setCreating(false)
-        setDraft({ name: '', lead: '', members: [], capacity: 3 })
+        setDraft({ name: '', lead: '', members: [], capacity: 3, roomId: '' })
         await reload()
         setSelected(created.id)
       }
@@ -3339,6 +3388,13 @@ window.__ModuleLoader__.load({
         await loadProject(selected)
         await reload()
       }
+      const archiveProject = async () => {
+        if (project === null) return
+        const ok = typeof askConfirm === 'function' ? await askConfirm(t('teamArchiveConfirm').replace('{name}', project.name)) : true
+        if (!ok) return
+        await call('team.project.archive', { id: project.id })
+        await reload()
+      }
 
       const projectForm = h(
         'div',
@@ -3358,6 +3414,15 @@ window.__ModuleLoader__.load({
           h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => setCreating(false) }, t('teamCancel')),
           h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '' || draft.name.trim() === '' || draft.lead === '', onClick: () => void createProject() }, t('teamCreate')),
         ),
+        h('span', { className: 'am-label' }, t('teamRoom')),
+        h(
+          'div',
+          { className: 'am-row' },
+          chip('room-none', t('teamRoomNone'), draft.roomId === '', () => setDraft(current => ({ ...current, roomId: '' }))),
+          (state?.rooms ?? []).map(room =>
+            chip(`room-${room.id}`, room.name, draft.roomId === room.id, () => setDraft(current => ({ ...current, roomId: room.id }))),
+          ),
+        ),
       )
 
       const projectView = project === null
@@ -3370,8 +3435,15 @@ window.__ModuleLoader__.load({
               { className: 'am-row' },
               h('h2', { className: 'am-head-name', style: { margin: 0 } }, project.name),
               h('span', { className: 'am-tag' }, `${t('teamCapacity')} ${project.capacity}`),
+              project.roomId === '' ? null : h('span', { className: 'am-tag' }, `${t('teamRoom')} · ${roomNameOf(project.roomId)}`),
+              project.status === 'archived' ? h('span', { className: 'am-tag' }, t('teamArchived')) : null,
               h('span', { style: { flex: 1 } }),
-              h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => setTaskOpen(value => !value) }, t('teamNewTask')),
+              h(
+                'button',
+                { className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '' || project.status === 'archived', onClick: () => void archiveProject() },
+                t('teamArchive'),
+              ),
+              h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '' || project.status === 'archived', onClick: () => setTaskOpen(value => !value) }, t('teamNewTask')),
             ),
             h('p', { className: 'am-note' }, `${t('teamLead')}: ${nameOf(project.lead)}`),
             h('span', { className: 'am-label' }, t('teamMembers')),
@@ -3383,12 +3455,12 @@ window.__ModuleLoader__.load({
                   'span',
                   { key: member, className: 'am-tag' },
                   nameOf(member),
-                  h('button', { className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '', onClick: () => void removeMember(member) }, '×'),
+                  h('button', { className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '' || project.status === 'archived', onClick: () => void removeMember(member) }, '×'),
                 ),
               ),
               agents
                 .filter(agent => agent.id !== project.lead && !project.members.includes(agent.id))
-                .map(agent => h('button', { key: `add-${agent.id}`, className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '', onClick: () => void addMember(agent.id) }, `+ ${agent.name}`)),
+                .map(agent => h('button', { key: `add-${agent.id}`, className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '' || project.status === 'archived', onClick: () => void addMember(agent.id) }, `+ ${agent.name}`)),
             ),
             taskOpen
               ? h(
@@ -3459,7 +3531,7 @@ window.__ModuleLoader__.load({
                                 'div',
                                 { className: 'am-row' },
                                 h('span', { className: 'am-label' }, t('teamAssign')),
-                                project.members.map(member => chip(`task-assign-${task.id}-${member}`, nameOf(member), task.assignee === member, () => void assignTask(task.id, member))),
+                                project.status === 'archived' ? null : project.members.map(member => chip(`task-assign-${task.id}-${member}`, nameOf(member), task.assignee === member, () => void assignTask(task.id, member))),
                                 h('span', { style: { flex: 1 } }),
                                 h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '' || ['done', 'cancelled'].includes(task.status), onClick: () => void closeTask(task.id, 'done') }, t('teamDone')),
                                 h('button', { className: 'am-btn am-btn-sm am-btn-danger', disabled: busy !== '' || ['done', 'cancelled'].includes(task.status), onClick: () => void closeTask(task.id, 'cancelled') }, t('teamCancelTask')),

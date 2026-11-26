@@ -17,6 +17,19 @@ const SOURCE = { kind: 'dsh-agent-vault', form: 'relay' }
 const RETRY_MS = 2000
 const SKIP_MS = 60_000
 const MAX_BACKOFF_MS = 60_000
+/** A single wake or relay must not hold the queue forever: a hanging host
+ *  service keeps `running` set, and every later kick only flips `again`. */
+const STEP_TIMEOUT_MS = 30_000
+
+/** Reject `promise` after `ms`, so one stuck step cannot stall the drain loop. */
+export function withTimeout(promise, ms, what) {
+  let timer
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} did not finish within ${ms} ms`)), ms)
+    if (typeof timer.unref === 'function') timer.unref()
+  })
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer))
+}
 
 function deepFreeze(value) {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -46,6 +59,14 @@ function dispatchText(row) {
     'Use state=ready when done, waiting when you need input, blocked/failed when you cannot finish, dropped when the task should not be done. ' +
     'Keep the summary short and name the files you produced.',
   ].join('\n')
+}
+
+/** Prefix for an attempt the host stopped in the middle of and requeued. */
+const RECOVERY_NOTE = '[Recovery] The host stopped mid-attempt. Before you continue, inspect what you already did ' +
+  '(files, git history, outside effects) and do not repeat it; then finish the task under the same mandate.'
+
+function wakeText(row) {
+  return row.recovered === true ? `${RECOVERY_NOTE}\n\n${dispatchText(row)}` : dispatchText(row)
 }
 
 function relayText(row) {
@@ -187,11 +208,30 @@ export function createTeamDispatch(options = {}) {
     if (typeof target.agent.followup !== 'function') return { skipped: 'the host has no agent inbox API' }
     const id = `vault-team:dispatch:${row.attempt}`
     if (!inboxHolds(target.agent, id) && !(await historyHolds(target.sessionId, id))) {
-      target.agent.followup(message(id, dispatchText(row)))
+      target.agent.followup(message(id, wakeText(row)))
       await flush()
     }
     await team.claimTask({ project: row.project, task: row.task, agent: row.member, sessionId: target.sessionId })
     return { delivered: true }
+  }
+
+  /**
+   * Deliver one message to an agent's bound session, creating and binding a
+   * session when the agent has none. The deterministic id makes a repeated
+   * delivery a no-op. Used by the discussion-room mention dispatch.
+   */
+  async function deliver(agentId, delivery) {
+    const target = await ensureSession(agentId)
+    if (!target) return { skipped: `no session for ${agentId}` }
+    if (typeof target.agent.followup !== 'function') return { skipped: 'the host has no agent inbox API' }
+    const id = String(delivery?.id ?? '')
+    const text = String(delivery?.text ?? '')
+    if (id === '' || text === '') return { skipped: 'delivery needs an id and text' }
+    if (!inboxHolds(target.agent, id) && !(await historyHolds(target.sessionId, id))) {
+      target.agent.followup(message(id, text))
+      await flush()
+    }
+    return { delivered: true, sessionId: target.sessionId }
   }
 
   async function relay(row) {
@@ -230,6 +270,12 @@ export function createTeamDispatch(options = {}) {
       return running
     }
     running = (async () => {
+      // Yield once before doing any work: a drain with nothing pending would
+      // otherwise run to completion synchronously, its `finally` would clear
+      // `running`, and the assignment below would then publish an already
+      // resolved promise — every later kick would see "already running" and
+      // silently drop the queue.
+      await Promise.resolve()
       try {
         for (let round = 0; round < 100; round += 1) {
           const dispatches = team.pendingDispatches()
@@ -241,7 +287,7 @@ export function createTeamDispatch(options = {}) {
             const key = `d:${row.attempt}`
             if ((retryAt.get(key) ?? 0) > now) continue
             try {
-              const result = await wake(row)
+              const result = await withTimeout(wake(row), STEP_TIMEOUT_MS, 'dispatch wake')
               if (result?.delivered) {
                 retryAt.delete(key)
                 failures.delete(key)
@@ -259,7 +305,7 @@ export function createTeamDispatch(options = {}) {
             const key = `r:${row.attempt}:${row.report?.at ?? ''}`
             if ((retryAt.get(key) ?? 0) > now) continue
             try {
-              const result = await relay(row)
+              const result = await withTimeout(relay(row), STEP_TIMEOUT_MS, 'report relay')
               if (result?.delivered) {
                 retryAt.delete(key)
                 failures.delete(key)
@@ -305,5 +351,5 @@ export function createTeamDispatch(options = {}) {
     schedule(1000)
   }
 
-  return { start, kick, drain, pending }
+  return { start, kick, drain, pending, deliver }
 }

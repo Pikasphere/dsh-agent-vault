@@ -1,7 +1,7 @@
 # 智能体团队与任务分配（设计稿）
 
-> 状态：**P0、P1 已实现**（2026-11-26，分支 `feat/agent-teams`）；P2–P3 未实现。日期 2026-11-25。
-> 本文只描述设计与验收口径，落地按 §12 分期；实现见 `team/store.js`、`team/dispatch.js` 与 `index.js` 的 `registerTeamTools`。背景研读见 `~/文档/deepseek-harness/default-workspace/superagent-原型研读.md` 与 `superagent-插件工程研读.md`。
+> 状态：**P0–P2 已实现；P3 部分实现**（2026-11-26，分支 `feat/agent-teams`）。已落地：项目/任务/分配/汇报、自动唤醒与 relay、HTTP ops 与面板团队页、讨论室 @ 派发、一人一队、项目归档、`stalePolicy: resume` 恢复注记。未落地：项目作用域知识、容量上限、强沙箱。日期 2026-11-25，更新 2026-11-26。
+> 本文只描述设计与验收口径，落地按 §12 分期；实现见 `team/store.js`、`team/dispatch.js`、`team/room-dispatch.js` 与 `index.js` 的 `registerTeamTools`。背景研读见 `~/文档/deepseek-harness/default-workspace/superagent-原型研读.md` 与 `superagent-插件工程研读.md`。
 >
 > 一句话：团队的单位是**智能体**；项目只是把已有智能体编成「1 负责人 + N 成员」；任务由负责人分配、成员执行并汇报；子智能体直接使用 DSH 官方 `subagent`，vault 不接管。
 
@@ -57,7 +57,7 @@
 ### 3.1 单位与角色
 
 - 团队成员 = **智能体**（`agents.json` 的 id），不是会话、不是子代理。
-- `lead` 是项目内的角色字段，不是新实体：同一个智能体可以在 A 项目当负责人、在 B 项目当成员。
+- `lead` 是项目内的角色字段，不是新实体；但**一个智能体同一时间只能属于一个 active 项目**（负责人或成员都算）。原因是绑定模型：一个智能体只有一个当前活动会话（`bindings.json` 最后一条），两个项目会把它唤醒进同一段对话、互相窜上下文。加成员/建项目时校验，冲突返回 `agent-busy-team`；移出成员或归档项目即释放。
 - 会话只是执行位置：一个成员可以有多段历史会话，当前活动会话由 `bindings.json` 决定；「工作结束不销毁」指的是智能体身份与任务历史保留，会话可以归档（§10）。
 
 ### 3.2 实体
@@ -70,9 +70,9 @@
 | `name` | string | 项目名，≤ 80 字 |
 | `lead` | agentId | 负责人，必须是已注册智能体 |
 | `members` | agentId[] | 成员，不含 lead；可含 lead 以外的任意已注册智能体 |
-| `roomId` | string? | 可选，绑定讨论室 |
+| `roomId` | string? | 可选，绑定讨论室；房间即该团队的任务入口（§7） |
 | `capacity` | number | 同时运行的 attempt 上限，默认 3 |
-| `status` | `active` / `archived` | 项目归档只影响面板，不影响历史 |
+| `status` | `active` / `archived` | 归档保留历史、释放全部成员（含 lead），并冻结新任务/新成员；不可逆 |
 | `createdAt` / `updatedAt` | ISO string | |
 
 **Task**
@@ -163,8 +163,10 @@ Attempt: queued ──dispatch/claim──> running ──report──> waiting/
 
 启动时（`apply` 内）扫描所有 `project.json` 的 `tasks.json`：
 
-- attempt 处于 `running` 且 `events.jsonl` 最后一条超过 `staleMs`（默认 30 分钟）→ 标 `failed`，事件 `attempt.stale`，面板可见；
-- 或按配置续跑：重新 dispatch 同一 attempt（幂等键不变，不会重复投递）。
+- attempt 处于 `running` 且 `startedAt` 超过 `staleMs`（默认 30 分钟）→ 按 `stalePolicy` 处理（`createTeam` 选项，默认 `fail`）：
+  - `fail`：attempt 标 `failed`，写一条 report（"assign this task again to continue"），事件 `attempt.stale`，面板可见；
+  - `resume`：同一 attempt 回到 `queued` 并标记 `recovered`，事件 `attempt.recovered`；dispatch 的唤醒消息前置 `[Recovery]` 注记，要求成员先检查自己已经做过的工作（文件、git、外部副作用）再继续，幂等键不变，不会重复投递。
+- `resume` 适合宿主重启/API 抖动后接着干；保守场景用 `fail`，把决定权交给人。配置位置：插件 Config 的 `stalePolicy: resume`。
 
 不启动后台轮询；恢复是一次性扫描，其余靠事件驱动。
 
@@ -266,7 +268,13 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 - **不自动写记忆**：任务完成不触发任何自动写入；成员自己决定 `agent_memory_save`（交接）与 `agent_knowledge_write`（详细经验），沿用 2.x 的哲学：记忆由用户决定读入，知识由模型决定查写。
 - **项目作用域**：知识条目增加可选 `project` 标签（写入时传、检索时过滤）；不传 = 全局。默认行为不变，只有显式传 `project` 才收窄。
 - **任务与知识关联**：task 可记录 `knowledge` entryId[]（可选，由 lead 或成员在 report 里附带）；面板可跳转。
-- **讨论室**：项目可绑定 `roomId`；创建项目时可邀请成员入房；房间成员管理仍归用户，vault 不自动发消息进房间。
+- **讨论室 = 团队任务入口**：项目可绑定 `roomId`（`team.state` 返回房间列表，面板建项目时可选）。房间里一条**人的**消息用 `@成员` 直接派发：
+  - **解析**：只认房间成员，按智能体 id 或注册显示名匹配，最长匹配优先；非成员、未知 @ 不唤醒（留在正文里）。
+  - **派发**：复用 dispatch 的会话绑定与 `agent.followup`；成员没有会话就 `sessionController.create` 并 `setBinding`，即"在该智能体名下创建对话"。消息体含房间名、最近 10 条 transcript 与本条正文，并要求成员用 `agent_room say` 回投、团队任务用 `team_task_report` 汇报。
+  - **幂等**：消息 id 固定为 `vault-room:<room>:<message>:<agent>`，重复投递只进一次；结果写回房间消息（`dispatched` / `dispatchFailed`）。
+  - **防连环**：只有人的消息触发派发；智能体在房间里互相 @ 不会唤醒彼此。
+  - **面板**：房间消息下显示"已派发 → 成员"，房间页头显示所属团队；团队页显示绑定的房间、成员与任务。
+- 房间成员管理仍归用户；vault 不自动把成员加入房间。
 - **journal**：不动，保持私有。
 - **记忆注入**：不变。团队层不向 `systemPrompt` 注入任何东西；任务 brief 只作为 user message 进成员会话。
 
@@ -298,7 +306,7 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 
 ### 9.2 HTTP 与面板
 
-- HTTP：`/api/agent-memory` 下新增 `team.state`、`team.project`、`team.task`、`team.ops`（与现有 op 模式一致，`index.js:1332`）。
+- HTTP：`/api/agent-memory` 下新增 `team.state`（projects + agents + rooms）、`team.project`、`team.project.archive`、`team.task.create`、`team.task.assign`、`team.task.close`、`team.member.add` / `team.member.remove`、`room.say`（解析 @ 并派发）。
 - 面板新增「团队」页签：项目列表、成员、任务板（按状态分列）、报告时间线、手动 assign/close/取消；沿用 `client.js` 现有表格与抽屉组件。
 
 ### 9.3 返回形状
@@ -309,6 +317,7 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 
 - 同项目串行（mutex），跨项目并行。
 - 插件重启：一次性扫描 running attempt（§4.3）；lead 会话不存在时按绑定重建；`dispatch`/`relay` 队列中的 key 幂等，重放安全。
+- 队列不卡死：单个唤醒/relay 包裹 30 秒超时，超时记一次失败并退避，不会无限占住排水循环；排水循环开始前让出一个微任务，避免「空队列跑完后 kick 被当成已在运行」把后续任务静默丢弃（2026-11-26 实测修复）。
 - 会话归档：沿用 vault 的 archive 语义；「不销毁」= 智能体身份、任务历史、知识保留；会话可以归档以控制上下文。
 - 上下文成本：attempt 结束可建议归档该会话；长项目用 checkpoint（借用 `sleep.js` 的折叠思路，但不自动注入，只在面板/工具里可查）。
 
@@ -325,8 +334,8 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 |---|---|---|
 | P0 | 领域模型 + 文件存储 + 工具（project/task/assign/report/list/close），无唤醒 | **已完成（2026-11-26）**：`team/store.js`、`registerTeamTools`、`test-team.mjs` 全绿；文件落盘正确、重启可读、非法操作返回固定 code |
 | P1 | 唤醒 + relay（依赖 DSH inbox API）+ 降级 claim 路径 | **已完成（2026-11-26）**：`team/dispatch.js` 用 `agent.followup` 唤醒成员、把非 progress 的 report relay 给 lead；确定性消息 id + inbox/历史检查防重投；宿主不支持 inbox 时停在 queued，claim 路径保留 |
-| P2 | HTTP ops + 面板「团队」页签 | 面板可建项目、派任务、看报告；与工具操作一致 |
-| P3 | 项目作用域知识、房间绑定、恢复与容量、归档建议 | 项目过滤检索正确；重启恢复正确；容量不超卖 |
+| P2 | HTTP ops + 面板「团队」页签 | **已完成（2026-11-26）**：面板可建项目、派任务、看报告；项目可绑定讨论室，房间页显示所属团队 |
+| P3 | 项目作用域知识、房间绑定、恢复与容量、归档 | **部分完成（2026-11-26）**：讨论室 @ 派发（`team/room-dispatch.js`）、一人一队校验（`agent-busy-team`）、项目归档（`team.project.archive`）、`stalePolicy: resume` 恢复注记已落地并有测试；项目作用域知识与容量上限仍未实现 |
 
 每期结束跑 `npm test`（现有 node 测试风格），并补 `test-team.mjs`。
 
@@ -339,4 +348,4 @@ P0/P1 的落地差异：分配后由 `team/dispatch.js` 自动唤醒成员（找
 3. **唤醒 API 的权限**：vault 所在进程能否对任意智能体 `followup`？需要一次实机验证（用一个测试会话）。
 4. **成员被用户直接使用**：用户在一个普通对话里用某成员时，它的 team 任务状态如何与对话隔离？建议按会话绑定区分，任务状态全局。
 5. **多成员同 repo 并发写**：靠 task 的 scope 约定（不同目录/文件域），还是给每个 attempt 分配工作区？P0 先靠约定。
-6. **项目删除/成员移除**：历史任务保留还是随项目归档？建议保留，项目 `archived`。
+6. **项目删除/成员移除**：历史任务保留还是随项目归档？已定：保留。`team.project.archive` 只置 `status=archived`，不删文件；归档释放全部成员并冻结新任务/新成员，不可逆（需要重开就新建项目）。

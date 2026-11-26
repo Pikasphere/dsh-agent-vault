@@ -588,6 +588,11 @@ assert.equal(teamState.payload.ok, true)
 assert.equal(teamState.payload.value.projects.some(row => row.id === teamProjectId), true)
 assert.equal(teamState.payload.value.agents.some(row => row.id === teamLead), true)
 
+// one agent, one active team: archive the first project so its agents are free
+const archivedTeam = await call('POST', '/op', { op: 'team.project.archive', args: { id: teamProjectId } })
+assert.equal(archivedTeam.payload.ok, true)
+assert.equal(archivedTeam.payload.value.status, 'archived')
+
 const httpProject = (await call('POST', '/op', { op: 'team.create', args: { name: '面板建的团队', lead: teamLead, members: [teamMember] } })).payload
 assert.equal(httpProject.ok, true)
 assert.equal(httpProject.value.lead, teamLead)

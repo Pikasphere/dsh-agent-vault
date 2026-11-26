@@ -123,5 +123,40 @@ const noInboxDispatch = createTeamDispatch({ ctx: ctxFor(makeHost(false)), store
 await noInboxDispatch.drain()
 assert.equal(noInboxTeam.pendingDispatches().length, 1)
 
+// ── an empty drain must not wedge the queue ─────────────────────────────────
+// A drain with nothing pending used to run to completion synchronously and then
+// publish `running` as an already-resolved promise; every later kick then saw
+// "already running" and silently dropped the queue.
+const idleRoot = path.join(scratch, 'idle')
+const idleTeam = createTeam({ rootDir: idleRoot, agents: () => agents })
+const idleProject = idleTeam.createProject({ name: '空转', lead: 'alpha', members: ['beta'] })
+const idleDispatch = createTeamDispatch({ ctx: ctxFor(makeHost(true)), store: fakeStore, team: idleTeam, log: () => {} })
+await idleDispatch.drain()
+await idleTeam.createTask({ project: idleProject.id, title: '空转后唤醒', brief: 'x', assignee: 'beta', createdBy: 'alpha' })
+await idleDispatch.drain()
+assert.equal(idleTeam.project(idleProject.id).tasks[0].status, 'running', 'the queue still works after an empty drain')
+
+// ── a resumed stale attempt carries the recovery note ───────────────────────
+const recoverRoot = path.join(scratch, 'recover')
+const recoverTeam = createTeam({ rootDir: recoverRoot, agents: () => agents, stalePolicy: 'resume', staleMs: 60000 })
+const recoverProject = recoverTeam.createProject({ name: '恢复', lead: 'alpha', members: ['beta'] })
+const recoverTask = await recoverTeam.createTask({ project: recoverProject.id, title: '中断', brief: '中途停了', assignee: 'beta', createdBy: 'alpha' })
+await recoverTeam.claimTask({ project: recoverProject.id, task: recoverTask.id, agent: 'beta' })
+const recoverTasks = path.join(recoverRoot, 'projects', recoverProject.id, 'tasks.json')
+const recoverDoc = JSON.parse(fs.readFileSync(recoverTasks, 'utf8'))
+recoverDoc.tasks[0].attempts[0].startedAt = '2020-01-01T00:00:00.000Z'
+fs.writeFileSync(recoverTasks, JSON.stringify(recoverDoc, null, 2), 'utf8')
+
+const reopened = createTeam({ rootDir: recoverRoot, agents: () => agents, stalePolicy: 'resume', staleMs: 60000 })
+const beforeRecovery = delivered.length
+const recoverDispatch = createTeamDispatch({ ctx: ctxFor(makeHost(true)), store: fakeStore, team: reopened, log: () => {} })
+await recoverDispatch.drain()
+const recovery = delivered.slice(beforeRecovery).find(item => item.sessionId === 'sess-beta')
+assert.ok(recovery !== undefined, 'the recovered attempt wakes its member')
+assert.match(recovery.text, /\[Recovery\]/)
+assert.match(recovery.text, /inspect what you already did/)
+assert.match(recovery.text, /\[Team task\]/, 'the note precedes the ordinary task text')
+assert.equal(reopened.project(recoverProject.id).tasks[0].attempts[0].state, 'running')
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL TEAM DISPATCH TESTS PASSED')
