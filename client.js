@@ -125,6 +125,42 @@ window.__ModuleLoader__.load({
         journalHint: '私有日志：只属于这个智能体的详细记录（类似日记）。其他智能体看不到，也不会自动注入，它自己决定何时查阅。',
         journalEmpty: '这个智能体还没有写日志。',
         journalReadOnly: '日志是追加式的，已有条目只读；要补充就新建一条。',
+        team: '团队',
+        teamHint: '项目 = 1 负责人 + N 成员，成员都是已注册智能体。分配后自动唤起成员会话，汇报自动回到负责人。',
+        teamNew: '新建项目',
+        teamName: '项目名',
+        teamLead: '负责人',
+        teamMembers: '成员',
+        teamCapacity: '并发上限',
+        teamCreate: '创建',
+        teamCancel: '取消',
+        teamEmpty: '还没有团队项目。',
+        teamTasks: '任务',
+        teamNewTask: '新建任务',
+        teamTitle: '标题',
+        teamBrief: '任务说明',
+        teamAcceptance: '验收标准',
+        teamAssignee: '执行人',
+        teamAssign: '派给',
+        teamDone: '验收完成',
+        teamCancelTask: '取消任务',
+        teamUnassigned: '未分配',
+        teamNoTasks: '这个项目还没有任务。',
+        teamReport: '汇报',
+        teamQuestion: '问题',
+        teamFiles: '文件',
+        teamRemove: '移除',
+        teamAdd: '加入',
+        teamUpdated: '更新',
+        teamStatusOpen: '待派',
+        teamStatusAssigned: '已派',
+        teamStatusRunning: '进行中',
+        teamStatusWaiting: '待输入',
+        teamStatusReview: '待验收',
+        teamStatusBlocked: '受阻',
+        teamStatusFailed: '失败',
+        teamStatusDone: '完成',
+        teamStatusCancelled: '已取消',
         sessionsTab: '对话',
         sessionsHint: '这里按智能体收拢它的对话。已绑定的对话会从左侧工作区列表里隐藏，只能从这里或搜索找到；选择工作区会立即切过去。',
         sessionsAgent: '当前智能体',
@@ -383,6 +419,42 @@ window.__ModuleLoader__.load({
         journalHint: 'Private journal: the detailed diary-like record of this one agent. Other agents cannot see it, nothing is injected automatically, and the agent decides when to consult it.',
         journalEmpty: 'This agent has not written a journal entry yet.',
         journalReadOnly: 'The journal is append-only, so an existing entry is read-only; add a new one instead.',
+        team: 'Teams',
+        teamHint: 'A project is one lead and several members, all registered agents. Assigning a task wakes the member, and reports come back to the lead.',
+        teamNew: 'New project',
+        teamName: 'Project name',
+        teamLead: 'Lead',
+        teamMembers: 'Members',
+        teamCapacity: 'Concurrency',
+        teamCreate: 'Create',
+        teamCancel: 'Cancel',
+        teamEmpty: 'No team projects yet.',
+        teamTasks: 'Tasks',
+        teamNewTask: 'New task',
+        teamTitle: 'Title',
+        teamBrief: 'Brief',
+        teamAcceptance: 'Acceptance',
+        teamAssignee: 'Assignee',
+        teamAssign: 'Assign to',
+        teamDone: 'Accept',
+        teamCancelTask: 'Cancel task',
+        teamUnassigned: 'Unassigned',
+        teamNoTasks: 'No tasks in this project yet.',
+        teamReport: 'Report',
+        teamQuestion: 'Question',
+        teamFiles: 'Files',
+        teamRemove: 'Remove',
+        teamAdd: 'Add',
+        teamUpdated: 'updated',
+        teamStatusOpen: 'open',
+        teamStatusAssigned: 'assigned',
+        teamStatusRunning: 'running',
+        teamStatusWaiting: 'waiting',
+        teamStatusReview: 'review',
+        teamStatusBlocked: 'blocked',
+        teamStatusFailed: 'failed',
+        teamStatusDone: 'done',
+        teamStatusCancelled: 'cancelled',
         sessionsTab: 'Sessions',
         sessionsHint: 'Each agent keeps its own conversations here. Bound conversations are hidden from the workspace list on the left; find them here or through search. Picking a workspace switches to it right away.',
         sessionsAgent: 'Agent',
@@ -2765,6 +2837,8 @@ window.__ModuleLoader__.load({
                     ),
                   ),
             )
+      } else if (tab === 'team') {
+        body = h(TeamPage, { t, call, busy, locale })
       } else {
         body = h(
           'div',
@@ -3008,7 +3082,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'nav',
                 { className: 'am-tabs' },
-                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'settings']
+                ['memory', 'recall', 'sessions', 'knowledge', 'journal', 'team', 'settings']
                   .filter(key => key !== 'sessions' || data?.capabilities?.sessions === true)
                   .map(key =>
                   h(
@@ -3024,7 +3098,7 @@ window.__ModuleLoader__.load({
                         }
                       },
                     },
-                    key === 'sessions' ? t('sessionsTab') : t(key),
+                    key === 'sessions' ? t('sessionsTab') : key === 'team' ? t('team') : t(key),
                   ),
                 ),
               )
@@ -3154,6 +3228,286 @@ window.__ModuleLoader__.load({
     // ── new-conversation agent picker ───────────────────────────────────────
     // The New Session row already knows its session id, so the choice is written
     // straight onto that conversation instead of a global switch.
+    // ── team page: projects, tasks, reports ─────────────────────────────────
+    function TeamPage(props) {
+      const { t, call, busy, locale } = props
+      const [state, setState] = useState(null)
+      const [selected, setSelected] = useState('')
+      const [project, setProject] = useState(null)
+      const [creating, setCreating] = useState(false)
+      const [draft, setDraft] = useState({ name: '', lead: '', members: [], capacity: 3 })
+      const [taskOpen, setTaskOpen] = useState(false)
+      const [taskDraft, setTaskDraft] = useState({ title: '', brief: '', acceptance: '', assignee: '' })
+      const [openTask, setOpenTask] = useState('')
+
+      const reload = useCallback(async () => {
+        const next = await call('team.state')
+        if (!next) return
+        setState(next)
+        setSelected(current => (current !== '' && next.projects.some(item => item.id === current) ? current : (next.projects[0]?.id ?? '')))
+      }, [call])
+
+      const loadProject = useCallback(async id => {
+        if (id === '') {
+          setProject(null)
+          return
+        }
+        const next = await call('team.project', { id })
+        if (next) setProject(next)
+      }, [call])
+
+      useEffect(() => {
+        void reload()
+      }, [reload])
+      useEffect(() => {
+        void loadProject(selected)
+      }, [selected, loadProject])
+
+      const agents = state?.agents ?? []
+      const nameOf = id => agents.find(item => item.id === id)?.name ?? id
+      const statusLabel = {
+        open: t('teamStatusOpen'),
+        assigned: t('teamStatusAssigned'),
+        running: t('teamStatusRunning'),
+        waiting: t('teamStatusWaiting'),
+        review: t('teamStatusReview'),
+        blocked: t('teamStatusBlocked'),
+        failed: t('teamStatusFailed'),
+        done: t('teamStatusDone'),
+        cancelled: t('teamStatusCancelled'),
+      }
+      const statusColor = {
+        running: 'var(--dsw-alias-state-success-primary)',
+        done: 'var(--dsw-alias-state-success-primary)',
+        review: 'var(--dsw-alias-state-business-primary)',
+        blocked: 'var(--dsw-alias-state-danger-primary)',
+        failed: 'var(--dsw-alias-state-danger-primary)',
+        cancelled: 'var(--dsw-alias-label-tertiary)',
+      }
+
+      const chip = (key, label, active, onClick) =>
+        h(
+          'button',
+          { key, className: `am-btn am-btn-sm${active ? ' am-btn-primary' : ' am-btn-ghost'}`, disabled: busy !== '', onClick },
+          label,
+        )
+      const toggleMember = id =>
+        setDraft(current => ({
+          ...current,
+          members: current.members.includes(id) ? current.members.filter(item => item !== id) : [...current.members, id],
+        }))
+
+      const createProject = async () => {
+        const created = await call('team.create', { name: draft.name, lead: draft.lead, members: draft.members, capacity: draft.capacity })
+        if (!created) return
+        setCreating(false)
+        setDraft({ name: '', lead: '', members: [], capacity: 3 })
+        await reload()
+        setSelected(created.id)
+      }
+      const addMember = async member => {
+        await call('team.member.add', { project: selected, member })
+        await loadProject(selected)
+        await reload()
+      }
+      const removeMember = async member => {
+        await call('team.member.remove', { project: selected, member })
+        await loadProject(selected)
+        await reload()
+      }
+      const createTask = async () => {
+        const created = await call('team.task.create', {
+          project: selected,
+          title: taskDraft.title,
+          brief: taskDraft.brief,
+          acceptance: taskDraft.acceptance,
+          ...(taskDraft.assignee === '' ? {} : { assignee: taskDraft.assignee }),
+        })
+        if (!created) return
+        setTaskOpen(false)
+        setTaskDraft({ title: '', brief: '', acceptance: '', assignee: '' })
+        await loadProject(selected)
+        await reload()
+      }
+      const assignTask = async (task, member) => {
+        await call('team.task.assign', { project: selected, task, member })
+        await loadProject(selected)
+        await reload()
+      }
+      const closeTask = async (task, outcome) => {
+        await call('team.task.close', { project: selected, task, outcome })
+        await loadProject(selected)
+        await reload()
+      }
+
+      const projectForm = h(
+        'div',
+        { className: 'am-card', style: { marginBottom: '12px' } },
+        h('span', { className: 'am-label' }, t('teamNew')),
+        h('input', { className: 'am-input', placeholder: t('teamName'), value: draft.name, onChange: event => setDraft(current => ({ ...current, name: event.target.value })) }),
+        h('span', { className: 'am-label' }, t('teamLead')),
+        h('div', { className: 'am-row' }, agents.map(agent => chip(`lead-${agent.id}`, agent.name, draft.lead === agent.id, () => setDraft(current => ({ ...current, lead: agent.id }))))),
+        h('span', { className: 'am-label' }, t('teamMembers')),
+        h('div', { className: 'am-row' }, agents.filter(agent => agent.id !== draft.lead).map(agent => chip(`member-${agent.id}`, agent.name, draft.members.includes(agent.id), () => toggleMember(agent.id)))),
+        h(
+          'div',
+          { className: 'am-row' },
+          h('span', { className: 'am-label' }, t('teamCapacity')),
+          h('input', { className: 'am-input am-input-sm', type: 'number', min: 1, max: 10, value: draft.capacity, onChange: event => setDraft(current => ({ ...current, capacity: Number(event.target.value) || 3 })) }),
+          h('span', { style: { flex: 1 } }),
+          h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => setCreating(false) }, t('teamCancel')),
+          h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '' || draft.name.trim() === '' || draft.lead === '', onClick: () => void createProject() }, t('teamCreate')),
+        ),
+      )
+
+      const projectView = project === null
+        ? null
+        : h(
+            'div',
+            {},
+            h(
+              'div',
+              { className: 'am-row' },
+              h('h2', { className: 'am-head-name', style: { margin: 0 } }, project.name),
+              h('span', { className: 'am-tag' }, `${t('teamCapacity')} ${project.capacity}`),
+              h('span', { style: { flex: 1 } }),
+              h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => setTaskOpen(value => !value) }, t('teamNewTask')),
+            ),
+            h('p', { className: 'am-note' }, `${t('teamLead')}: ${nameOf(project.lead)}`),
+            h('span', { className: 'am-label' }, t('teamMembers')),
+            h(
+              'div',
+              { className: 'am-row', style: { marginBottom: '10px' } },
+              project.members.map(member =>
+                h(
+                  'span',
+                  { key: member, className: 'am-tag' },
+                  nameOf(member),
+                  h('button', { className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '', onClick: () => void removeMember(member) }, '×'),
+                ),
+              ),
+              agents
+                .filter(agent => agent.id !== project.lead && !project.members.includes(agent.id))
+                .map(agent => h('button', { key: `add-${agent.id}`, className: 'am-btn am-btn-sm am-btn-ghost', disabled: busy !== '', onClick: () => void addMember(agent.id) }, `+ ${agent.name}`)),
+            ),
+            taskOpen
+              ? h(
+                  'div',
+                  { className: 'am-card', style: { marginBottom: '12px' } },
+                  h('span', { className: 'am-label' }, t('teamNewTask')),
+                  h('input', { className: 'am-input', placeholder: t('teamTitle'), value: taskDraft.title, onChange: event => setTaskDraft(current => ({ ...current, title: event.target.value })) }),
+                  h('textarea', { className: 'am-textarea am-textarea-sm', placeholder: t('teamBrief'), value: taskDraft.brief, onChange: event => setTaskDraft(current => ({ ...current, brief: event.target.value })) }),
+                  h('input', { className: 'am-input', placeholder: t('teamAcceptance'), value: taskDraft.acceptance, onChange: event => setTaskDraft(current => ({ ...current, acceptance: event.target.value })) }),
+                  h('span', { className: 'am-label' }, t('teamAssignee')),
+                  h(
+                    'div',
+                    { className: 'am-row' },
+                    chip('assignee-none', t('teamUnassigned'), taskDraft.assignee === '', () => setTaskDraft(current => ({ ...current, assignee: '' }))),
+                    project.members.map(member => chip(`assignee-${member}`, nameOf(member), taskDraft.assignee === member, () => setTaskDraft(current => ({ ...current, assignee: member })))),
+                  ),
+                  h(
+                    'div',
+                    { className: 'am-row am-row-end' },
+                    h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => setTaskOpen(false) }, t('teamCancel')),
+                    h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '' || taskDraft.title.trim() === '' || taskDraft.brief.trim() === '', onClick: () => void createTask() }, t('teamCreate')),
+                  ),
+                )
+              : null,
+            h('span', { className: 'am-label' }, t('teamTasks')),
+            project.tasks.length === 0
+              ? h('p', { className: 'am-note-dim' }, t('teamNoTasks'))
+              : h(
+                  'div',
+                  { className: 'am-list' },
+                  project.tasks
+                    .slice()
+                    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+                    .map(task => {
+                      const latest = task.attempts.length > 0 ? task.attempts[task.attempts.length - 1] : null
+                      const report = latest?.report
+                      const open = openTask === task.id
+                      return h(
+                        'div',
+                        { key: task.id, className: 'am-card' },
+                        h(
+                          'div',
+                          { className: 'am-row' },
+                          h('button', { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => setOpenTask(open ? '' : task.id) }, open ? '▾' : '▸'),
+                          h('span', { className: 'am-tag', style: { color: statusColor[task.status] ?? 'inherit' } }, statusLabel[task.status] ?? task.status),
+                          h('span', { className: 'am-item-title' }, task.title),
+                          h('span', { style: { flex: 1 } }),
+                          h('span', { className: 'am-note-dim' }, task.assignee === '' ? t('teamUnassigned') : nameOf(task.assignee)),
+                          h('span', { className: 'am-note-dim' }, ago(task.updatedAt, locale)),
+                        ),
+                        open
+                          ? h(
+                              'div',
+                              { style: { paddingLeft: '28px' } },
+                              task.brief === '' ? null : h('p', { className: 'am-note' }, task.brief),
+                              task.acceptance === '' ? null : h('p', { className: 'am-note-dim' }, `${t('teamAcceptance')}: ${task.acceptance}`),
+                              report === undefined
+                                ? null
+                                : h(
+                                    'div',
+                                    { className: 'am-card' },
+                                    h('span', { className: 'am-label' }, `${t('teamReport')} · ${statusLabel[report.state] ?? report.state}`),
+                                    h('p', { className: 'am-note' }, report.summary),
+                                    report.question === undefined || report.question === '' ? null : h('p', { className: 'am-note' }, `${t('teamQuestion')}: ${report.question}`),
+                                    report.files === undefined || report.files.length === 0 ? null : h('p', { className: 'am-mono' }, report.files.join(', ')),
+                                  ),
+                              h(
+                                'div',
+                                { className: 'am-row' },
+                                h('span', { className: 'am-label' }, t('teamAssign')),
+                                project.members.map(member => chip(`task-assign-${task.id}-${member}`, nameOf(member), task.assignee === member, () => void assignTask(task.id, member))),
+                                h('span', { style: { flex: 1 } }),
+                                h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '' || ['done', 'cancelled'].includes(task.status), onClick: () => void closeTask(task.id, 'done') }, t('teamDone')),
+                                h('button', { className: 'am-btn am-btn-sm am-btn-danger', disabled: busy !== '' || ['done', 'cancelled'].includes(task.status), onClick: () => void closeTask(task.id, 'cancelled') }, t('teamCancelTask')),
+                              ),
+                            )
+                          : null,
+                      )
+                    }),
+                ),
+          )
+
+      return h(
+        'div',
+        { className: 'am-split' },
+        h(
+          'header',
+          { className: 'am-head' },
+          h('div', { className: 'am-head-main' }, h('h2', { className: 'am-head-name' }, t('team')), h('p', { className: 'am-head-sub' }, t('teamHint'))),
+          h('div', { className: 'am-head-actions' }, h('button', { className: 'am-btn am-btn-sm am-btn-primary', disabled: busy !== '', onClick: () => setCreating(value => !value) }, t('teamNew'))),
+        ),
+        creating ? projectForm : null,
+        state === null
+          ? h('div', { className: 'am-empty' }, '…')
+          : state.projects.length === 0
+            ? h('div', { className: 'am-empty' }, t('teamEmpty'))
+            : h(
+                'div',
+                {},
+                h(
+                  'div',
+                  { className: 'am-row', style: { marginBottom: '10px' } },
+                  state.projects.map(item =>
+                    h(
+                      'button',
+                      {
+                        key: item.id,
+                        className: `am-btn am-btn-sm${item.id === selected ? ' am-btn-primary' : ''}`,
+                        onClick: () => setSelected(item.id),
+                      },
+                      `${item.name} (${item.tasks.active}/${item.tasks.total})`,
+                    ),
+                  ),
+                ),
+                projectView,
+              ),
+      )
+    }
+
     function HeroAgentPicker(props) {
       const t = useLocale(props)
       const sessionId = typeof props.sessionId === 'string' ? props.sessionId : ''

@@ -582,6 +582,41 @@ const projects = await teamTool('team_project_list').execute({}, leadExec)
 assert.equal(projects.projects.some(row => row.id === teamProjectId), true)
 console.log('team tools ok')
 
+// ── team HTTP ops: the panel administers teams as the user ──────────────────
+const teamState = await call('POST', '/op', { op: 'team.state', args: {} })
+assert.equal(teamState.payload.ok, true)
+assert.equal(teamState.payload.value.projects.some(row => row.id === teamProjectId), true)
+assert.equal(teamState.payload.value.agents.some(row => row.id === teamLead), true)
+
+const httpProject = (await call('POST', '/op', { op: 'team.create', args: { name: '面板建的团队', lead: teamLead, members: [teamMember] } })).payload
+assert.equal(httpProject.ok, true)
+assert.equal(httpProject.value.lead, teamLead)
+assert.equal(httpProject.value.members[0], teamMember)
+const httpProjectId = httpProject.value.id
+
+const httpTask = (await call('POST', '/op', { op: 'team.task.create', args: { project: httpProjectId, title: '面板任务', brief: '从面板创建', acceptance: '一句话', assignee: teamMember } })).payload
+assert.equal(httpTask.ok, true)
+assert.equal(httpTask.value.assignee, teamMember)
+assert.equal(httpTask.value.attempts.at(-1).state, 'queued')
+const httpTaskId = httpTask.value.id
+
+const httpAssign = (await call('POST', '/op', { op: 'team.task.assign', args: { project: httpProjectId, task: httpTaskId, member: teamMember } })).payload
+assert.equal(httpAssign.ok, true)
+assert.equal(httpAssign.value.attempt.state, 'queued')
+
+const busyRemove = await call('POST', '/op', { op: 'team.member.remove', args: { project: httpProjectId, member: teamMember } })
+assert.equal(busyRemove.status, 400)
+assert.equal(busyRemove.payload.error.code, 'member-busy')
+
+const closedHttp = (await call('POST', '/op', { op: 'team.task.close', args: { project: httpProjectId, task: httpTaskId, outcome: 'cancelled', note: '面板关闭' } })).payload
+assert.equal(closedHttp.ok, true)
+assert.equal(closedHttp.value.status, 'cancelled')
+
+const teamProjectView = (await call('POST', '/op', { op: 'team.project', args: { id: httpProjectId } })).payload
+assert.equal(teamProjectView.ok, true)
+assert.equal(teamProjectView.value.tasks.some(row => row.id === httpTaskId), true)
+console.log('team http ok')
+
 // ── teardown ────────────────────────────────────────────────────────────────
 for (const effect of registered.effects) {
   if (typeof effect.disposer === 'function') effect.disposer()

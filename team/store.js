@@ -219,9 +219,10 @@ export function createTeam(options = {}) {
     }
   }
 
-  function requireLead(project, editor) {
-    if (editor !== project.lead) {
-      throw new MemoryError('not-lead', `only the lead (${project.lead}) may do this`)
+  function requireEditor(project, editor) {
+    // The panel acts as the user, who owns every project.
+    if (editor !== project.lead && editor !== 'user') {
+      throw new MemoryError('not-lead', `only the lead (${project.lead}) or the user may do this`)
     }
     return editor
   }
@@ -307,7 +308,7 @@ export function createTeam(options = {}) {
     const id = projectIdOf(input.project)
     return withLock(id, () => {
       const project = readProject(id)
-      requireLead(project, input.by)
+      requireEditor(project, input.by)
       const member = requireKnownAgent(input.member, 'no-member')
       if (member === project.lead) throw new MemoryError('bad-member', 'the lead is not a member')
       if (project.members.includes(member)) throw new MemoryError('bad-member', `${member} is already a member`)
@@ -323,7 +324,7 @@ export function createTeam(options = {}) {
     const id = projectIdOf(input.project)
     return withLock(id, () => {
       const project = readProject(id)
-      requireLead(project, input.by)
+      requireEditor(project, input.by)
       const member = requireMember(project, requireKnownAgent(input.member, 'no-member'))
       const doc = readTasks(id)
       const held = doc.tasks.filter(task => task.assignee === member && ACTIVE_TASK.has(task.status))
@@ -384,7 +385,7 @@ export function createTeam(options = {}) {
     const id = projectIdOf(input.project)
     return withLock(id, () => {
       const project = readProject(id)
-      requireLead(project, input.by)
+      requireEditor(project, input.by)
       const member = requireMember(project, requireKnownAgent(input.member, 'no-member'))
       const doc = readTasks(id)
       const task = findTask(doc, taskIdOf(input.task))

@@ -157,7 +157,7 @@ export function apply(ctx, config = {}) {
     registerTools(ctx, store, rooms, journals, recall, team, dispatch)
     registerArchiveGate(ctx, store, archives)
     sleep.attach()
-    registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep)
+    registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch)
   } catch (error) {
     recordError(store, 'apply', error)
   }
@@ -1369,7 +1369,11 @@ async function readJson(req) {
  * that turned every panel call into a 503 — how the plugin went blank after
  * the upgrade.
  */
-async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args) {
+async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch) {
+  const teamStore = () => {
+    if (team === undefined || team === null) throw new MemoryError('no-team', 'the team store is not available')
+    return team
+  }
   switch (op) {
     case 'state':
       return store.state()
@@ -1562,6 +1566,38 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return rooms.say({ id: args.id, text: args.text, from: { kind: 'user', id: 'user', name: '我' } })
     case 'room.clear':
       return rooms.clear({ id: args.id })
+    case 'team.state':
+      return {
+        projects: teamStore().listProjects(),
+        agents: store.state().vaults.map(item => ({ id: item.id, name: item.name })),
+      }
+    case 'team.project':
+      return teamStore().project(args.id)
+    case 'team.create':
+      return teamStore().createProject({ name: args.name, lead: args.lead, members: args.members, capacity: args.capacity, roomId: args.roomId })
+    case 'team.member.add':
+      return teamStore().addMember({ project: args.project, member: args.member, by: 'user' })
+    case 'team.member.remove':
+      return teamStore().removeMember({ project: args.project, member: args.member, by: 'user' })
+    case 'team.task.create': {
+      const task = await teamStore().createTask({
+        project: args.project,
+        title: args.title,
+        brief: args.brief,
+        acceptance: args.acceptance,
+        assignee: args.assignee,
+        createdBy: 'user',
+      })
+      if (dispatch !== undefined && dispatch !== null) dispatch.kick()
+      return task
+    }
+    case 'team.task.assign': {
+      const assigned = await teamStore().assignTask({ project: args.project, task: args.task, member: args.member, by: 'user' })
+      if (dispatch !== undefined && dispatch !== null) dispatch.kick()
+      return assigned
+    }
+    case 'team.task.close':
+      return teamStore().closeTask({ project: args.project, task: args.task, by: 'user', outcome: args.outcome, note: args.note })
     case 'journal.list':
       return journals.list({
         id: args.id,
@@ -1681,7 +1717,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
   }
 }
 
-function registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep) {
+function registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep, team, dispatch) {
   /**
    * Store state plus the capabilities this host build exposes to the panel.
    * `arm` gates the client's automatic switch, so it must be declared here as
@@ -1714,7 +1750,7 @@ function registerApi(ctx, store, rooms, journals, archives, recall, reveal, slee
           const body = await readJson(req)
           const op = String(body?.op ?? '')
           const args = body?.args && typeof body.args === 'object' ? body.args : {}
-          const value = await handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args)
+          const value = await handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch)
           return json(res, 200, { ok: true, value, state: publicState() })
         }
         return json(res, 404, { error: { code: 'not-found', message: `no route ${method} ${route}` } })
