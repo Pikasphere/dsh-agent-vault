@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
+import { createTeam } from './team/store.js'
 import { createSleep } from './sleep.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall, DEFAULT_MODEL } from './recall.js'
@@ -131,9 +132,19 @@ export function apply(ctx, config = {}) {
   })
   const reveal = typeof config.reveal === 'function' ? config.reveal : createReveal()
 
+  let team
+  try {
+    team = createTeam({
+      rootDir: store.root,
+      agents: () => store.state().vaults.map(agent => ({ id: agent.id, name: agent.name })),
+    })
+  } catch (error) {
+    recordError(store, 'team/init', error)
+  }
+
   try {
     registerPrompt(ctx, store)
-    registerTools(ctx, store, rooms, journals, recall)
+    registerTools(ctx, store, rooms, journals, recall, team)
     registerArchiveGate(ctx, store, archives)
     sleep.attach()
     registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep)
@@ -304,7 +315,7 @@ function vaultOf(store, args, exec) {
   return store.resolveVault({ id: args?.id ?? args?.vault, sessionId: exec?.agent?.id })
 }
 
-function registerTools(ctx, store, rooms, journals, recall) {
+function registerTools(ctx, store, rooms, journals, recall, team) {
   ctx.inject(['tools'], scoped => {
     const register = (definition, label) => scoped.effect(() => scoped.tools.register(definition), label)
     const limit = store.memoryLimit
@@ -543,6 +554,7 @@ function registerTools(ctx, store, rooms, journals, recall) {
 
     registerRoomTools(register, store, rooms)
     registerJournalTools(register, store, journals)
+    if (team !== undefined && team !== null) registerTeamTools(register, store, team)
   })
 }
 
@@ -641,6 +653,325 @@ function registerJournalTools(register, store, journals) {
       }),
     },
     'agent-memory: journal tool',
+  )
+}
+
+// ── team: projects, tasks, assignments ──────────────────────────────────────
+
+/**
+ * Team tools. The unit of a team is the agent: a project names a lead and
+ * members from the vault registry. Every tool requires the calling conversation
+ * to be bound to an agent, so "who may do this" is checked against the binding,
+ * never inferred from the prompt.
+ *
+ * This build is P0: assigning a task queues an attempt but does not wake the
+ * member. The member claims it with team_task_claim from its own conversation;
+ * the wake-up path arrives with the relay phase.
+ */
+function registerTeamTools(register, store, team) {
+  const boundAgentOf = exec => {
+    const sessionId = exec?.agent?.id ? String(exec.agent.id) : ''
+    return sessionId === '' ? '' : store.bindingOf(sessionId)
+  }
+  const requireBound = exec => {
+    const bound = boundAgentOf(exec)
+    if (bound === '') {
+      throw new MemoryError('no-agent', 'this conversation has no agent bound; bind one in the New Session row first')
+    }
+    return bound
+  }
+  const requireLead = (projectId, exec) => {
+    const bound = requireBound(exec)
+    const project = team.project(projectId)
+    if (project.lead !== bound) throw new MemoryError('not-lead', `only the lead (${project.lead}) may do this`)
+    return bound
+  }
+  const line = (text, limit) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, limit)
+
+  register(
+    {
+      name: 'team_project_create',
+      description:
+        'Create a team project: one lead and members, all existing agents from the registry. The calling conversation must be bound ' +
+        'to the lead. Tasks in the project are assigned by the lead and reported by the member who holds them.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Project name, at most 80 characters.' },
+          lead: { type: 'string', description: 'Agent id of the lead; must match the agent bound to this conversation.' },
+          members: { type: 'array', items: { type: 'string' }, description: 'Agent ids of the members. The lead is not a member.' },
+          capacity: { type: 'number', description: 'Concurrent attempts allowed, 1-10, default 3.' },
+          roomId: { type: 'string', description: 'Optional discussion room id to bind to the project.' },
+        },
+        required: ['name', 'lead'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const bound = requireBound(exec)
+        if (String(args?.lead ?? '') !== bound) {
+          throw new MemoryError('not-lead', `the lead must be the agent bound to this conversation (${bound})`)
+        }
+        const project = team.createProject({
+          name: args?.name,
+          lead: bound,
+          members: args?.members,
+          capacity: args?.capacity,
+          roomId: args?.roomId,
+        })
+        return { ok: true, project }
+      }),
+    },
+    'agent-memory: team project tool',
+  )
+
+  register(
+    {
+      name: 'team_project_list',
+      description: 'List team projects with their lead, members and task counts.',
+      parameters: { type: 'object', properties: {} },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, projects: { type: 'array', items: { type: 'object' } } } }),
+      execute: guard(async (_args, exec) => {
+        requireBound(exec)
+        return { ok: true, projects: team.listProjects() }
+      }),
+    },
+    'agent-memory: team project list tool',
+  )
+
+  register(
+    {
+      name: 'team_member_add',
+      description: 'Add a registered agent to a project as a member. Only the lead may do this.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          member: { type: 'string', description: 'Agent id to add.' },
+        },
+        required: ['project', 'member'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const by = requireLead(args?.project, exec)
+        return { ok: true, project: await team.addMember({ project: args?.project, member: args?.member, by }) }
+      }),
+    },
+    'agent-memory: team member add tool',
+  )
+
+  register(
+    {
+      name: 'team_member_remove',
+      description: 'Remove a member from a project. Refused while the member still holds an active task. Only the lead may do this.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          member: { type: 'string', description: 'Agent id to remove.' },
+        },
+        required: ['project', 'member'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const by = requireLead(args?.project, exec)
+        return { ok: true, project: await team.removeMember({ project: args?.project, member: args?.member, by }) }
+      }),
+    },
+    'agent-memory: team member remove tool',
+  )
+
+  register(
+    {
+      name: 'team_task_create',
+      description:
+        'Create a task in a project. Only the lead may create tasks. Brief is what the member reads; acceptance is how the lead ' +
+        'will judge the result. With assignee, an attempt is queued for that member at once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          title: { type: 'string', description: 'Short task title, at most 200 characters.' },
+          brief: { type: 'string', description: 'What to do, at most 4000 characters. This is the original text the member works from.' },
+          acceptance: { type: 'string', description: 'How the lead judges the result, at most 1000 characters.' },
+          assignee: { type: 'string', description: 'Optional member agent id to assign the task immediately.' },
+        },
+        required: ['project', 'title', 'brief'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, task: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const bound = requireLead(args?.project, exec)
+        const task = await team.createTask({
+          project: args?.project,
+          title: args?.title,
+          brief: args?.brief,
+          acceptance: args?.acceptance,
+          assignee: args?.assignee,
+          createdBy: bound,
+        })
+        return { ok: true, task }
+      }),
+    },
+    'agent-memory: team task create tool',
+  )
+
+  register(
+    {
+      name: 'team_task_assign',
+      description:
+        'Assign a task to a member: a queued attempt is recorded. This build does not wake the member; the member claims the task ' +
+        'with team_task_claim from its own conversation. Reassigning cancels the previous open attempt. Only the lead may assign.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          task: { type: 'string', description: 'Task id.' },
+          member: { type: 'string', description: 'Member agent id to assign the task to.' },
+        },
+        required: ['project', 'task', 'member'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, task: { type: 'object' }, attempt: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const by = requireLead(args?.project, exec)
+        const result = await team.assignTask({ project: args?.project, task: args?.task, member: args?.member, by })
+        return { ok: true, task: result.task, attempt: result.attempt }
+      }),
+    },
+    'agent-memory: team task assign tool',
+  )
+
+  register(
+    {
+      name: 'team_task_report',
+      description:
+        'Report progress on the task you hold, as its assignee. state=progress says still working (no notice); waiting asks for input; ' +
+        'ready asks the lead to accept the result; blocked and failed stop the attempt; dropped means the task should not be done. ' +
+        'Keep summary short and put detail in the knowledge base or files, and name the files.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          task: { type: 'string', description: 'Task id.' },
+          state: { type: 'string', enum: ['progress', 'waiting', 'ready', 'blocked', 'failed', 'dropped'], description: 'Report state.' },
+          summary: { type: 'string', description: 'What the lead needs to know, at most 600 characters.' },
+          question: { type: 'string', description: 'A question for the lead, at most 500 characters; settles the attempt as waiting.' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Produced files or paths, at most 20.' },
+        },
+        required: ['project', 'task', 'state', 'summary'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, task: { type: 'object' }, attempt: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const agent = requireBound(exec)
+        const result = await team.reportTask({
+          project: args?.project,
+          task: args?.task,
+          agent,
+          state: args?.state,
+          summary: args?.summary,
+          question: args?.question,
+          files: args?.files,
+        })
+        return { ok: true, task: result.task, attempt: result.attempt }
+      }),
+    },
+    'agent-memory: team task report tool',
+  )
+
+  register(
+    {
+      name: 'team_task_claim',
+      description:
+        'Claim a task assigned to you and start its queued attempt. Use it when the lead assigned a task but nothing woke you. ' +
+        'Records the current conversation as the attempt session. Only the assignee may claim.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          task: { type: 'string', description: 'Task id.' },
+          sessionId: { type: 'string', description: 'Optional session id to record; defaults to the current conversation.' },
+        },
+        required: ['project', 'task'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, task: { type: 'object' }, attempt: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const agent = requireBound(exec)
+        const sessionId = typeof args?.sessionId === 'string' && args.sessionId !== '' ? args.sessionId : exec?.agent?.id ?? ''
+        const result = await team.claimTask({ project: args?.project, task: args?.task, agent, sessionId })
+        return { ok: true, task: result.task, attempt: result.attempt }
+      }),
+    },
+    'agent-memory: team task claim tool',
+  )
+
+  register(
+    {
+      name: 'team_task_close',
+      description:
+        'Close a task: done accepts the result, cancelled ends it without acceptance. Open attempts are cancelled. Only the lead may close.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          task: { type: 'string', description: 'Task id.' },
+          outcome: { type: 'string', enum: ['done', 'cancelled'], description: 'done accepts; cancelled ends without acceptance.' },
+          note: { type: 'string', description: 'Optional closing note, at most 1000 characters.' },
+        },
+        required: ['project', 'task', 'outcome'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, task: { type: 'object' } } }),
+      execute: guard(async (args, exec) => {
+        const by = requireLead(args?.project, exec)
+        const task = await team.closeTask({ project: args?.project, task: args?.task, by, outcome: args?.outcome, note: args?.note })
+        return { ok: true, task }
+      }),
+    },
+    'agent-memory: team task close tool',
+  )
+
+  register(
+    {
+      name: 'team_task_list',
+      description:
+        'List tasks of a project. The lead sees every task; a member sees only the tasks assigned to it. Optional status filters the list.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          status: { type: 'string', description: 'Optional task status to filter by.' },
+        },
+        required: ['project'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' }, tasks: { type: 'array', items: { type: 'object' } } } }),
+      execute: guard(async (args, exec) => {
+        const bound = requireBound(exec)
+        const project = team.project(args?.project)
+        const lead = project.lead === bound
+        const result = await team.listTasks({ project: project.id, status: args?.status, agent: lead ? '' : bound })
+        return { ok: true, ...result }
+      }),
+    },
+    'agent-memory: team task list tool',
+  )
+
+  register(
+    {
+      name: 'team_member_status',
+      description:
+        'Ask about one member of a project: whether it is busy, which tasks are active, and its latest report. Only the lead may ask.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Project id.' },
+          member: { type: 'string', description: 'Member agent id.' },
+        },
+        required: ['project', 'member'],
+      },
+      output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, member: { type: 'string' }, busy: { type: 'boolean' }, active: { type: 'array', items: { type: 'object' } } } }),
+      execute: guard(async (args, exec) => {
+        requireLead(args?.project, exec)
+        return { ok: true, ...(await team.memberStatus({ project: args?.project, member: args?.member })) }
+      }),
+    },
+    'agent-memory: team member status tool',
   )
 }
 

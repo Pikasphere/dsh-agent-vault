@@ -86,6 +86,17 @@ assert.deepEqual(names, [
   'agent_memory_save',
   'agent_recall',
   'agent_room',
+  'team_member_add',
+  'team_member_remove',
+  'team_member_status',
+  'team_project_create',
+  'team_project_list',
+  'team_task_assign',
+  'team_task_claim',
+  'team_task_close',
+  'team_task_create',
+  'team_task_list',
+  'team_task_report',
 ])
 for (const tool of registered.tools) {
   assert.equal(typeof tool.description, 'string')
@@ -507,6 +518,69 @@ const cpList = await call('POST', '/op', { op: 'journal.list', args: { id, inclu
 assert.equal(cpList.payload.value.entries[0].kind, 'checkpoint')
 assert.equal(cpList.payload.value.entries[0].meta.sessionId, 'session-x')
 console.log('rooms + journal ok')
+
+// ── team tools: projects, tasks, assignment, reports ────────────────────────
+const teamLead = (await call('POST', '/op', { op: 'vault.create', args: { name: '团队负责人' } })).payload.value.id
+const teamMember = (await call('POST', '/op', { op: 'vault.create', args: { name: '团队成员' } })).payload.value.id
+const teamOutsider = (await call('POST', '/op', { op: 'vault.create', args: { name: '团队外' } })).payload.value.id
+await call('POST', '/op', { op: 'binding.set', args: { sessionId: 'session-team-lead', agentId: teamLead } })
+await call('POST', '/op', { op: 'binding.set', args: { sessionId: 'session-team-member', agentId: teamMember } })
+await call('POST', '/op', { op: 'binding.set', args: { sessionId: 'session-team-outsider', agentId: teamOutsider } })
+const teamTool = name => registered.tools.find(tool => tool.name === name)
+const leadExec = { agent: { id: 'session-team-lead' } }
+const memberExec = { agent: { id: 'session-team-member' } }
+const outsiderExec = { agent: { id: 'session-team-outsider' } }
+
+const teamProject = await teamTool('team_project_create').execute({ name: '团队测试', lead: teamLead, members: [teamMember] }, leadExec)
+assert.equal(teamProject.ok, true)
+assert.equal(teamProject.project.members.length, 1)
+const teamProjectId = teamProject.project.id
+
+const notLeadCreate = await teamTool('team_project_create').execute({ name: '另一个', lead: teamLead }, outsiderExec)
+assert.equal(notLeadCreate.ok, false)
+assert.equal(notLeadCreate.error, 'not-lead')
+
+const teamTask = await teamTool('team_task_create').execute(
+  { project: teamProjectId, title: '写一段说明', brief: '说明团队工具怎么用', acceptance: '中文一段' },
+  leadExec,
+)
+assert.equal(teamTask.ok, true)
+const teamTaskId = teamTask.task.id
+const teamAssign = await teamTool('team_task_assign').execute({ project: teamProjectId, task: teamTaskId, member: teamMember }, leadExec)
+assert.equal(teamAssign.ok, true)
+assert.equal(teamAssign.attempt.state, 'queued')
+
+const outsiderAssign = await teamTool('team_task_assign').execute({ project: teamProjectId, task: teamTaskId, member: teamMember }, outsiderExec)
+assert.equal(outsiderAssign.ok, false)
+assert.equal(outsiderAssign.error, 'not-lead')
+
+const memberList = await teamTool('team_task_list').execute({ project: teamProjectId }, memberExec)
+assert.equal(memberList.tasks.length, 1)
+const leadClaim = await teamTool('team_task_claim').execute({ project: teamProjectId, task: teamTaskId }, leadExec)
+assert.equal(leadClaim.ok, false)
+assert.equal(leadClaim.error, 'not-assignee')
+
+const claimed = await teamTool('team_task_claim').execute({ project: teamProjectId, task: teamTaskId }, memberExec)
+assert.equal(claimed.ok, true)
+assert.equal(claimed.task.status, 'running')
+
+const reported = await teamTool('team_task_report').execute(
+  { project: teamProjectId, task: teamTaskId, state: 'ready', summary: '说明写好了' },
+  memberExec,
+)
+assert.equal(reported.task.status, 'review')
+const leadList = await teamTool('team_task_list').execute({ project: teamProjectId }, leadExec)
+assert.equal(leadList.tasks[0].status, 'review')
+
+const closedTeam = await teamTool('team_task_close').execute({ project: teamProjectId, task: teamTaskId, outcome: 'done' }, leadExec)
+assert.equal(closedTeam.ok, true)
+const closedAgain = await teamTool('team_task_close').execute({ project: teamProjectId, task: teamTaskId, outcome: 'done' }, leadExec)
+assert.equal(closedAgain.ok, false)
+assert.equal(closedAgain.error, 'task-closed')
+
+const projects = await teamTool('team_project_list').execute({}, leadExec)
+assert.equal(projects.projects.some(row => row.id === teamProjectId), true)
+console.log('team tools ok')
 
 // ── teardown ────────────────────────────────────────────────────────────────
 for (const effect of registered.effects) {
