@@ -758,6 +758,19 @@ window.__ModuleLoader__.load({
 .am-side-agent-slot{width:16px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}
 .am-side-agent-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .am-side-agent-count{flex:none;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.am-side-projects-head{margin:10px 0 2px;padding:0 10px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
+.am-project-side{display:flex;flex-direction:column}
+.am-project-side-head{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 10px;border:0;border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px;cursor:pointer;text-align:left}
+.am-project-side-head:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-project-side-caret{width:14px;height:14px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);transition:transform .15s var(--ds-ease-in-out)}
+.am-project-side-caret.is-open{transform:rotate(90deg)}
+.am-project-side-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-side-room{margin:0 10px 2px 34px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-side-member{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px 0 30px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary)}
+.am-project-side-star{width:14px;flex:none;text-align:center;font-size:11px;color:var(--dsw-alias-state-business-primary)}
+.am-project-side-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-side-role{margin-left:auto;flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary)}
+.am-project-side .am-side-sessions{padding-left:30px}
 .am-side-sessions{display:flex;flex-direction:column;gap:2px;padding:2px 0 6px 16px}
 .am-side-session{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;border:0;border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;text-align:left;user-select:none}
 .am-side-session:hover{background:var(--dsw-alias-interactive-bg-hover)}
@@ -3888,7 +3901,11 @@ window.__ModuleLoader__.load({
         let observedRoot = null
         let layoutReported = false
         const collapsed = new Set()
+        const collapsedProjects = new Set()
         let lastListSignature = ''
+        let lastProjects = []
+        let lastVaultNames = new Map()
+        let lastRooms = new Map()
         let searchQuery = ''
         let searchOpen = false
         let sortMode = 'recent'
@@ -4250,23 +4267,30 @@ window.__ModuleLoader__.load({
           const matches = session =>
             String(session.title ?? '').toLowerCase().includes(query) ||
             String(session.workspaceTitle ?? '').toLowerCase().includes(query)
+          const activeProjects = lastProjects.filter(project => project.status === 'active')
+          // Agents that belong to a team move to their own dropdown, one block
+          // per project; the flat list keeps the ungrouped agents.
+          const projectOf = new Map()
+          for (const project of activeProjects) {
+            if (project.lead !== '') projectOf.set(project.lead, project)
+            for (const member of project.members ?? []) projectOf.set(member, project)
+          }
+          const filtered = sessions =>
+            sessions
+              .filter(session => session.archive !== 'strong')
+              .filter(session => showArchived || session.archive !== 'weak')
+              .sort((left, right) => (Number(right.updatedAt) || 0) - (Number(left.updatedAt) || 0))
           const visible = lastAgents
+            .filter(agent => !projectOf.has(agent.agentId))
             .map(agent => {
               const nameHit = query !== '' && String(agent.name ?? '').toLowerCase().includes(query)
-              const sessions = agent.sessions
-                .filter(session => session.archive !== 'strong')
-                .filter(session => showArchived || session.archive !== 'weak')
-                .filter(session => query === '' || nameHit || matches(session))
-              return { ...agent, sessions }
+              return {
+                ...agent,
+                sessions: filtered(agent.sessions).filter(session => query === '' || nameHit || matches(session)),
+              }
             })
             .filter(agent => agent.sessions.length > 0)
-            .map(agent => ({
-              ...agent,
-              sessions: [...agent.sessions].sort(
-                (left, right) => (Number(right.updatedAt) || 0) - (Number(left.updatedAt) || 0),
-              ),
-            }))
-          if (visible.length === 0 && lastAgents.length === 0) {
+          if (visible.length === 0 && activeProjects.length === 0 && lastAgents.length === 0) {
             host.hidden = true
             return
           }
@@ -4279,10 +4303,41 @@ window.__ModuleLoader__.load({
             )
           }
 
-          const total = visible.reduce((sum, agent) => sum + agent.sessions.length, 0)
-          visibleSessions = visible.flatMap(agent =>
-            agent.sessions.map(session => ({ sessionId: session.sessionId, agentId: agent.agentId })),
-          )
+          const projectRows = activeProjects
+            .map(project => {
+              const members = [
+                { id: project.lead, lead: true },
+                ...(project.members ?? []).map(id => ({ id, lead: false })),
+              ].map(member => {
+                const name = lastVaultNames.get(member.id) ?? member.id
+                const agent = lastAgents.find(item => item.agentId === member.id)
+                const nameHit = query !== '' && String(name).toLowerCase().includes(query)
+                return {
+                  ...member,
+                  name,
+                  sessions: filtered(agent?.sessions ?? []).filter(session => query === '' || nameHit || matches(session)),
+                }
+              })
+              return { project, members }
+            })
+            .filter(entry => {
+              if (query === '') return true
+              if (String(entry.project.name ?? '').toLowerCase().includes(query)) return true
+              return entry.members.some(member => member.sessions.length > 0 || member.name.toLowerCase().includes(query))
+            })
+          const total =
+            visible.reduce((sum, agent) => sum + agent.sessions.length, 0) +
+            projectRows.reduce((sum, entry) => sum + entry.members.reduce((n, member) => n + member.sessions.length, 0), 0)
+          visibleSessions = [
+            ...visible.flatMap(agent =>
+              agent.sessions.map(session => ({ sessionId: session.sessionId, agentId: agent.agentId })),
+            ),
+            ...projectRows.flatMap(entry =>
+              entry.members.flatMap(member =>
+                member.sessions.map(session => ({ sessionId: session.sessionId, agentId: member.id })),
+              ),
+            ),
+          ]
           const count = host.querySelector('.am-side-agents-count')
           count.textContent = String(total)
           count.title = String(total)
@@ -4305,6 +4360,17 @@ window.__ModuleLoader__.load({
             // from the same sessions, so the signature must name the mode too.
             compactAll,
             [...collapsed],
+            [...collapsedProjects],
+            activeProjects.map(project => [
+              project.id,
+              project.name,
+              project.lead,
+              project.members ?? [],
+              project.roomId,
+              project.tasks?.active,
+              project.tasks?.total,
+            ]),
+            [...lastVaultNames],
             query,
             sortMode,
             showArchived,
@@ -4318,36 +4384,26 @@ window.__ModuleLoader__.load({
           // list back at the top: the 5s sync changes the signature whenever a
           // session's running flag or timestamp moves, so the list snapped to
           // the top every few seconds while the user was reading it.
-          const keepScroll = list.scrollTop
-          if (visible.length === 0) {
-            list.innerHTML = `<div class="am-side-empty">${escape(t('sideSearchEmpty'))}</div>`
-            list.scrollTop = keepScroll
-            return
+          const sessionRow = session => {
+            const weak = session.archive === 'weak'
+            const picked = ctxSelected.has(session.sessionId)
+            const state =
+              (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
+              (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
+            return (
+              `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${picked ? ' is-selected' : ''}" data-action="open" data-session="${escape(session.sessionId)}" aria-selected="${picked ? 'true' : 'false'}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
+              `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
+              `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
+              (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
+              `</button>`
+            )
           }
-          list.innerHTML = visible
+          const keepScroll = list.scrollTop
+          const agentHtml = visible
             .map(agent => {
               const open = !compactAll && !collapsed.has(agent.agentId)
               const initial = Array.from(agent.name || '?')[0] || '?'
-              const rows = open
-                ? `<div class="am-side-sessions">` +
-                  agent.sessions
-                    .map(session => {
-                      const weak = session.archive === 'weak'
-                      const picked = ctxSelected.has(session.sessionId)
-                      const state =
-                        (session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : '') +
-                        (weak ? `<span class="am-side-session-tag">${escape(t('sideArchived'))}</span>` : '')
-                      return (
-                        `<button type="button" class="am-side-session${weak ? ' is-weak' : ''}${picked ? ' is-selected' : ''}" data-action="open" data-session="${escape(session.sessionId)}" aria-selected="${picked ? 'true' : 'false'}" title="${escape(weak ? t('archiveWeakHint') : session.title || '')}">` +
-                        `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
-                        `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
-                        (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
-                        `</button>`
-                      )
-                    })
-                    .join('') +
-                  `</div>`
-                : ''
+              const rows = open ? `<div class="am-side-sessions">` + agent.sessions.map(sessionRow).join('') + `</div>` : ''
               return (
                 `<div class="am-side-agent" data-agent="${escape(agent.agentId)}">` +
                 `<button type="button" class="am-side-agent-row${ctxAgentId === agent.agentId ? ' is-selected' : ''}" data-action="toggle-agent" aria-selected="${ctxAgentId === agent.agentId ? 'true' : 'false'}">` +
@@ -4359,6 +4415,47 @@ window.__ModuleLoader__.load({
               )
             })
             .join('')
+          const projectHtml = projectRows
+            .map(entry => {
+              const open = !collapsedProjects.has(entry.project.id)
+              const room = lastRooms.get(entry.project.roomId)
+              const memberHtml = entry.members
+                .map(member => {
+                  const sessions = member.sessions.map(sessionRow).join('')
+                  return (
+                    `<div class="am-project-side-member" data-agent="${escape(member.id)}">` +
+                    `<span class="am-project-side-star">${member.lead ? '★' : '·'}</span>` +
+                    `<span class="am-project-side-name">${escape(member.name)}</span>` +
+                    `<span class="am-project-side-role">${escape(member.lead ? t('teamLead') : t('teamMembers'))}</span>` +
+                    `</div>` +
+                    `<div class="am-side-sessions">${sessions}</div>`
+                  )
+                })
+                .join('')
+              return (
+                `<div class="am-project-side" data-project="${escape(entry.project.id)}">` +
+                `<button type="button" class="am-project-side-head" data-action="toggle-project" data-project="${escape(entry.project.id)}">` +
+                `<span class="am-project-side-caret${open ? ' is-open' : ''}">${ICON.chevron}</span>` +
+                `<span class="am-project-side-title">${escape(entry.project.name)}</span>` +
+                `<span class="am-side-agent-count">${entry.members.reduce((sum, member) => sum + member.sessions.length, 0)}</span>` +
+                `</button>` +
+                (open
+                  ? (room === undefined ? '' : `<div class="am-project-side-room">${escape(t('teamRoom'))}：${escape(room)}</div>`) + memberHtml
+                  : '') +
+                `</div>`
+              )
+            })
+            .join('')
+          if (agentHtml === '' && projectHtml === '') {
+            list.innerHTML = `<div class="am-side-empty">${escape(t('sideSearchEmpty'))}</div>`
+            list.scrollTop = keepScroll
+            return
+          }
+          list.innerHTML =
+            agentHtml +
+            (projectHtml === ''
+              ? ''
+              : `<div class="am-side-projects-head">${escape(t('teamProjects'))}</div>` + projectHtml)
           list.scrollTop = keepScroll
         }
 
@@ -4484,12 +4581,14 @@ window.__ModuleLoader__.load({
                 renderSection(host)
               } else if (action === 'collapse-all') {
                 for (const agent of lastAgents) collapsed.add(agent.agentId)
+                for (const project of lastProjects) collapsedProjects.add(project.id)
                 compactAll = false
                 viewOpen = false
                 savePrefs()
                 renderSection(host)
               } else if (action === 'expand-all') {
                 collapsed.clear()
+                collapsedProjects.clear()
                 compactAll = false
                 viewOpen = false
                 savePrefs()
@@ -4499,6 +4598,12 @@ window.__ModuleLoader__.load({
               } else if (action === 'toggle-section') {
                 sectionOpen = !sectionOpen
                 savePrefs()
+                renderSection(host)
+              } else if (action === 'toggle-project') {
+                const projectId = target.getAttribute('data-project') ?? ''
+                if (projectId === '') return
+                if (collapsedProjects.has(projectId)) collapsedProjects.delete(projectId)
+                else collapsedProjects.add(projectId)
                 renderSection(host)
               } else if (action === 'toggle-agent') {
                 const agentId = target.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
@@ -4663,6 +4768,21 @@ window.__ModuleLoader__.load({
               })
               if (stopped) return
               lastAgents = boundPayload.value?.agents ?? []
+              try {
+                const teamPayload = await request('/op', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ op: 'team.state', args: {} }),
+                })
+                if (stopped) return
+                lastProjects = teamPayload.value?.projects ?? []
+                lastVaultNames = new Map((teamPayload.value?.agents ?? []).map(item => [item.id, item.name]))
+                lastRooms = new Map((teamPayload.value?.rooms ?? []).map(item => [item.id, item.name]))
+              } catch {
+                lastProjects = []
+                lastVaultNames = new Map()
+                lastRooms = new Map()
+              }
               mount()
               const host = document.getElementById('am-sidebar-agents')
               if (host !== null) renderSection(host)
