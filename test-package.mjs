@@ -53,5 +53,12 @@ for (const relative of ['cordis.patch.yml', 'icon.svg', 'archive.js']) {
   assert.ok(listed(relative), `package.json "files" does not ship package asset: ${relative}`)
 }
 
+// The bundle patch must insert the plugin and must keep the built-in team tools
+// disabled: they register the same team_task_* names, and whichever package
+// activates second fails, leaving the tool set dependent on startup order.
+const patch = fs.readFileSync(path.join(here, 'cordis.patch.yml'), 'utf8')
+assert.match(patch, /id:\s*agent-memory/, 'bundle patch must insert the vault plugin')
+assert.match(patch, /id:\s*tool-agent-team[\s\S]*?disabled:\s*true/, 'bundle patch must disable the built-in tool-agent-team')
+
 console.log(`import chain shipped: ${[...seen].sort().join(', ')}`)
 console.log('ALL PACKAGE TESTS PASSED')
