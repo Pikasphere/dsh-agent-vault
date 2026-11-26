@@ -269,23 +269,23 @@ window.__ModuleLoader__.load({
         recallSrcKnowledge: '知识库',
         transcripts: '对话入索引',
         transcriptsHint: '把本智能体交接过的会话（以及绑定到它的会话）里的用户与助手文本编进索引，供「回忆」检索；工具输出与推理过程不入库，密钥会被打码，每个会话最多 12000 字。改动需重启宿主才彻底生效。',
-        sleepTitle: '提前压缩（睡眠）',
-        sleepHint: '上下文超过阈值时，在回合结束、会话空闲的那一刻主动请宿主压一次，而不是等它接近窗口才压。压缩质量由宿主决定；只加一条记账，不改写任何压缩逻辑。',
-        sleepThreshold: '触发阈值（tokens）',
-        sleepThresholdHint: '按整个上下文的 token 数计。10 万窗口的模型建议 4 万；1M 窗口按需调高。',
+        sleepTitle: '自动压缩与持续折叠（总开关）',
+        sleepHint: '开启后，在回合结束或会话空闲检查时，按下方条件尝试压缩；不会改动正在生成的会话。总开关不等于开启持续压缩：还需设置大于 0 的持续压缩目标，或打开「每轮都折叠」。两者都未启用时，只在达到应急阈值后尝试。归档折叠会把旧内容移出工作上下文，保留摘要或指针，后续细节需通过召回读取。',
+        sleepThreshold: '应急压缩触发阈值（tokens）',
+        sleepThresholdHint: '整个上下文的 token 数达到此值时，即使没有开启持续压缩，也会尝试应急压缩。它不是持续压缩的启动线；例如阈值 325000、目标为 0、每轮折叠关闭时，21 万 token 不会触发。应按模型窗口留出余量，持续压缩目标通常设得比此值低。',
         sleepStats: '已尝试 / 累计折叠',
         sleepFailing: '压缩连续失败',
         sleepEveryTurn: '每轮都折叠',
-        sleepEveryTurnHint: '不等阈值：每轮结束后把上一轮的已消费内容归档成指针桩，只留最近几条在工作区。上下文不再累积，但跨轮依赖要靠召回。',
-        sleepChunk: '每次折叠目标（tokens）',
-        sleepChunkHint: '持续折叠时每片的大小；硬阈值那一刀只把它当下限，实际按「超出目标的量」切，上限 200k。',
-        sleepKeepUnder: '持续压缩目标（tokens，0=关闭）',
-        sleepKeepUnderHint: '每次空闲折到这么多 token 以下。开「每轮都折」时它是每轮折叠的上限；填 0 表示不限，折到没得折为止。归档只进词法检索、不进向量索引，所以不会拖慢嵌入。',
-        sleepProbe: '运行一次检查',
-        sleepProbeDone: '已折叠 / 未折叠：',
-        sleepProbeHint: '立刻对所有活跃会话跑一次折叠判定，不用等下一轮；结果同时写进 index/compaction.jsonl。',
-        sleepMinSaved: '单次最少收益（tokens）',
-        sleepMinSavedHint: '估算这一片折叠后模型实际少读多少 token；低于这个值就不折。实测 33k 的原始文本往往只省下 3k（工具结果早已被剪枝到 5k 字符），而每次折叠都会让整个提示缓存失效，所以小折是净亏。',
+        sleepEveryTurnHint: '更激进的模式：不必超过持续目标或应急阈值，每轮结束后都会尝试折叠可归档的旧内容，也会在空闲检查时尝试。持续目标填 0 时，没有 token 停止线，但仍受每次最多分片数、最近内容保留和最少收益等限制；填正数也不代表低于该值就完全不折叠。此模式不保证每轮都能折叠，跨轮细节更依赖召回。',
+        sleepChunk: '每片折叠大小（tokens）',
+        sleepChunkHint: '普通持续折叠时，选择旧内容分片的目标大小，不是折叠后上下文的大小，也不等于实际节省量。达到应急阈值时，会按超出目标的量选择更大的片，以此值为下限，并受应急分片上限限制。',
+        sleepKeepUnder: '持续压缩目标（tokens，0 的含义见下方）',
+        sleepKeepUnderHint: '关闭「每轮都折叠」时：填正数表示上下文超过此值就尝试持续折叠；填 0 则关闭此触发方式，只保留应急阈值。开启「每轮都折叠」时：填 0 表示没有 token 停止线，而不是关闭折叠。建议先关闭每轮折叠，设置 100000 或 150000；正数至少填 20000。目标不是硬上限，分片数、最近内容保留、冷却和收益门槛可能使一次检查后仍高于目标。',
+        sleepProbe: '立即检查并尝试压缩',
+        sleepProbeDone: '已尝试 / 未尝试：',
+        sleepProbeHint: '不是只读诊断：立即检查所有活跃会话，满足条件时会真正执行压缩或归档。仍遵守总开关、忙碌状态、触发条件和冷却等限制；不会强制折叠。结果显示尝试与未尝试的会话数，不代表全部成功；详细结果写入 index/compaction.jsonl。',
+        sleepMinSaved: '单片最低预计节省量（tokens）',
+        sleepMinSavedHint: '按模型实际可见内容估算这一片能省多少 token，低于门槛就跳过。原始归档大小不等于实际收益：工具输出可能已被裁剪。折叠也可能降低提示缓存复用，因此不宜为很小的收益频繁折叠；填 0 仅取消收益门槛，不会取消其他限制。',
         recallSrcSession: '对话',
         recallSessions: '对话来源',
         recallSessionsHint: '以下是本智能体有权读取的会话。取消勾选后，该会话不再进入索引（检索不到），但「回到对话」仍可用。',
@@ -572,23 +572,23 @@ window.__ModuleLoader__.load({
         recallSrcKnowledge: 'knowledge',
         transcripts: 'Index conversations',
         transcriptsHint: 'Index the user and assistant text of sessions this agent handed off or is bound to, so recall can search them. Tool results and reasoning stay out, secrets are masked, and each session is capped at 12000 characters. Changes need a host restart to fully apply.',
-        sleepTitle: 'Compress early (sleep)',
-        sleepHint: 'When the context crosses the threshold, ask the host for one compaction at the end of a turn while the session is idle, instead of waiting until it is close to the window. Summary quality stays with the host; this only adds an accounting line.',
-        sleepThreshold: 'Trigger (tokens)',
-        sleepThresholdHint: 'Counted over the whole context. Roughly 40k for a 100k window; raise it for a 1M window.',
+        sleepTitle: 'Automatic compaction and continuous folding (master switch)',
+        sleepHint: 'When enabled, checks at turn end or while idle attempt compaction under the conditions below; sessions that are generating are left alone. This switch alone does not enable continuous folding: set a positive context target or enable Fold every turn. With neither, only the emergency threshold triggers an attempt. Archive folding moves old material out of the working context and leaves a summary or pointer; use recall for details later.',
+        sleepThreshold: 'Emergency compaction threshold (tokens)',
+        sleepThresholdHint: 'Attempts emergency compaction when the whole context reaches this size, even without continuous folding. This is separate from the continuous target: with a 325000 threshold, target 0 and Fold every turn off, 210000 tokens will not trigger a fold. Leave room within the model window; normally set the continuous target below this threshold.',
         sleepStats: 'attempts / folded',
         sleepFailing: 'Compaction failing repeatedly',
         sleepEveryTurn: 'Fold every turn',
-        sleepEveryTurnHint: 'No threshold: after each turn, archive the consumed material into pointer stubs and keep only the recent few nodes. The context stops growing; cross-turn continuity relies on recall.',
-        sleepChunk: 'Fold size (tokens)',
-        sleepChunkHint: 'Slice size while folding continuously. The emergency fold only treats it as a floor: it cuts how far over target you are, capped at 200k.',
-        sleepKeepUnder: 'Keep context under (tokens, 0 = off)',
-        sleepKeepUnderHint: 'Fold back under this many tokens on every idle. With fold-every-turn it caps each turn pass; 0 means no cap. Archives stay lexically searchable but skip the vector index, so embedding cost stays flat.',
-        sleepProbe: 'Run a check now',
-        sleepProbeDone: 'folded / skipped:',
-        sleepProbeHint: 'Runs the fold decision on every live session right away instead of waiting for the next turn; the outcome is also written to index/compaction.jsonl.',
-        sleepMinSaved: 'Minimum saving per fold (tokens)',
-        sleepMinSavedHint: 'Estimated tokens the model actually stops reading when this slice is folded; below it, nothing is folded. Measured: a 33k slice usually frees only ~3k (tool results are already pruned to 5k chars), while every fold invalidates the whole prompt cache, so small folds are a net loss.',
+        sleepEveryTurnHint: 'More aggressive: attempts to fold eligible old material after each turn and during idle checks, without needing to exceed either target or threshold. Target 0 removes the token stopping line, but slice limits, recent-content retention and minimum savings still apply. A positive target does not prevent all folding below it in this mode. An attempt may still skip; cross-turn details rely more on recall.',
+        sleepChunk: 'Target size per slice (tokens)',
+        sleepChunkHint: 'The target amount of old material selected for a normal continuous fold, not the resulting context size or actual saving. At the emergency threshold, larger slices are selected based on the excess over the target, using this size as a floor and the emergency slice limit as a cap.',
+        sleepKeepUnder: 'Continuous context target (tokens; see below for 0)',
+        sleepKeepUnderHint: 'With Fold every turn OFF: a positive value triggers continuous folding above that size; 0 disables this trigger, leaving only the emergency threshold. With Fold every turn ON: 0 means no token stopping line, not folding disabled. Start with every-turn folding off and a target of 100000 or 150000; positive values must be at least 20000. This is not a hard cap: slice limits, recent-content retention, cooldown and minimum savings may leave the context above target after a check.',
+        sleepProbe: 'Check and attempt compaction now',
+        sleepProbeDone: 'attempted / not attempted:',
+        sleepProbeHint: 'Not read-only: checks all live sessions now and actually compacts or archives when eligible. Still respects the master switch, busy state, trigger conditions and cooldown; it does not force a fold. Counts show attempted versus unattempted sessions, not successful folds. Details are recorded in index/compaction.jsonl.',
+        sleepMinSaved: 'Minimum estimated saving per slice (tokens)',
+        sleepMinSavedHint: 'Estimates savings in model-visible tokens and skips slices below this value. Archive size is not actual saving: tool output may already be trimmed. Folding can also reduce prompt-cache reuse, so avoid frequent folds for tiny savings. Setting 0 removes only this savings gate, not the other limits.',
         recallSrcSession: 'conversation',
         recallSessions: 'Conversations',
         recallSessionsHint: 'Sessions this agent may read. Uncheck one to keep it out of the index (it will not be searchable), while "Go to conversation" still works.',
@@ -733,6 +733,9 @@ window.__ModuleLoader__.load({
 /* The shell rearranged its sidebar grid in 0.2.2: keep the section visible
    even when the new parent is a grid row with a fixed track. */
 #am-sidebar-agents{display:flex!important;visibility:visible!important;opacity:1!important;height:auto!important;max-height:none!important;min-height:38px!important;overflow:visible!important}
+#am-side-teams{display:flex!important;visibility:visible!important;opacity:1!important;height:auto!important;max-height:none!important;min-height:38px!important;overflow:visible!important}
+.am-side-teams{margin-bottom:2px}
+#am-side-teams[hidden]{display:none!important}
 .am-side-agents.is-collapsed .am-side-agents-list,.am-side-agents.is-collapsed .am-side-view{display:none}
 .am-side-agents-head{box-sizing:border-box;display:flex;align-items:center;gap:6px;height:38px;margin:0 0 6px;padding-left:6px;color:var(--dsw-alias-label-tertiary);overflow:hidden}
 .am-side-agents-title{font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
@@ -3895,6 +3898,7 @@ window.__ModuleLoader__.load({
         let stopped = false
         let applied = ''
         let sectionOpen = true
+        let teamsOpen = true
         let lastAgents = []
         let bannerSessionId = ''
         let observer = null
@@ -3920,6 +3924,7 @@ window.__ModuleLoader__.load({
           if (saved?.sort === 'recent' || saved?.sort === 'name') sortMode = saved.sort
           if (typeof saved?.showArchived === 'boolean') showArchived = saved.showArchived
           if (typeof saved?.sectionOpen === 'boolean') sectionOpen = saved.sectionOpen
+          if (typeof saved?.teamsOpen === 'boolean') teamsOpen = saved.teamsOpen
           if (typeof saved?.compactAll === 'boolean') compactAll = saved.compactAll
         } catch {
           /* storage can be unavailable in hardened compositions */
@@ -3928,7 +3933,7 @@ window.__ModuleLoader__.load({
           String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch])
         const savePrefs = () => {
           try {
-            window.localStorage.setItem(prefsKey, JSON.stringify({ sort: sortMode, showArchived, sectionOpen, compactAll }))
+            window.localStorage.setItem(prefsKey, JSON.stringify({ sort: sortMode, showArchived, sectionOpen, teamsOpen, compactAll }))
           } catch {
             /* ignore */
           }
@@ -4290,7 +4295,7 @@ window.__ModuleLoader__.load({
               }
             })
             .filter(agent => agent.sessions.length > 0)
-          if (visible.length === 0 && activeProjects.length === 0 && lastAgents.length === 0) {
+          if (visible.length === 0 && (query !== '' || lastAgents.length === 0)) {
             host.hidden = true
             return
           }
@@ -4325,9 +4330,7 @@ window.__ModuleLoader__.load({
               if (String(entry.project.name ?? '').toLowerCase().includes(query)) return true
               return entry.members.some(member => member.sessions.length > 0 || member.name.toLowerCase().includes(query))
             })
-          const total =
-            visible.reduce((sum, agent) => sum + agent.sessions.length, 0) +
-            projectRows.reduce((sum, entry) => sum + entry.members.reduce((n, member) => n + member.sessions.length, 0), 0)
+          const total = visible.reduce((sum, agent) => sum + agent.sessions.length, 0)
           visibleSessions = [
             ...visible.flatMap(agent =>
               agent.sessions.map(session => ({ sessionId: session.sessionId, agentId: agent.agentId })),
@@ -4415,48 +4418,109 @@ window.__ModuleLoader__.load({
               )
             })
             .join('')
-          const projectHtml = projectRows
-            .map(entry => {
-              const open = !collapsedProjects.has(entry.project.id)
-              const room = lastRooms.get(entry.project.roomId)
-              const memberHtml = entry.members
-                .map(member => {
-                  const sessions = member.sessions.map(sessionRow).join('')
-                  return (
-                    `<div class="am-project-side-member" data-agent="${escape(member.id)}">` +
-                    `<span class="am-project-side-star">${member.lead ? '★' : '·'}</span>` +
-                    `<span class="am-project-side-name">${escape(member.name)}</span>` +
-                    `<span class="am-project-side-role">${escape(member.lead ? t('teamLead') : t('teamMembers'))}</span>` +
-                    `</div>` +
-                    `<div class="am-side-sessions">${sessions}</div>`
-                  )
-                })
-                .join('')
-              return (
-                `<div class="am-project-side" data-project="${escape(entry.project.id)}">` +
-                `<button type="button" class="am-project-side-head" data-action="toggle-project" data-project="${escape(entry.project.id)}">` +
-                `<span class="am-project-side-caret${open ? ' is-open' : ''}">${ICON.chevron}</span>` +
-                `<span class="am-project-side-title">${escape(entry.project.name)}</span>` +
-                `<span class="am-side-agent-count">${entry.members.reduce((sum, member) => sum + member.sessions.length, 0)}</span>` +
-                `</button>` +
-                (open
-                  ? (room === undefined ? '' : `<div class="am-project-side-room">${escape(t('teamRoom'))}：${escape(room)}</div>`) + memberHtml
-                  : '') +
-                `</div>`
-              )
-            })
-            .join('')
-          if (agentHtml === '' && projectHtml === '') {
+          if (agentHtml === '') {
             list.innerHTML = `<div class="am-side-empty">${escape(t('sideSearchEmpty'))}</div>`
             list.scrollTop = keepScroll
             return
           }
-          list.innerHTML =
-            agentHtml +
-            (projectHtml === ''
-              ? ''
-              : `<div class="am-side-projects-head">${escape(t('teamProjects'))}</div>` + projectHtml)
+          list.innerHTML = agentHtml
           list.scrollTop = keepScroll
+        }
+
+        /** The team block is its own section in the sidebar, above the agent list. */
+        const ensureTeamsChrome = host => {
+          if (host.dataset.chrome === '1') return
+          host.dataset.chrome = '1'
+          host.innerHTML =
+            `<div class="am-side-agents-head">` +
+            `<button type="button" class="am-side-agents-title" data-action="panel" title="${escape(t('sidebarPanel'))}">${escape(t('teamProjects'))}</button>` +
+            `<span class="am-side-agents-count" title="0">0</span>` +
+            `<span class="am-side-agents-actions">` +
+            `<button type="button" class="am-side-icon-btn am-side-teams-toggle is-open" data-action="toggle-teams" title="${escape(t('sidebarCollapse'))}" aria-label="${escape(t('sidebarCollapse'))}">${ICON.chevron}</button>` +
+            `</span>` +
+            `</div>` +
+            `<div class="am-side-agents-list"></div>`
+        }
+
+        const renderTeams = host => {
+          if (host === null || host === undefined) return
+          ensureTeamsChrome(host)
+          const activeProjects = lastProjects.filter(project => project.status === 'active')
+          if (activeProjects.length === 0) {
+            host.hidden = true
+            return
+          }
+          host.hidden = false
+          host.classList.toggle('is-collapsed', !teamsOpen)
+          const toggle = host.querySelector('.am-side-teams-toggle')
+          toggle.classList.toggle('is-open', teamsOpen)
+          toggle.title = teamsOpen ? t('sidebarCollapse') : t('sidebarExpand')
+          const count = host.querySelector('.am-side-agents-count')
+          count.textContent = String(activeProjects.length)
+          count.title = String(activeProjects.length)
+          const list = host.querySelector('.am-side-agents-list')
+          const rows = activeProjects.map(project => {
+            const open = !collapsedProjects.has(project.id)
+            const room = lastRooms.get(project.roomId)
+            const memberHtml = [{ id: project.lead, lead: true }, ...(project.members ?? []).map(id => ({ id, lead: false }))]
+              .map(member => {
+                const agent = lastAgents.find(item => item.agentId === member.id)
+                const name = lastVaultNames.get(member.id) ?? agent?.name ?? member.id
+                const sessions = (agent?.sessions ?? []).filter(session => session.archive !== 'strong')
+                return (
+                  `<div class="am-project-side-member" data-agent="${escape(member.id)}">` +
+                  `<span class="am-project-side-star">${member.lead ? '★' : '·'}</span>` +
+                  `<span class="am-project-side-name">${escape(name)}</span>` +
+                  `<span class="am-project-side-role">${escape(member.lead ? t('teamLead') : t('teamMembers'))}</span>` +
+                  `</div>` +
+                  `<div class="am-side-sessions">` +
+                  sessions
+                    .map(session => {
+                      const state = session.running ? `<span class="am-side-session-dot" title="${escape(t('sideRunning'))}"></span>` : ''
+                      return (
+                        `<button type="button" class="am-side-session" data-action="open" data-session="${escape(session.sessionId)}" title="${escape(session.title || '')}">` +
+                        `<span class="am-side-session-title">${escape(session.title || t('untitled'))}</span>` +
+                        `<span class="am-side-session-meta">${escape(session.workspaceTitle || t('sessionsNoWorkspace'))}</span>` +
+                        (state === '' ? '' : `<span class="am-side-session-state">${state}</span>`) +
+                        `</button>`
+                      )
+                    })
+                    .join('') +
+                  `</div>`
+                )
+              })
+              .join('')
+            return (
+              `<div class="am-project-side" data-project="${escape(project.id)}">` +
+              `<button type="button" class="am-project-side-head" data-action="toggle-project" data-project="${escape(project.id)}">` +
+              `<span class="am-project-side-caret${open ? ' is-open' : ''}">${ICON.chevron}</span>` +
+              `<span class="am-project-side-title">${escape(project.name)}</span>` +
+              `<span class="am-side-agent-count">${[{ id: project.lead }, ...(project.members ?? []).map(id => ({ id }))].reduce((sum, member) => sum + (lastAgents.find(item => item.agentId === member.id)?.sessions.length ?? 0), 0)}</span>` +
+              `</button>` +
+              (open ? (room === undefined ? '' : `<div class="am-project-side-room">${escape(t('teamRoom'))}：${escape(room)}</div>`) + memberHtml : '') +
+              `</div>`
+            )
+          })
+          const signature = JSON.stringify([
+            teamsOpen,
+            [...collapsedProjects],
+            activeProjects.map(project => [project.id, project.name, project.lead, project.members ?? [], project.roomId, project.tasks?.active, project.tasks?.total]),
+            [...lastVaultNames],
+            [...lastRooms],
+            lastAgents.map(agent => [agent.agentId, agent.sessions.map(session => [session.sessionId, session.title, session.running, session.archive])]),
+          ])
+          if (signature === host.dataset.stamp) return
+          host.dataset.stamp = signature
+          const keepScroll = list.scrollTop
+          list.innerHTML = rows.join('')
+          list.scrollTop = keepScroll
+        }
+
+        const renderSections = () => {
+          const agentsHost = document.getElementById('am-sidebar-agents')
+          if (agentsHost !== null) renderSection(agentsHost)
+          const teamsHost = document.getElementById('am-side-teams')
+          if (teamsHost !== null) renderTeams(teamsHost)
         }
 
         /**
@@ -4585,14 +4649,14 @@ window.__ModuleLoader__.load({
                 compactAll = false
                 viewOpen = false
                 savePrefs()
-                renderSection(host)
+                renderSections()
               } else if (action === 'expand-all') {
                 collapsed.clear()
                 collapsedProjects.clear()
                 compactAll = false
                 viewOpen = false
                 savePrefs()
-                renderSection(host)
+                renderSections()
               } else if (action === 'add-agent') {
                 openCreateAgent()
               } else if (action === 'toggle-section') {
@@ -4604,7 +4668,7 @@ window.__ModuleLoader__.load({
                 if (projectId === '') return
                 if (collapsedProjects.has(projectId)) collapsedProjects.delete(projectId)
                 else collapsedProjects.add(projectId)
-                renderSection(host)
+                renderSections()
               } else if (action === 'toggle-agent') {
                 const agentId = target.closest('[data-agent]')?.getAttribute('data-agent') ?? ''
                 if (agentId === '') return
@@ -4680,11 +4744,65 @@ window.__ModuleLoader__.load({
               openAgentMenu(event)
             })
           }
+          let teamsHost = document.getElementById('am-side-teams')
+          if (teamsHost === null) {
+            teamsHost = document.createElement('div')
+            teamsHost.id = 'am-side-teams'
+            teamsHost.className = 'am-side-agents am-side-teams'
+            teamsHost.addEventListener('wheel', event => {
+              const list = event.target instanceof Element ? event.target.closest('.am-side-agents-list') : null
+              if (list === null) return
+              const delta = event.deltaY
+              if (delta === 0) return
+              const top = list.scrollTop <= 0
+              const bottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 1
+              if ((delta < 0 && top) || (delta > 0 && bottom)) return
+              event.stopPropagation()
+            }, { capture: true, passive: true })
+            teamsHost.addEventListener('click', event => {
+              const target = event.target.closest?.('[data-action]')
+              if (target === null) return
+              const action = target.getAttribute('data-action')
+              if (action === 'panel') {
+                const layout = ctx.get('layout')
+                if (layout !== undefined && typeof layout.selectPanel === 'function') {
+                  try {
+                    layout.selectPanel('agent-memory')
+                  } catch {
+                    /* panel id moved in a newer shell */
+                  }
+                }
+              } else if (action === 'toggle-teams') {
+                teamsOpen = !teamsOpen
+                savePrefs()
+                renderTeams(teamsHost)
+              } else if (action === 'toggle-project') {
+                const projectId = target.getAttribute('data-project') ?? ''
+                if (projectId === '') return
+                if (collapsedProjects.has(projectId)) collapsedProjects.delete(projectId)
+                else collapsedProjects.add(projectId)
+                renderTeams(teamsHost)
+              } else if (action === 'open') {
+                const sessionId = target.getAttribute('data-session') ?? ''
+                closeContextMenu()
+                if (sessionId !== '') openSession(sessionId)
+              }
+            })
+            // A stray right click inside our section must not raise the shell's
+            // menu for whatever row happens to sit behind it.
+            teamsHost.addEventListener('contextmenu', event => {
+              event.preventDefault()
+              event.stopPropagation()
+            })
+          }
           // Re-inserting a node resets the scroll of its subtree, so a mount fix
           // triggered by a React re-render also threw the list back to the top.
           const keepListScroll = host.querySelector('.am-side-agents-list')?.scrollTop ?? 0
           if (host.parentElement !== root) root.insertBefore(host, area ?? root.firstChild)
           else if (area !== null && host.nextElementSibling !== area) root.insertBefore(host, area)
+          if (teamsHost.parentElement !== root) root.insertBefore(teamsHost, host)
+          else if (teamsHost.nextElementSibling !== host) root.insertBefore(teamsHost, host)
+          renderTeams(teamsHost)
           if (keepListScroll > 0) {
             const list = host.querySelector('.am-side-agents-list')
             if (list !== null) list.scrollTop = keepListScroll
@@ -4720,6 +4838,7 @@ window.__ModuleLoader__.load({
             observedRoot = root
             observer = new MutationObserver(() => {
               if (!root.contains(host)) root.insertBefore(host, area)
+              if (!root.contains(teamsHost)) root.insertBefore(teamsHost, host)
             })
             observer.observe(root, { childList: true })
           }
@@ -4786,9 +4905,12 @@ window.__ModuleLoader__.load({
               mount()
               const host = document.getElementById('am-sidebar-agents')
               if (host !== null) renderSection(host)
+              const teamsHost = document.getElementById('am-side-teams')
+              if (teamsHost !== null) renderTeams(teamsHost)
             } else {
               lastAgents = []
               document.getElementById('am-sidebar-agents')?.remove()
+              document.getElementById('am-side-teams')?.remove()
             }
             // A read-only banner for the currently selected archived session.
             const selectedRow = document.querySelector('[data-row-key^="session:"][aria-selected="true"]')
@@ -4849,6 +4971,7 @@ window.__ModuleLoader__.load({
           observer?.disconnect()
           style.remove()
           document.getElementById('am-sidebar-agents')?.remove()
+          document.getElementById('am-side-teams')?.remove()
           document.getElementById('am-archive-banner')?.remove()
           closeContextMenu()
           window.clearTimeout(ctxToastTimer)
