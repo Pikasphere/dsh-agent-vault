@@ -163,6 +163,7 @@ window.__ModuleLoader__.load({
         teamStatusCancelled: '已取消',
         teamRoom: '讨论室',
         teamRoomNone: '不绑定',
+        teamProjects: '团队项目',
         teamArchive: '归档',
         teamArchiveConfirm: '归档项目 “{name}”？归档后它的成员可以加入其他团队。',
         teamArchived: '已归档',
@@ -465,6 +466,7 @@ window.__ModuleLoader__.load({
         teamStatusCancelled: 'cancelled',
         teamRoom: 'Room',
         teamRoomNone: 'No room',
+        teamProjects: 'Team projects',
         teamArchive: 'Archive',
         teamArchiveConfirm: 'Archive project "{name}"? Its members become free to join another team.',
         teamArchived: 'archived',
@@ -701,6 +703,24 @@ window.__ModuleLoader__.load({
 .am-item-meta{font-size:11px;color:var(--dsw-alias-label-tertiary);display:flex;gap:10px;flex-wrap:wrap}
 .am-tag{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
 .am-team-tag{flex:none;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
+.am-project-heading{margin:10px 10px 4px}
+.am-project{margin:0 2px}
+.am-project-head{display:flex;align-items:center;gap:6px;width:100%;height:30px;padding:0 8px;border:0;border-radius:var(--dsw-radius-md);background:transparent;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;line-height:20px;cursor:pointer;text-align:left}
+.am-project-head:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.am-project-caret{width:12px;flex:none;color:var(--dsw-alias-label-tertiary);font-size:11px}
+.am-project-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-meta{flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.am-project-room{display:block;width:calc(100% - 24px);margin:0 0 3px 24px;padding:0;border:0;background:none;font-family:inherit;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-room:hover{color:var(--dsw-alias-label-secondary)}
+.am-project-member{padding-left:6px}
+.am-project-member .am-side-agent-row{height:30px;padding:0 8px;font-size:13px}
+.am-star{width:14px;flex:none;color:var(--dsw-alias-state-business-primary);font-size:11px;line-height:20px;text-align:center}
+.am-project-role{margin-left:auto;flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary)}
+.am-project-session{display:flex;align-items:center;gap:6px;width:calc(100% - 24px);margin:0 0 1px 24px;padding:2px 6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;font-family:inherit;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}
+.am-project-session:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+.am-project-session-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-project-session-dot{width:6px;height:6px;flex:none;border-radius:999px;background:var(--dsw-alias-state-success-primary)}
+
 .am-error{margin:0;padding:10px 12px;border-radius:10px;font-size:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary)) 45%,transparent);color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary));background:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary)) 8%,transparent)}
 .am-toast{font-size:12px;color:var(--dsw-alias-state-success-primary)}
 .am-divider{height:1px;background:var(--dsw-alias-border-l1);margin:4px 0}
@@ -957,6 +977,10 @@ window.__ModuleLoader__.load({
       // Team projects and rooms, for the agent list, the agent header and the room page.
       const [teamProjects, setTeamProjects] = useState([])
       const [teamRooms, setTeamRooms] = useState([])
+      // Bound conversations of every agent, for the project dropdown's sessions.
+      const [boundAgents, setBoundAgents] = useState([])
+      // Which project blocks are expanded in the left list; collapsed by default.
+      const [projectOpen, setProjectOpen] = useState({})
       const [journal, setJournal] = useState([])
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
@@ -1154,6 +1178,25 @@ window.__ModuleLoader__.load({
           live = false
         }
       }, [view, roomVersion])
+
+      // Conversations per agent, so a project block can show where its members
+      // are working without opening each agent first.
+      useEffect(() => {
+        if (view !== 'agents' || data?.capabilities?.sessions !== true) return undefined
+        let live = true
+        request('/op', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'bound.list', args: {} }),
+        })
+          .then(payload => {
+            if (live) setBoundAgents(payload.value?.agents ?? [])
+          })
+          .catch(() => {})
+        return () => {
+          live = false
+        }
+      }, [view, teamProjects.length, data?.capabilities?.sessions])
 
       // Team membership powers the agent list badge and the agent header; the
       // panel only reads it here, the Team tab is where projects are managed.
@@ -1942,6 +1985,106 @@ window.__ModuleLoader__.load({
               )
             : null
 
+      const activeProjects = teamProjects.filter(project => project.status === 'active')
+      const sessionsOfAgent = id => boundAgents.find(group => group.agentId === id)?.sessions ?? []
+      const vaultRow = item =>
+        h(
+          'button',
+          {
+            key: item.id,
+            className: `am-vault${item.id === selectedId ? ' is-active' : ''}`,
+            onClick: () => select(item.id),
+          },
+          h(
+            'span',
+            { className: 'am-vault-row' },
+            h('span', { className: 'am-vault-name' }, item.name),
+            item.id === data.activeVault ? h('span', { className: 'am-badge' }, t('active')) : null,
+          ),
+          h(
+            'span',
+            { className: 'am-vault-meta' },
+            t('vaultMeta')
+              .replace('{m}', String(item.memoryChars))
+              .replace('{limit}', String(limit))
+              .replace('{k}', String(item.knowledgeCount))
+              .replace('{u}', String((data.bindings ?? []).filter(entry => entry.agentId === item.id).length)),
+          ),
+        )
+
+      /** One team project as a collapsible block: ★ lead, members, their sessions. */
+      const projectBlock = project => {
+        const open = projectOpen[project.id] === true
+        const members = [
+          { id: project.lead, lead: true },
+          ...(project.members ?? []).map(id => ({ id, lead: false })),
+        ]
+        const room = teamRooms.find(item => item.id === project.roomId)
+        return h(
+          'div',
+          { key: project.id, className: 'am-project' },
+          h(
+            'button',
+            {
+              className: 'am-project-head',
+              title: project.name,
+              onClick: () => setProjectOpen(current => ({ ...current, [project.id]: !open })),
+            },
+            h('span', { className: 'am-project-caret' }, open ? '▾' : '▸'),
+            h('span', { className: 'am-project-name' }, project.name),
+            h('span', { className: 'am-project-meta' }, `${project.tasks.active}/${project.tasks.total}`),
+          ),
+          project.roomId === '' || room === undefined
+            ? null
+            : h(
+                'button',
+                {
+                  className: 'am-project-room',
+                  onClick: () => {
+                    setView('rooms')
+                    setRoomId(project.roomId)
+                  },
+                },
+                `${t('teamRoom')}：${room.name}`,
+              ),
+          open
+            ? members.map(member =>
+                h(
+                  'div',
+                  { key: member.id, className: 'am-project-member' },
+                  h(
+                    'button',
+                    {
+                      className: `am-side-agent-row${member.id === selectedId ? ' is-selected' : ''}`,
+                      onClick: () => select(member.id),
+                    },
+                    h('span', { className: 'am-star' }, member.lead ? '★' : '·'),
+                    h('span', { className: 'am-side-agent-name' }, nameOfVault(member.id)),
+                    h('span', { className: 'am-project-role' }, member.lead ? t('teamLead') : t('teamMembers')),
+                  ),
+                  sessionsOfAgent(member.id)
+                    .slice(0, 3)
+                    .map(session =>
+                      h(
+                        'button',
+                        {
+                          key: session.sessionId,
+                          className: 'am-project-session',
+                          title: session.title || session.sessionId,
+                          onClick: () => openBoundSession(session.sessionId),
+                        },
+                        h('span', { className: 'am-project-session-title' }, session.title || session.sessionId),
+                        session.running ? h('span', { className: 'am-project-session-dot' }) : null,
+                      ),
+                    ),
+                ),
+              )
+            : null,
+        )
+      }
+
+      const ungrouped = data.vaults.filter(item => teamOfAgent(item.id) === null)
+
       const sideList = h(
         'div',
         { className: 'am-vaults' },
@@ -1966,32 +2109,15 @@ window.__ModuleLoader__.load({
               )
           : data.vaults.length === 0
             ? h('p', { className: 'am-note-dim', style: { padding: '8px 10px' } }, t('emptyList'))
-            : data.vaults.map(item =>
-                h(
-                  'button',
-                  {
-                    key: item.id,
-                    className: `am-vault${item.id === selectedId ? ' is-active' : ''}`,
-                    onClick: () => select(item.id),
-                  },
-                  h(
-                    'span',
-                    { className: 'am-vault-row' },
-                    h('span', { className: 'am-vault-name' }, item.name),
-                    item.id === data.activeVault ? h('span', { className: 'am-badge' }, t('active')) : null,
-                    teamOfAgent(item.id) === null ? null : h('span', { className: 'am-team-tag' }, teamOfAgent(item.id).name),
-                  ),
-                  h(
-                    'span',
-                    { className: 'am-vault-meta' },
-                    t('vaultMeta')
-                      .replace('{m}', String(item.memoryChars))
-                      .replace('{limit}', String(limit))
-                      .replace('{k}', String(item.knowledgeCount))
-                      .replace('{u}', String((data.bindings ?? []).filter(entry => entry.agentId === item.id).length)),
-                  ),
-                ),
-              ),
+            : [
+                ...ungrouped.map(vaultRow),
+                ...(activeProjects.length === 0
+                  ? []
+                  : [
+                      h('div', { key: 'team-projects-head', className: 'am-side-label am-project-heading' }, t('teamProjects')),
+                      ...activeProjects.map(projectBlock),
+                    ]),
+              ],
       )
 
       const side = h(
