@@ -15,6 +15,7 @@
     "store.js",
     "rooms.js",
     "team/store.js",
+    "team/dispatch.js",
     "rank.js",
     "graph.js",
     "recall.js",
@@ -66,7 +67,7 @@
   },
   "scripts": {
     "prepack": "node test-package.mjs",
-    "test": "node test-store.mjs && node test-binding.mjs && node test-migrate.mjs && node test-rooms.mjs && node test-journal.mjs && node test-time.mjs && node test-recall.mjs && node test-transcripts.mjs && node test-embed.mjs && node test-reveal.mjs && node test-sleep.mjs && node test-team.mjs && node test-host.mjs && node test-client.mjs && node test-package.mjs"
+    "test": "node test-store.mjs && node test-binding.mjs && node test-migrate.mjs && node test-rooms.mjs && node test-journal.mjs && node test-time.mjs && node test-recall.mjs && node test-transcripts.mjs && node test-embed.mjs && node test-reveal.mjs && node test-sleep.mjs && node test-team.mjs && node test-team-dispatch.mjs && node test-host.mjs && node test-client.mjs && node test-package.mjs"
   },
   "license": "MIT",
   "optionalDependencies": {

@@ -1,7 +1,7 @@
 # 智能体团队与任务分配（设计稿）
 
-> 状态：**P0 已实现**（2026-11-26，分支 `feat/agent-teams`）；P1–P3 未实现。日期 2026-11-25。
-> 本文只描述设计与验收口径，落地按 §12 分期；实现见 `team/store.js` 与 `index.js` 的 `registerTeamTools`。背景研读见 `~/文档/deepseek-harness/default-workspace/superagent-原型研读.md` 与 `superagent-插件工程研读.md`。
+> 状态：**P0、P1 已实现**（2026-11-26，分支 `feat/agent-teams`）；P2–P3 未实现。日期 2026-11-25。
+> 本文只描述设计与验收口径，落地按 §12 分期；实现见 `team/store.js`、`team/dispatch.js` 与 `index.js` 的 `registerTeamTools`。背景研读见 `~/文档/deepseek-harness/default-workspace/superagent-原型研读.md` 与 `superagent-插件工程研读.md`。
 >
 > 一句话：团队的单位是**智能体**；项目只是把已有智能体编成「1 负责人 + N 成员」；任务由负责人分配、成员执行并汇报；子智能体直接使用 DSH 官方 `subagent`，vault 不接管。
 
@@ -324,13 +324,13 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 | 期 | 范围 | 验收 |
 |---|---|---|
 | P0 | 领域模型 + 文件存储 + 工具（project/task/assign/report/list/close），无唤醒 | **已完成（2026-11-26）**：`team/store.js`、`registerTeamTools`、`test-team.mjs` 全绿；文件落盘正确、重启可读、非法操作返回固定 code |
-| P1 | 唤醒 + relay（依赖 DSH inbox API）+ 降级 claim 路径 | 成员被叫醒、report 回 lead、重试幂等；断网/重启不重投；降级路径可用 |
+| P1 | 唤醒 + relay（依赖 DSH inbox API）+ 降级 claim 路径 | **已完成（2026-11-26）**：`team/dispatch.js` 用 `agent.followup` 唤醒成员、把非 progress 的 report relay 给 lead；确定性消息 id + inbox/历史检查防重投；宿主不支持 inbox 时停在 queued，claim 路径保留 |
 | P2 | HTTP ops + 面板「团队」页签 | 面板可建项目、派任务、看报告；与工具操作一致 |
 | P3 | 项目作用域知识、房间绑定、恢复与容量、归档建议 | 项目过滤检索正确；重启恢复正确；容量不超卖 |
 
 每期结束跑 `npm test`（现有 node 测试风格），并补 `test-team.mjs`。
 
-P0 的落地差异：`team_task_assign` 只把 attempt 置 `queued`，不唤醒成员；成员在自己的会话里用 `team_task_claim` 领取后再 `team_task_report`。`team_project_list` 是为发现项目补的只读工具。任务被改派或关闭时，未完成的 attempt 记为 `cancelled`（新增于 `team/store.js`，不在原设计的状态表里）。
+P0/P1 的落地差异：分配后由 `team/dispatch.js` 自动唤醒成员（找到或新建成员绑定会话，`agent.followup` 投递任务 brief，随后 attempt 置 `running`）；成员报 `waiting/ready/blocked/failed/dropped` 后自动 relay 给 lead 的绑定会话（没有绑定会话则留在待投队列，不新建 lead 会话）。队列是派生状态：`pendingDispatches` = assigned + queued attempt，`pendingRelays` = 有 report 且无 `relayedAt`，重启后重放。消息 id 固定为 `vault-team:dispatch:<attemptId>` / `vault-team:relay:<attemptId>:<at>`，发送前查 inbox 与历史，避免重投。宿主没有 inbox API 时，attempt 停在 `queued`，成员仍用 `team_task_claim` 领取。`team_project_list` 是为发现项目补的只读工具。任务被改派或关闭时，未完成的 attempt 记为 `cancelled`（新增于 `team/store.js`，不在原设计的状态表里）。
 
 ## 13. 开放问题
 

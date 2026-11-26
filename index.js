@@ -26,6 +26,7 @@ import { createStore, defaultRoot, MemoryError } from './store.js'
 import { createJournals } from './journal.js'
 import { createRooms } from './rooms.js'
 import { createTeam } from './team/store.js'
+import { createTeamDispatch } from './team/dispatch.js'
 import { createSleep } from './sleep.js'
 import { createArchives, ARCHIVE_LEVELS } from './archive.js'
 import { createRecall, DEFAULT_MODEL } from './recall.js'
@@ -142,14 +143,31 @@ export function apply(ctx, config = {}) {
     recordError(store, 'team/init', error)
   }
 
+  let dispatch
+  if (team !== undefined && team !== null) {
+    try {
+      dispatch = createTeamDispatch({ ctx, store, team, log: message => recordError(store, 'team/dispatch', message) })
+    } catch (error) {
+      recordError(store, 'team/dispatch-init', error)
+    }
+  }
+
   try {
     registerPrompt(ctx, store)
-    registerTools(ctx, store, rooms, journals, recall, team)
+    registerTools(ctx, store, rooms, journals, recall, team, dispatch)
     registerArchiveGate(ctx, store, archives)
     sleep.attach()
     registerApi(ctx, store, rooms, journals, archives, recall, reveal, sleep)
   } catch (error) {
     recordError(store, 'apply', error)
+  }
+
+  if (dispatch !== undefined && dispatch !== null) {
+    try {
+      dispatch.start()
+    } catch (error) {
+      recordError(store, 'team/dispatch-start', error)
+    }
   }
 
   // The local model costs ~150 ms to load; do it after the host settles so the
@@ -315,7 +333,7 @@ function vaultOf(store, args, exec) {
   return store.resolveVault({ id: args?.id ?? args?.vault, sessionId: exec?.agent?.id })
 }
 
-function registerTools(ctx, store, rooms, journals, recall, team) {
+function registerTools(ctx, store, rooms, journals, recall, team, dispatch) {
   ctx.inject(['tools'], scoped => {
     const register = (definition, label) => scoped.effect(() => scoped.tools.register(definition), label)
     const limit = store.memoryLimit
@@ -554,7 +572,7 @@ function registerTools(ctx, store, rooms, journals, recall, team) {
 
     registerRoomTools(register, store, rooms)
     registerJournalTools(register, store, journals)
-    if (team !== undefined && team !== null) registerTeamTools(register, store, team)
+    if (team !== undefined && team !== null) registerTeamTools(register, store, team, dispatch)
   })
 }
 
@@ -664,11 +682,11 @@ function registerJournalTools(register, store, journals) {
  * to be bound to an agent, so "who may do this" is checked against the binding,
  * never inferred from the prompt.
  *
- * This build is P0: assigning a task queues an attempt but does not wake the
- * member. The member claims it with team_task_claim from its own conversation;
- * the wake-up path arrives with the relay phase.
+ * P1: a queued attempt is woken by team/dispatch.js (agent.followup), and a
+ * member's report is relayed back to the lead. The manual claim path stays as
+ * the degraded path for hosts without an inbox API.
  */
-function registerTeamTools(register, store, team) {
+function registerTeamTools(register, store, team, dispatch) {
   const boundAgentOf = exec => {
     const sessionId = exec?.agent?.id ? String(exec.agent.id) : ''
     return sessionId === '' ? '' : store.bindingOf(sessionId)
@@ -808,6 +826,7 @@ function registerTeamTools(register, store, team) {
           assignee: args?.assignee,
           createdBy: bound,
         })
+        if (dispatch !== undefined && dispatch !== null) dispatch.kick()
         return { ok: true, task }
       }),
     },
@@ -833,6 +852,7 @@ function registerTeamTools(register, store, team) {
       execute: guard(async (args, exec) => {
         const by = requireLead(args?.project, exec)
         const result = await team.assignTask({ project: args?.project, task: args?.task, member: args?.member, by })
+        if (dispatch !== undefined && dispatch !== null) dispatch.kick()
         return { ok: true, task: result.task, attempt: result.attempt }
       }),
     },
@@ -870,6 +890,7 @@ function registerTeamTools(register, store, team) {
           question: args?.question,
           files: args?.files,
         })
+        if (dispatch !== undefined && dispatch !== null) dispatch.kick()
         return { ok: true, task: result.task, attempt: result.attempt }
       }),
     },

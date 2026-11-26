@@ -537,6 +537,77 @@ export function createTeam(options = {}) {
   }
 
   /**
+   * Work the dispatcher must wake members for: tasks assigned with a queued
+   * attempt. Derived from state, so a restart re-runs whatever was not done.
+   */
+  function pendingDispatches() {
+    const rows = []
+    for (const summary of listProjects()) {
+      const project = readProject(summary.id)
+      const doc = readTasks(summary.id)
+      for (const task of doc.tasks) {
+        if (task.status !== 'assigned' || task.assignee === '') continue
+        const attempt = activeAttemptOf(task)
+        if (!attempt || attempt.state !== 'queued') continue
+        rows.push({
+          project: project.id,
+          task: task.id,
+          title: task.title,
+          brief: task.brief,
+          attempt: attempt.id,
+          member: task.assignee,
+          lead: project.lead,
+        })
+      }
+    }
+    return rows
+  }
+
+  /**
+   * Reports the lead has not seen yet. A report is relayed once its attempt has
+   * a `relayedAt`; restarting re-reads the missing ones from the same state.
+   */
+  function pendingRelays() {
+    const relayStates = new Set(['waiting', 'ready', 'blocked', 'failed', 'dropped'])
+    const rows = []
+    for (const summary of listProjects()) {
+      const project = readProject(summary.id)
+      const doc = readTasks(summary.id)
+      for (const task of doc.tasks) {
+        for (const attempt of task.attempts) {
+          if (!attempt.report || !relayStates.has(attempt.report.state)) continue
+          if (typeof attempt.relayedAt === 'string' && attempt.relayedAt !== '') continue
+          rows.push({
+            project: project.id,
+            task: task.id,
+            title: task.title,
+            attempt: attempt.id,
+            member: attempt.assignee,
+            lead: project.lead,
+            report: attempt.report,
+          })
+        }
+      }
+    }
+    return rows
+  }
+
+  /** Record that the lead saw a report, so the relay is not sent again. */
+  function markRelayed(input = {}) {
+    const id = projectIdOf(input.project)
+    return withLock(id, () => {
+      const doc = readTasks(id)
+      const task = findTask(doc, taskIdOf(input.task))
+      const attempt = task.attempts.find(item => item.id === input.attempt)
+      if (!attempt) throw new MemoryError('no-attempt', `unknown attempt: ${input.attempt}`)
+      attempt.relayedAt = soon()
+      saveTasks(id, doc)
+      event(id, 'report.relayed', { task: task.id, attempt: attempt.id, target: String(input.target ?? '') })
+      return { task: task.id, attempt: attempt.id, relayedAt: attempt.relayedAt }
+    })
+  }
+
+  /**
    * Mark attempts left `running` by a stopped host as failed, so a stale lock
    * never looks like work in progress. Called once when the plugin starts.
    */
@@ -588,6 +659,9 @@ export function createTeam(options = {}) {
     closeTask,
     listTasks,
     memberStatus,
+    pendingDispatches,
+    pendingRelays,
+    markRelayed,
     recoverStale,
   }
 }
