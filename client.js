@@ -163,6 +163,8 @@ window.__ModuleLoader__.load({
         teamStatusCancelled: '已取消',
         teamRoom: '讨论室',
         teamRoomNone: '不绑定',
+        teamRoomAuto: '自动创建讨论室',
+        teamRoomBind: '创建并绑定讨论室',
         teamProjects: '团队项目',
         teamArchive: '归档',
         teamArchiveConfirm: '归档项目 “{name}”？归档后它的成员可以加入其他团队。',
@@ -466,6 +468,8 @@ window.__ModuleLoader__.load({
         teamStatusCancelled: 'cancelled',
         teamRoom: 'Room',
         teamRoomNone: 'No room',
+        teamRoomAuto: 'Create a room automatically',
+        teamRoomBind: 'Create and bind a room',
         teamProjects: 'Team projects',
         teamArchive: 'Archive',
         teamArchiveConfirm: 'Archive project "{name}"? Its members become free to join another team.',
@@ -3484,7 +3488,7 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = useState('')
       const [project, setProject] = useState(null)
       const [creating, setCreating] = useState(false)
-      const [draft, setDraft] = useState({ name: '', lead: '', members: [], capacity: 3, roomId: '' })
+      const [draft, setDraft] = useState({ name: '', lead: '', members: [], capacity: 3, roomId: '', autoRoom: true })
       const [taskOpen, setTaskOpen] = useState(false)
       const [taskDraft, setTaskDraft] = useState({ title: '', brief: '', acceptance: '', assignee: '' })
       const [openTask, setOpenTask] = useState('')
@@ -3554,10 +3558,11 @@ window.__ModuleLoader__.load({
           members: draft.members,
           capacity: draft.capacity,
           ...(draft.roomId === '' ? {} : { roomId: draft.roomId }),
+          ...(draft.autoRoom && draft.roomId === '' ? { autoRoom: true } : { autoRoom: false }),
         })
         if (!created) return
         setCreating(false)
-        setDraft({ name: '', lead: '', members: [], capacity: 3, roomId: '' })
+        setDraft({ name: '', lead: '', members: [], capacity: 3, roomId: '', autoRoom: true })
         await reload()
         setSelected(created.id)
       }
@@ -3595,6 +3600,12 @@ window.__ModuleLoader__.load({
         await loadProject(selected)
         await reload()
       }
+      const bindRoom = async () => {
+        if (project === null) return
+        await call('team.room.bind', { project: project.id })
+        await loadProject(selected)
+        await reload()
+      }
       const archiveProject = async () => {
         if (project === null) return
         const ok = typeof askConfirm === 'function' ? await askConfirm(t('teamArchiveConfirm').replace('{name}', project.name)) : true
@@ -3625,9 +3636,10 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'am-row' },
-          chip('room-none', t('teamRoomNone'), draft.roomId === '', () => setDraft(current => ({ ...current, roomId: '' }))),
+          chip('room-auto', t('teamRoomAuto'), draft.autoRoom && draft.roomId === '', () => setDraft(current => ({ ...current, roomId: '', autoRoom: true }))),
+          chip('room-none', t('teamRoomNone'), !draft.autoRoom && draft.roomId === '', () => setDraft(current => ({ ...current, roomId: '', autoRoom: false }))),
           (state?.rooms ?? []).map(room =>
-            chip(`room-${room.id}`, room.name, draft.roomId === room.id, () => setDraft(current => ({ ...current, roomId: room.id }))),
+            chip(`room-${room.id}`, room.name, draft.roomId === room.id, () => setDraft(current => ({ ...current, roomId: room.id, autoRoom: false }))),
           ),
         ),
       )
@@ -3642,7 +3654,11 @@ window.__ModuleLoader__.load({
               { className: 'am-row' },
               h('h2', { className: 'am-head-name', style: { margin: 0 } }, project.name),
               h('span', { className: 'am-tag' }, `${t('teamCapacity')} ${project.running ?? 0}/${project.capacity}`),
-              project.roomId === '' ? null : h('span', { className: 'am-tag' }, `${t('teamRoom')} · ${roomNameOf(project.roomId)}`),
+              project.roomId === ''
+                ? (project.status === 'archived'
+                    ? null
+                    : h('button', { className: 'am-btn am-btn-sm', disabled: busy !== '', onClick: () => void bindRoom() }, t('teamRoomBind')))
+                : h('span', { className: 'am-tag' }, `${t('teamRoom')} · ${roomNameOf(project.roomId)}`),
               project.status === 'archived' ? h('span', { className: 'am-tag' }, t('teamArchived')) : null,
               h('span', { style: { flex: 1 } }),
               h(

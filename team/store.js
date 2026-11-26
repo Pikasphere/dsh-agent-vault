@@ -386,6 +386,23 @@ export function createTeam(options = {}) {
     })
   }
 
+  /** Point the project at a discussion room; a project binds one room at a time. */
+  function bindRoom(input = {}) {
+    const id = projectIdOf(input.project)
+    return withLock(id, () => {
+      const project = readProject(id)
+      requireEditor(project, input.by)
+      requireActive(project)
+      const roomId = String(input.roomId ?? '').trim().slice(0, 40)
+      if (roomId === '') throw new MemoryError('bad-room', 'room id required')
+      if (project.roomId === roomId) return project
+      project.roomId = roomId
+      saveProject(project)
+      event(id, 'project.room', { roomId })
+      return project
+    })
+  }
+
   /**
    * Park a project: it keeps its history but frees every member, including the
    * lead, to join another active team. Archived projects are never reopened;
@@ -747,6 +764,7 @@ export function createTeam(options = {}) {
     addMember,
     removeMember,
     archiveProject,
+    bindRoom,
     createTask,
     assignTask,
     claimTask,

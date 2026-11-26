@@ -589,7 +589,7 @@ function registerTools(ctx, store, rooms, journals, recall, team, dispatch) {
 
     registerRoomTools(register, store, rooms)
     registerJournalTools(register, store, journals)
-    if (team !== undefined && team !== null) registerTeamTools(register, store, team, dispatch)
+    if (team !== undefined && team !== null) registerTeamTools(register, store, team, dispatch, rooms)
   })
 }
 
@@ -703,7 +703,7 @@ function registerJournalTools(register, store, journals) {
  * member's report is relayed back to the lead. The manual claim path stays as
  * the degraded path for hosts without an inbox API.
  */
-function registerTeamTools(register, store, team, dispatch) {
+function registerTeamTools(register, store, team, dispatch, rooms) {
   const boundAgentOf = exec => {
     const sessionId = exec?.agent?.id ? String(exec.agent.id) : ''
     return sessionId === '' ? '' : store.bindingOf(sessionId)
@@ -728,7 +728,8 @@ function registerTeamTools(register, store, team, dispatch) {
       name: 'team_project_create',
       description:
         'Create a team project: one lead and members, all existing agents from the registry. The calling conversation must be bound ' +
-        'to the lead. Tasks in the project are assigned by the lead and reported by the member who holds them.',
+        'to the lead. A discussion room is created and bound by default, with the lead and every member added to it; tasks in the ' +
+        'project are assigned by the lead and reported by the member who holds them.',
       parameters: {
         type: 'object',
         properties: {
@@ -736,7 +737,9 @@ function registerTeamTools(register, store, team, dispatch) {
           lead: { type: 'string', description: 'Agent id of the lead; must match the agent bound to this conversation.' },
           members: { type: 'array', items: { type: 'string' }, description: 'Agent ids of the members. The lead is not a member.' },
           capacity: { type: 'number', description: 'Concurrent attempts allowed, 1-10, default 3.' },
-          roomId: { type: 'string', description: 'Optional discussion room id to bind to the project.' },
+          roomId: { type: 'string', description: 'Existing discussion room id to bind instead of creating one.' },
+          roomName: { type: 'string', description: 'Name for the room created with the project; defaults to "<project> 讨论室".' },
+          autoRoom: { type: 'boolean', description: 'Create and bind a discussion room automatically (default true). Pass false to create the project without a room.' },
         },
         required: ['name', 'lead'],
       },
@@ -746,13 +749,17 @@ function registerTeamTools(register, store, team, dispatch) {
         if (String(args?.lead ?? '') !== bound) {
           throw new MemoryError('not-lead', `the lead must be the agent bound to this conversation (${bound})`)
         }
-        const project = team.createProject({
-          name: args?.name,
-          lead: bound,
-          members: args?.members,
-          capacity: args?.capacity,
-          roomId: args?.roomId,
-        })
+        const project = rooms === undefined || rooms === null
+          ? team.createProject({ name: args?.name, lead: bound, members: args?.members, capacity: args?.capacity, roomId: args?.roomId })
+          : createProjectWithRoom(team, rooms, {
+              name: args?.name,
+              lead: bound,
+              members: args?.members,
+              capacity: args?.capacity,
+              roomId: args?.roomId,
+              autoRoom: args?.autoRoom,
+              roomName: args?.roomName,
+            })
         return { ok: true, project }
       }),
     },
@@ -788,7 +795,8 @@ function registerTeamTools(register, store, team, dispatch) {
       output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' } } }),
       execute: guard(async (args, exec) => {
         const by = requireLead(args?.project, exec)
-        return { ok: true, project: await team.addMember({ project: args?.project, member: args?.member, by }) }
+        const project = await team.addMember({ project: args?.project, member: args?.member, by })
+        return { ok: true, project: rooms === undefined || rooms === null ? project : syncProjectRoom(rooms, project) }
       }),
     },
     'agent-memory: team member add tool',
@@ -809,7 +817,8 @@ function registerTeamTools(register, store, team, dispatch) {
       output: textOutput({ type: 'object', properties: { ok: { type: 'boolean' }, project: { type: 'object' } } }),
       execute: guard(async (args, exec) => {
         const by = requireLead(args?.project, exec)
-        return { ok: true, project: await team.removeMember({ project: args?.project, member: args?.member, by }) }
+        const project = await team.removeMember({ project: args?.project, member: args?.member, by })
+        return { ok: true, project: rooms === undefined || rooms === null ? project : syncProjectRoom(rooms, project) }
       }),
     },
     'agent-memory: team member remove tool',
@@ -1392,6 +1401,44 @@ async function readJson(req) {
  * that turned every panel call into a 503 — how the plugin went blank after
  * the upgrade.
  */
+/**
+ * A team's discussion room follows its roster: creating a project makes one
+ * unless the caller opts out, and joining or leaving the project edits it.
+ * The room is the team's shared table, so its members are exactly lead+members.
+ */
+function roomMemberList(project) {
+  return [...new Set([project.lead, ...(project.members ?? [])].filter(Boolean))]
+}
+
+function createProjectWithRoom(team, rooms, input) {
+  const roomId = typeof input.roomId === 'string' ? input.roomId.trim() : ''
+  const autoRoom = input.autoRoom !== false
+  const name = String(input.name ?? '').trim()
+  let created = undefined
+  if (roomId === '' && autoRoom) {
+    created = rooms.create({ name: String(input.roomName ?? '').trim() || `${name || '项目'} 讨论室` })
+  }
+  const project = team.createProject({ ...input, roomId: created === undefined ? roomId : created.id })
+  const boundId = created === undefined ? roomId : created.id
+  if (boundId === '') return project
+  try {
+    rooms.setMembers({ id: boundId, members: roomMemberList(project) })
+  } catch {
+    /* a room removed between create and bind leaves the project unbound */
+  }
+  return project
+}
+
+function syncProjectRoom(rooms, project) {
+  if (typeof project?.roomId !== 'string' || project.roomId === '') return project
+  try {
+    rooms.setMembers({ id: project.roomId, members: roomMemberList(project) })
+  } catch {
+    /* the room is gone; the project keeps working without it */
+  }
+  return project
+}
+
 async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, sleep, op, args, team, dispatch, roomDispatch) {
   const teamStore = () => {
     if (team === undefined || team === null) throw new MemoryError('no-team', 'the team store is not available')
@@ -1603,12 +1650,30 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return teamStore().project(args.id)
     case 'team.project.archive':
       return teamStore().archiveProject({ project: args.id, by: 'user' })
+    case 'team.room.bind': {
+      const projectId = String(args.project ?? '')
+      let roomId = typeof args.roomId === 'string' ? args.roomId.trim() : ''
+      if (roomId === '') {
+        const existing = teamStore().project(projectId)
+        const name = String(args.name ?? '').trim() || `${existing.name} 讨论室`
+        roomId = rooms.create({ name }).id
+      }
+      return syncProjectRoom(rooms, await teamStore().bindRoom({ project: projectId, roomId, by: 'user' }))
+    }
     case 'team.create':
-      return teamStore().createProject({ name: args.name, lead: args.lead, members: args.members, capacity: args.capacity, roomId: args.roomId })
+      return createProjectWithRoom(teamStore(), rooms, {
+        name: args.name,
+        lead: args.lead,
+        members: args.members,
+        capacity: args.capacity,
+        roomId: args.roomId,
+        autoRoom: args.autoRoom,
+        roomName: args.roomName,
+      })
     case 'team.member.add':
-      return teamStore().addMember({ project: args.project, member: args.member, by: 'user' })
+      return syncProjectRoom(rooms, await teamStore().addMember({ project: args.project, member: args.member, by: 'user' }))
     case 'team.member.remove':
-      return teamStore().removeMember({ project: args.project, member: args.member, by: 'user' })
+      return syncProjectRoom(rooms, await teamStore().removeMember({ project: args.project, member: args.member, by: 'user' }))
     case 'team.task.create': {
       const task = await teamStore().createTask({
         project: args.project,
