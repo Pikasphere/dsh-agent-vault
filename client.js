@@ -700,6 +700,7 @@ window.__ModuleLoader__.load({
 .am-item-snippet{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .am-item-meta{font-size:11px;color:var(--dsw-alias-label-tertiary);display:flex;gap:10px;flex-wrap:wrap}
 .am-tag{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
+.am-team-tag{flex:none;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
 .am-error{margin:0;padding:10px 12px;border-radius:10px;font-size:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary)) 45%,transparent);color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary));background:color-mix(in srgb,var(--dsw-alias-state-danger-primary,var(--dsw-alias-state-business-primary)) 8%,transparent)}
 .am-toast{font-size:12px;color:var(--dsw-alias-state-success-primary)}
 .am-divider{height:1px;background:var(--dsw-alias-border-l1);margin:4px 0}
@@ -953,8 +954,9 @@ window.__ModuleLoader__.load({
       const [roomName, setRoomName] = useState('')
       const [roomCreating, setRoomCreating] = useState(false)
       const [roomVersion, setRoomVersion] = useState(0)
-      // Projects that bind a discussion room, so the room page can name its team.
-      const [roomTeams, setRoomTeams] = useState([])
+      // Team projects and rooms, for the agent list, the agent header and the room page.
+      const [teamProjects, setTeamProjects] = useState([])
+      const [teamRooms, setTeamRooms] = useState([])
       const [journal, setJournal] = useState([])
       const [journalEditor, setJournalEditor] = useState(null)
       const [journalVersion, setJournalVersion] = useState(0)
@@ -1148,7 +1150,15 @@ window.__ModuleLoader__.load({
           .catch(error => {
             if (live) setFailure(String(error?.message ?? error))
           })
-        // A room may be its team's task surface; name that team in the header.
+        return () => {
+          live = false
+        }
+      }, [view, roomVersion])
+
+      // Team membership powers the agent list badge and the agent header; the
+      // panel only reads it here, the Team tab is where projects are managed.
+      useEffect(() => {
+        let live = true
         request('/op', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1156,8 +1166,8 @@ window.__ModuleLoader__.load({
         })
           .then(payload => {
             if (!live) return
-            const projects = payload.value?.projects ?? []
-            setRoomTeams(projects.filter(item => typeof item.roomId === 'string' && item.roomId !== ''))
+            setTeamProjects(payload.value?.projects ?? [])
+            setTeamRooms(payload.value?.rooms ?? [])
           })
           .catch(() => {})
         return () => {
@@ -1348,6 +1358,22 @@ window.__ModuleLoader__.load({
         setEditor(null)
         setResults(null)
         setQuery('')
+      }
+
+      const nameOfVault = id => (data?.vaults ?? []).find(item => item.id === id)?.name ?? id
+      const teamOfAgent = id => {
+        for (const project of teamProjects) {
+          if (project.status !== 'active') continue
+          if (project.lead === id || (project.members ?? []).includes(id)) return project
+        }
+        return null
+      }
+      const teamLineOfAgent = id => {
+        const project = teamOfAgent(id)
+        if (project === null) return ''
+        const role = project.lead === id ? t('teamLead') : t('teamMembers')
+        const room = teamRooms.find(item => item.id === project.roomId)
+        return `${t('team')}：${project.name} · ${role}${room === undefined ? '' : ` · ${t('teamRoom')}：${room.name}`}`
       }
 
       const openRoom = id => {
@@ -1953,6 +1979,7 @@ window.__ModuleLoader__.load({
                     { className: 'am-vault-row' },
                     h('span', { className: 'am-vault-name' }, item.name),
                     item.id === data.activeVault ? h('span', { className: 'am-badge' }, t('active')) : null,
+                    teamOfAgent(item.id) === null ? null : h('span', { className: 'am-team-tag' }, teamOfAgent(item.id).name),
                   ),
                   h(
                     'span',
@@ -3093,11 +3120,17 @@ window.__ModuleLoader__.load({
               { className: 'am-head-main' },
               h('h2', { className: 'am-head-name' }, vault ? vault.name : t('title')),
               h('p', { className: 'am-head-sub' }, vault && vault.description ? vault.description : t('subtitle')),
+              vault !== null && teamLineOfAgent(vault.id) !== ''
+                ? h('p', { className: 'am-head-sub' }, teamLineOfAgent(vault.id))
+                : null,
             ),
             vault
               ? h(
                   'div',
                   { className: 'am-head-actions' },
+                  teamOfAgent(vault.id) === null
+                    ? null
+                    : h('button', { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => setTab('team') }, t('team')),
                   h(Switch, {
                     checked: vault.id === data.activeVault,
                     label: t('inherit'),
@@ -3108,6 +3141,38 @@ window.__ModuleLoader__.load({
                 )
               : null,
           ),
+          vault !== null && teamOfAgent(vault.id) !== null
+            ? h(
+                'div',
+                { className: 'am-card', style: { margin: '0 26px 10px' } },
+                h(
+                  'div',
+                  { className: 'am-row' },
+                  h('span', { className: 'am-label' }, `${t('team')}：${teamOfAgent(vault.id).name}`),
+                  h('span', { className: 'am-note-dim' }, teamOfAgent(vault.id).lead === vault.id ? t('teamLead') : t('teamMembers')),
+                  h('span', { style: { flex: 1 } }),
+                  h('button', { className: 'am-btn am-btn-sm am-btn-ghost', onClick: () => setTab('team') }, t('team')),
+                ),
+                h(
+                  'div',
+                  { className: 'am-row' },
+                  [
+                    { id: teamOfAgent(vault.id).lead, role: t('teamLead') },
+                    ...(teamOfAgent(vault.id).members ?? []).map(id => ({ id, role: t('teamMembers') })),
+                  ].map(item =>
+                    h(
+                      'span',
+                      {
+                        key: item.id,
+                        className: 'am-tag',
+                        style: item.id === vault.id ? { borderColor: 'var(--dsw-alias-state-business-primary)' } : undefined,
+                      },
+                      `${nameOfVault(item.id)} · ${item.role}`,
+                    ),
+                  ),
+                ),
+              )
+            : null,
           vault
             ? h(
                 'nav',
@@ -3140,7 +3205,7 @@ window.__ModuleLoader__.load({
       const boundTeam =
         roomData === null
           ? null
-          : roomTeams.find(item => item.roomId === roomData.room.id && item.status === 'active') ?? null
+          : teamProjects.find(item => item.roomId === roomData.room.id && item.status === 'active') ?? null
       const agentNameOf = id => (data?.vaults ?? []).find(item => item.id === id)?.name ?? id
       const roomMain =
         view !== 'rooms' || roomData === null
