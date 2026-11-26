@@ -205,6 +205,18 @@ const searched = await call('POST', '/op', { op: 'knowledge.search', args: { id,
 assert.equal(searched.payload.value.entries.length, 1)
 const read = await call('POST', '/op', { op: 'knowledge.read', args: { id, entry } })
 assert.ok(read.payload.value.content.includes('目录遍历'))
+
+// a project tag narrows only when asked for explicitly
+const scoped = await call('POST', '/op', {
+  op: 'knowledge.save',
+  args: { id, title: '团队项目笔记', content: '只属于项目 p-abcd1234 的经验。', project: 'p-abcd1234' },
+})
+assert.equal(scoped.status, 200)
+assert.equal(scoped.payload.value.project, 'p-abcd1234')
+const scopedHits = await call('POST', '/op', { op: 'knowledge.search', args: { id, query: '团队项目', project: 'p-abcd1234' } })
+assert.equal(scopedHits.payload.value.entries.length, 1)
+const otherHits = await call('POST', '/op', { op: 'knowledge.search', args: { id, query: '团队项目', project: 'p-zzzz9999' } })
+assert.equal(otherHits.payload.value.entries.length, 0)
 console.log('knowledge save/search/read ok')
 
 // recall over the same store: the memory audit log and the knowledge base

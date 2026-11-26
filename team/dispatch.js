@@ -77,6 +77,7 @@ function relayText(row) {
   ]
   if (report.question !== undefined && report.question !== '') lines.push(`Question: ${report.question}`)
   if (Array.isArray(report.files) && report.files.length > 0) lines.push(`Files: ${report.files.join(', ')}`)
+  if (Array.isArray(report.knowledge) && report.knowledge.length > 0) lines.push(`Knowledge: ${report.knowledge.join(', ')}`)
   lines.push(`Close or reassign it with team_task_close / team_task_assign (project=${row.project}).`)
   return lines.join('\n')
 }
@@ -286,6 +287,14 @@ export function createTeamDispatch(options = {}) {
           for (const row of dispatches) {
             const key = `d:${row.attempt}`
             if ((retryAt.get(key) ?? 0) > now) continue
+            // Capacity is a concurrency limit, not a rejection: a task over the
+            // limit stays assigned with a queued attempt until a slot frees.
+            // No retryAt here — the row is simply not ready in this round, and
+            // the queue schedules another pass when nothing progressed.
+            if (typeof team.slots === 'function') {
+              const slots = team.slots(row.project)
+              if (slots.running >= slots.capacity) continue
+            }
             try {
               const result = await withTimeout(wake(row), STEP_TIMEOUT_MS, 'dispatch wake')
               if (result?.delivered) {

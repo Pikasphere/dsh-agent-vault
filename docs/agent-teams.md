@@ -1,6 +1,6 @@
 # 智能体团队与任务分配（设计稿）
 
-> 状态：**P0–P2 已实现；P3 部分实现**（2026-11-26，分支 `feat/agent-teams`）。已落地：项目/任务/分配/汇报、自动唤醒与 relay、HTTP ops 与面板团队页、讨论室 @ 派发、一人一队、项目归档、`stalePolicy: resume` 恢复注记。未落地：项目作用域知识、容量上限、强沙箱。日期 2026-11-25，更新 2026-11-26。
+> 状态：**P0–P3 已实现**（2026-11-26，分支 `feat/agent-teams`）。已落地：项目/任务/分配/汇报、自动唤醒与 relay、HTTP ops 与面板团队页、讨论室 @ 派发、一人一队、项目归档、`stalePolicy: resume` 恢复注记、项目作用域知识、项目容量上限。未落地：强沙箱（非目标，见 §1.3）。日期 2026-11-25，更新 2026-11-26。
 > 本文只描述设计与验收口径，落地按 §12 分期；实现见 `team/store.js`、`team/dispatch.js`、`team/room-dispatch.js` 与 `index.js` 的 `registerTeamTools`。背景研读见 `~/文档/deepseek-harness/default-workspace/superagent-原型研读.md` 与 `superagent-插件工程研读.md`。
 >
 > 一句话：团队的单位是**智能体**；项目只是把已有智能体编成「1 负责人 + N 成员」；任务由负责人分配、成员执行并汇报；子智能体直接使用 DSH 官方 `subagent`，vault 不接管。
@@ -88,7 +88,7 @@
 | `status` | 见 §3.3 | |
 | `createdBy` | `user` / agentId | |
 | `attempts` | Attempt[] | 按时间排序 |
-| `knowledge` | entryId[] | 可选，关联知识条目 |
+| `knowledge` | entryId[] | 可选，由 report 附带；存于 attempt.report.knowledge，面板显示条目 id |
 | `createdAt` / `updatedAt` | ISO string | |
 
 **Attempt**（一次「交给某个成员跑一轮」）
@@ -192,6 +192,8 @@ team_task_assign(task, member):
 
 容量满时返回 `queued` 而非拒绝：任务留在 `assigned`，等槽位。
 
+容量由 dispatch 强制执行：每轮派发前数本项目的 running attempt，达到 `capacity`（1–10，默认 3）的整轮不唤醒、不记失败；任一 attempt 汇报后空出槽位，队列下一轮（或事件触发的 kick）继续派发。面板项目头显示 `已运行/上限`。
+
 ### 5.2 唤醒（成员侧）
 
 `dispatch` handler：
@@ -266,8 +268,8 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 ## 7. 与记忆 / 知识库 / 讨论室
 
 - **不自动写记忆**：任务完成不触发任何自动写入；成员自己决定 `agent_memory_save`（交接）与 `agent_knowledge_write`（详细经验），沿用 2.x 的哲学：记忆由用户决定读入，知识由模型决定查写。
-- **项目作用域**：知识条目增加可选 `project` 标签（写入时传、检索时过滤）；不传 = 全局。默认行为不变，只有显式传 `project` 才收窄。
-- **任务与知识关联**：task 可记录 `knowledge` entryId[]（可选，由 lead 或成员在 report 里附带）；面板可跳转。
+- **项目作用域**：知识条目 frontmatter 增加可选 `project` 字段；`agent_knowledge_write` 传 `project` 时打标（`p-…` 格式校验），`agent_knowledge_search`/`list` 传 `project` 时只返回该项目的条目。不传 = 全局，默认行为不变；只有显式传 `project` 才收窄，检索不会自动按当前项目过滤。
+- **任务与知识关联**：`team_task_report` 接受可选 `knowledge: entryId[]`（≤ 20、去重），存于 `attempt.report.knowledge`，relay 给 lead 的消息里列出 `Knowledge:` 行；面板报告卡显示条目 id。成员应先用 `agent_knowledge_write` 写条目（带上 `project`），再在 report 里引用。
 - **讨论室 = 团队任务入口**：项目可绑定 `roomId`（`team.state` 返回房间列表，面板建项目时可选）。房间里一条**人的**消息用 `@成员` 直接派发：
   - **解析**：只认房间成员，按智能体 id 或注册显示名匹配，最长匹配优先；非成员、未知 @ 不唤醒（留在正文里）。
   - **派发**：复用 dispatch 的会话绑定与 `agent.followup`；成员没有会话就 `sessionController.create` 并 `setBinding`，即"在该智能体名下创建对话"。消息体含房间名、最近 10 条 transcript 与本条正文，并要求成员用 `agent_room say` 回投、团队任务用 `team_task_report` 汇报。
@@ -335,7 +337,7 @@ lead 不需要主动查任务；report 与人的消息会自己到。lead 可用
 | P0 | 领域模型 + 文件存储 + 工具（project/task/assign/report/list/close），无唤醒 | **已完成（2026-11-26）**：`team/store.js`、`registerTeamTools`、`test-team.mjs` 全绿；文件落盘正确、重启可读、非法操作返回固定 code |
 | P1 | 唤醒 + relay（依赖 DSH inbox API）+ 降级 claim 路径 | **已完成（2026-11-26）**：`team/dispatch.js` 用 `agent.followup` 唤醒成员、把非 progress 的 report relay 给 lead；确定性消息 id + inbox/历史检查防重投；宿主不支持 inbox 时停在 queued，claim 路径保留 |
 | P2 | HTTP ops + 面板「团队」页签 | **已完成（2026-11-26）**：面板可建项目、派任务、看报告；项目可绑定讨论室，房间页显示所属团队 |
-| P3 | 项目作用域知识、房间绑定、恢复与容量、归档 | **部分完成（2026-11-26）**：讨论室 @ 派发（`team/room-dispatch.js`）、一人一队校验（`agent-busy-team`）、项目归档（`team.project.archive`）、`stalePolicy: resume` 恢复注记已落地并有测试；项目作用域知识与容量上限仍未实现 |
+| P3 | 项目作用域知识、房间绑定、恢复与容量、归档 | **已完成（2026-11-26）**：讨论室 @ 派发（`team/room-dispatch.js`）、一人一队校验（`agent-busy-team`）、项目归档（`team.project.archive`）、`stalePolicy: resume` 恢复注记、知识条目 `project` 标签与过滤、容量上限（`team/slots`，dispatch 按 running 数门控，满则排队不失败）；`test-store`/`test-team`/`test-team-dispatch`/`test-room-dispatch` 覆盖 |
 
 每期结束跑 `npm test`（现有 node 测试风格），并补 `test-team.mjs`。
 

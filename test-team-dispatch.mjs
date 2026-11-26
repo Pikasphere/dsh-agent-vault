@@ -158,5 +158,28 @@ assert.match(recovery.text, /inspect what you already did/)
 assert.match(recovery.text, /\[Team task\]/, 'the note precedes the ordinary task text')
 assert.equal(reopened.project(recoverProject.id).tasks[0].attempts[0].state, 'running')
 
+// ── capacity: a project runs at most `capacity` attempts ────────────────────
+const capRoot = path.join(scratch, 'capacity')
+const capTeam = createTeam({ rootDir: capRoot, agents: () => agents })
+const capProject = capTeam.createProject({ name: '限量', lead: 'alpha', members: ['beta'], capacity: 1 })
+const capFirst = await capTeam.createTask({ project: capProject.id, title: '先跑', brief: 'a', assignee: 'beta', createdBy: 'alpha' })
+await capTeam.createTask({ project: capProject.id, title: '排队', brief: 'b', assignee: 'beta', createdBy: 'alpha' })
+const capHost = makeHost(true)
+const capDispatch = createTeamDispatch({ ctx: ctxFor(capHost), store: fakeStore, team: capTeam, log: () => {} })
+const capStart = delivered.length
+// Relays also flow through drain; capacity speaks only for task dispatches.
+const taskDeliveries = () => delivered.slice(capStart).filter(item => item.text.startsWith('[Team task]')).length
+await capDispatch.drain()
+assert.equal(taskDeliveries(), 1, 'only one attempt starts at capacity 1')
+assert.equal(capTeam.slots(capProject.id).running, 1)
+assert.equal(capTeam.pendingDispatches().length, 1, 'the second task waits queued')
+
+await capDispatch.drain()
+assert.equal(taskDeliveries(), 1, 'a full project starts nothing new')
+await capTeam.reportTask({ project: capProject.id, task: capFirst.id, agent: 'beta', state: 'ready', summary: 'first done' })
+await capDispatch.drain()
+assert.equal(taskDeliveries(), 2, 'the queued task starts when a slot frees')
+assert.equal(capTeam.slots(capProject.id).running, 1)
+
 fs.rmSync(scratch, { recursive: true, force: true })
 console.log('ALL TEAM DISPATCH TESTS PASSED')

@@ -50,6 +50,7 @@ assert.equal(project.capacity, 2)
 assert.equal(project.roomId, '')
 assert.equal(team.listProjects().length, 1)
 assert.equal(team.listProjects()[0].tasks.total, 0)
+assert.deepEqual(team.slots(project.id), { project: project.id, running: 0, capacity: 2 })
 
 code(() => team.createProject({ name: 'x', lead: 'nobody' }), 'no-lead')
 code(() => team.createProject({ name: '  ', lead: 'alpha' }), 'bad-project')
@@ -112,6 +113,7 @@ const claimed = await team.claimTask({ project: project.id, task: task.id, agent
 assert.equal(claimed.task.status, 'running')
 assert.equal(claimed.attempt.state, 'running')
 assert.equal(claimed.attempt.sessionId, 's-1')
+assert.equal(team.slots(project.id).running, 1, 'a running attempt occupies one slot')
 
 const progress = await team.reportTask({ project: project.id, task: task.id, agent: 'gamma', state: 'progress', summary: '改了一半' })
 assert.equal(progress.task.status, 'running')
@@ -129,10 +131,13 @@ const ready = await team.reportTask({
   state: 'ready',
   summary: '查询层已重写，测试全绿',
   files: ['src/query.js', 'test-query.mjs'],
+  knowledge: ['query-layer-notes', 'query-layer-notes'],
 })
 assert.equal(ready.task.status, 'review')
 assert.equal(ready.attempt.state, 'ready')
 assert.deepEqual(ready.attempt.report.files, ['src/query.js', 'test-query.mjs'])
+assert.deepEqual(ready.attempt.report.knowledge, ['query-layer-notes'], 'task knowledge ids dedupe')
+assert.equal(team.slots(project.id).running, 0, 'a finished attempt frees its slot')
 assert.equal(ready.attempt.endedAt !== '', true)
 
 // a closed task refuses further reports and assignments

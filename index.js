@@ -403,16 +403,17 @@ function registerTools(ctx, store, rooms, journals, recall, team, dispatch) {
             query: { type: 'string', description: 'Space-separated keywords. Empty lists recent entries.' },
             limit: { type: 'number', description: 'Maximum entries to return (1-25, default 8).' },
             id: { type: 'string', description: 'Optional: only entries contributed by this agent id.' },
+            project: { type: 'string', description: 'Optional project id (p-…): only entries tagged with that project. Omit for the whole library.' },
           },
         },
         output: textOutput({ type: 'object', properties: { entries: { type: 'array', items: { type: 'object' } } } }, () => 'search'),
         execute: guard(async args => {
           if (String(args?.query ?? '').trim() === '') {
-            const listed = store.listKnowledge({ id: args?.id })
+            const listed = store.listKnowledge({ id: args?.id, project: args?.project })
             const max = Math.min(Math.max(Number(args?.limit) || 8, 1), 25)
             return { ok: true, total: listed.total, entries: listed.entries.slice(0, max), shared: true }
           }
-          return { ok: true, ...store.searchKnowledge({ id: args?.id, query: args?.query, limit: args?.limit }) }
+          return { ok: true, ...store.searchKnowledge({ id: args?.id, project: args?.project, query: args?.query, limit: args?.limit }) }
         }),
       },
       'agent-memory: knowledge search tool',
@@ -450,6 +451,7 @@ function registerTools(ctx, store, rooms, journals, recall, team, dispatch) {
             title: { type: 'string', description: 'Short title; defaults to the first line of the content.' },
             content: { type: 'string', description: `Markdown body, at most ${entryLimit} characters.` },
             tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for later search.' },
+            project: { type: 'string', description: 'Optional project id (p-…): tags the entry for that team. Omit for a global entry.' },
           },
           required: ['content'],
         },
@@ -471,6 +473,7 @@ function registerTools(ctx, store, rooms, journals, recall, team, dispatch) {
                 title: args?.title,
                 content: args?.content,
                 tags: args?.tags,
+                project: args?.project,
                 source: exec?.agent?.id ? `session ${String(exec.agent.id).slice(-8)}` : '',
               }),
             },
@@ -889,6 +892,11 @@ function registerTeamTools(register, store, team, dispatch) {
           summary: { type: 'string', description: 'What the lead needs to know, at most 600 characters.' },
           question: { type: 'string', description: 'A question for the lead, at most 500 characters; settles the attempt as waiting.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Produced files or paths, at most 20.' },
+          knowledge: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Knowledge entry ids this task produced or used, at most 20. Write the entries with agent_knowledge_write first; tag them with the project.',
+          },
         },
         required: ['project', 'task', 'state', 'summary'],
       },
@@ -903,6 +911,7 @@ function registerTeamTools(register, store, team, dispatch) {
           summary: args?.summary,
           question: args?.question,
           files: args?.files,
+          knowledge: args?.knowledge,
         })
         if (dispatch !== undefined && dispatch !== null) dispatch.kick()
         return { ok: true, task: result.task, attempt: result.attempt }
@@ -1548,9 +1557,9 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
       return recall.state()
     }
     case 'knowledge.list':
-      return store.listKnowledge({ id: args.id })
+      return store.listKnowledge({ id: args.id, project: args.project })
     case 'knowledge.search':
-      return store.searchKnowledge({ id: args.id, query: args.query, limit: args.limit })
+      return store.searchKnowledge({ id: args.id, query: args.query, limit: args.limit, project: args.project })
     case 'knowledge.read':
       return store.readKnowledge({ entry: args.entry })
     case 'knowledge.save':
@@ -1560,6 +1569,7 @@ async function handleOp(ctx, store, rooms, journals, archives, recall, reveal, s
         title: args.title,
         content: args.content,
         tags: args.tags,
+        project: args.project,
         source: 'panel',
       })
     case 'knowledge.delete':

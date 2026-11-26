@@ -28,6 +28,7 @@ export const MEMORY_LIMIT = 4000
 export const ENTRY_LIMIT = 48000
 
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
+const PROJECT_ID = /^p-[a-z0-9]{4,12}$/
 const ENTRY_ID = /^[a-z0-9][a-z0-9-]{0,79}$/
 
 export function defaultRoot() {
@@ -116,6 +117,7 @@ function parseEntry(id, raw) {
     title: meta.title || id,
     tags: (meta.tags ?? '').split(',').map(item => item.trim()).filter(Boolean),
     agent: meta.agent ?? '',
+    project: meta.project ?? '',
     created: meta.created ?? '',
     updated: meta.updated ?? '',
     source: meta.source ?? '',
@@ -130,6 +132,7 @@ function renderEntry(entry) {
     `title: ${entry.title.replace(/\r?\n/g, ' ')}`,
     `tags: ${tags}`,
     `agent: ${entry.agent ?? ''}`,
+    `project: ${entry.project ?? ''}`,
     `created: ${entry.created}`,
     `updated: ${entry.updated}`,
     `source: ${entry.source.replace(/\r?\n/g, ' ')}`,
@@ -661,32 +664,39 @@ export function createStore(options = {}) {
 
   function listKnowledge(input = {}) {
     const filter = typeof input.id === 'string' && input.id !== '' ? requireAgent(input.id).id : ''
+    const project = collapse(input.project).slice(0, 40)
     const all = entries()
+    const rows = all
+      .filter(entry => filter === '' || entry.agent === filter)
+      .filter(entry => project === '' || entry.project === project)
+      .map(entry => ({
+        id: entry.id,
+        title: entry.title,
+        tags: entry.tags,
+        agent: entry.agent,
+        project: entry.project,
+        updated: entry.updated,
+        snippet: snippet(entry.body),
+      }))
     return {
       knowledgeDir: knowledgeRoot(),
       shared: true,
       filter: filter,
-      entries: all
-        .filter(entry => filter === '' || entry.agent === filter)
-        .map(entry => ({
-          id: entry.id,
-          title: entry.title,
-          tags: entry.tags,
-          agent: entry.agent,
-          updated: entry.updated,
-          snippet: snippet(entry.body),
-        })),
-      total: all.length,
+      project: project,
+      entries: rows,
+      total: rows.length,
     }
   }
 
   function searchKnowledge(input = {}) {
     const filter = typeof input.id === 'string' && input.id !== '' ? requireAgent(input.id).id : ''
+    const project = collapse(input.project).slice(0, 40)
     const query = collapse(input.query).toLowerCase()
     const tokens = query.split(' ').filter(token => token.length > 0)
     const limit = Math.min(Math.max(Number(input.limit) || 8, 1), 25)
     const ranked = entries()
       .filter(entry => filter === '' || entry.agent === filter)
+      .filter(entry => project === '' || entry.project === project)
       .map(entry => ({ entry, score: score(entry, tokens) }))
       .filter(item => item.score > 0)
       .sort((a, b) => b.score - a.score)
@@ -696,10 +706,11 @@ export function createStore(options = {}) {
         title: item.entry.title,
         tags: item.entry.tags,
         agent: item.entry.agent,
+        project: item.entry.project,
         updated: item.entry.updated,
         snippet: snippet(item.entry.body),
       }))
-    return { query: query, total: ranked.length, shared: true, entries: ranked }
+    return { query: query, total: ranked.length, shared: true, project: project, entries: ranked }
   }
 
   function readKnowledge(input = {}) {
@@ -736,6 +747,10 @@ export function createStore(options = {}) {
     const tags = Array.isArray(input.tags)
       ? input.tags.map(item => collapse(item)).filter(Boolean).slice(0, 12)
       : collapse(input.tags).split(',').map(item => collapse(item)).filter(Boolean).slice(0, 12)
+    const wantedProject = collapse(input.project).slice(0, 40)
+    if (wantedProject !== '' && !PROJECT_ID.test(wantedProject)) {
+      throw new MemoryError('bad-project', `invalid project id: ${wantedProject}`)
+    }
     const dir = knowledgeRoot()
     const existingEntries = entries()
     const existing = requested === '' ? undefined : existingEntries.find(item => item.id === requested)
@@ -760,13 +775,14 @@ export function createStore(options = {}) {
       title: title.slice(0, 120),
       tags: tags,
       agent: contributor !== '' ? contributor : existing?.agent ?? '',
+      project: wantedProject !== '' ? wantedProject : existing?.project ?? '',
       created: created,
       updated: updated,
       source: collapse(input.source).slice(0, 120),
       body: content,
     }
     writeAtomic(path.join(dir, `${entryId}.md`), renderEntry(entry))
-    return { entry: entryId, created: existing === undefined, updated: updated, title: entry.title, agent: entry.agent }
+    return { entry: entryId, created: existing === undefined, updated: updated, title: entry.title, agent: entry.agent, project: entry.project }
   }
 
   function deleteKnowledge(input = {}) {

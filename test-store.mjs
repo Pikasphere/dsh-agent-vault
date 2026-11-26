@@ -87,6 +87,26 @@ assert.equal(store.state().knowledgeDir, path.resolve(other))
 assert.equal(store.listKnowledge({ id: agent.id }).entries.length, 0)
 store.saveSettings({ knowledgeDir })
 assert.equal(store.listKnowledge({ id: agent.id }).entries.length, 2)
+
+// project-scoped knowledge: an explicit tag on write, an explicit filter on read
+const projectEntry = store.saveKnowledge({
+  id: agent.id,
+  title: '项目作用域笔记',
+  content: '只属于某个团队项目的经验。',
+  project: 'p-abcd1234',
+})
+assert.equal(projectEntry.project, 'p-abcd1234')
+const scoped = store.listKnowledge({ id: agent.id, project: 'p-abcd1234' })
+assert.equal(scoped.entries.length, 1)
+assert.equal(scoped.entries[0].id, projectEntry.entry)
+assert.equal(store.listKnowledge({ id: agent.id }).entries.length, 3)
+assert.equal(store.searchKnowledge({ id: agent.id, query: '项目作用域', project: 'p-abcd1234' }).entries.length, 1)
+assert.equal(store.searchKnowledge({ id: agent.id, query: '项目作用域', project: 'p-zzzz9999' }).entries.length, 0)
+assert.throws(
+  () => store.saveKnowledge({ id: agent.id, content: 'x', project: 'nope' }),
+  error => error instanceof MemoryError && error.code === 'bad-project',
+)
+
 // recall defaults survive an empty file, and a partial patch keeps the rest
 assert.deepEqual(store.state().recall, { mode: 'hybrid', lexicalWeight: 0.6, semanticWeight: 0.4, minCosine: 0.45, sessionMinCosine: 0.55, vectorSources: ['journal', 'log'], rrfK: 20, titleWeight: 0, heat: 0.25, dedupe: 0, mmr: 0 })
 store.saveSettings({ recall: { mode: 'lexical' } })

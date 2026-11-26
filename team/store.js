@@ -312,6 +312,7 @@ export function createTeam(options = {}) {
         const doc = readTasks(id)
         const total = doc.tasks.length
         const active = doc.tasks.filter(task => ACTIVE_TASK.has(task.status)).length
+        const running = doc.tasks.filter(task => task.attempts.some(attempt => attempt.state === 'running')).length
         rows.push({
           id: project.id,
           name: project.name,
@@ -320,6 +321,7 @@ export function createTeam(options = {}) {
           capacity: project.capacity,
           roomId: typeof project.roomId === 'string' ? project.roomId : '',
           status: project.status,
+          running,
           createdAt: project.createdAt,
           updatedAt: project.updatedAt,
           tasks: { total, active, done: total - active },
@@ -334,7 +336,18 @@ export function createTeam(options = {}) {
 
   function project(id) {
     const project = readProject(projectIdOf(id))
-    return { ...project, tasks: readTasks(project.id).tasks }
+    const tasks = readTasks(project.id).tasks
+    const running = tasks.filter(task => task.attempts.some(attempt => attempt.state === 'running')).length
+    return { ...project, tasks, running }
+  }
+
+  /** How many attempts run in a project, and how many may run at once. */
+  function slots(projectId) {
+    const id = projectIdOf(projectId)
+    const project = readProject(id)
+    const doc = readTasks(id)
+    const running = doc.tasks.filter(task => task.attempts.some(attempt => attempt.state === 'running')).length
+    return { project: id, running, capacity: project.capacity }
   }
 
   function addMember(input = {}) {
@@ -496,10 +509,20 @@ export function createTeam(options = {}) {
       const files = Array.isArray(input.files)
         ? input.files.filter(item => typeof item === 'string' && item.trim() !== '').slice(0, LIMITS.files).map(item => item.trim().slice(0, LIMITS.filePath))
         : []
+      const knowledge = Array.isArray(input.knowledge)
+        ? [...new Set(input.knowledge.filter(item => typeof item === 'string' && item.trim() !== '').map(item => item.trim().slice(0, 80)))].slice(0, LIMITS.files)
+        : []
       const attempt = activeAttemptOf(task)
       if (!attempt) throw new MemoryError('no-attempt', `task ${task.id} has no active attempt`)
       const at = soon()
-      attempt.report = { state, summary, ...(question === '' ? {} : { question }), ...(files.length === 0 ? {} : { files }), at }
+      attempt.report = {
+        state,
+        summary,
+        ...(question === '' ? {} : { question }),
+        ...(files.length === 0 ? {} : { files }),
+        ...(knowledge.length === 0 ? {} : { knowledge }),
+        at,
+      }
       if (state === 'progress') {
         // Still working: the task keeps running and the attempt stays open.
       } else {
@@ -720,6 +743,7 @@ export function createTeam(options = {}) {
     createProject,
     listProjects,
     project,
+    slots,
     addMember,
     removeMember,
     archiveProject,

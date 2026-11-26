@@ -3434,7 +3434,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'am-row' },
               h('h2', { className: 'am-head-name', style: { margin: 0 } }, project.name),
-              h('span', { className: 'am-tag' }, `${t('teamCapacity')} ${project.capacity}`),
+              h('span', { className: 'am-tag' }, `${t('teamCapacity')} ${project.running ?? 0}/${project.capacity}`),
               project.roomId === '' ? null : h('span', { className: 'am-tag' }, `${t('teamRoom')} · ${roomNameOf(project.roomId)}`),
               project.status === 'archived' ? h('span', { className: 'am-tag' }, t('teamArchived')) : null,
               h('span', { style: { flex: 1 } }),
@@ -3526,6 +3526,9 @@ window.__ModuleLoader__.load({
                                     h('p', { className: 'am-note' }, report.summary),
                                     report.question === undefined || report.question === '' ? null : h('p', { className: 'am-note' }, `${t('teamQuestion')}: ${report.question}`),
                                     report.files === undefined || report.files.length === 0 ? null : h('p', { className: 'am-mono' }, report.files.join(', ')),
+                                    report.knowledge === undefined || report.knowledge.length === 0
+                                      ? null
+                                      : h('p', { className: 'am-mono' }, `knowledge: ${report.knowledge.join(', ')}`),
                                   ),
                               h(
                                 'div',
