@@ -219,7 +219,6 @@ export function createTeam(options = {}) {
       createdAt: soon(),
       startedAt: '',
       endedAt: '',
-      report: undefined,
     }
   }
 
@@ -596,14 +595,19 @@ export function createTeam(options = {}) {
     const rows = tasks.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     return {
       project: { id: project.id, name: project.name, lead: project.lead, members: project.members },
-      tasks: rows.map(task => ({
-        id: task.id,
-        title: task.title,
-        status: task.status,
-        assignee: task.assignee,
-        updatedAt: task.updatedAt,
-        report: task.attempts.length > 0 ? task.attempts[task.attempts.length - 1].report : undefined,
-      })),
+      // A row must stay lossless JSON: an absent report is omitted, never `report: undefined`
+      // (the harness rejects tool output carrying undefined-valued properties).
+      tasks: rows.map(task => {
+        const report = task.attempts.length > 0 ? task.attempts[task.attempts.length - 1].report : undefined
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          assignee: task.assignee,
+          updatedAt: task.updatedAt,
+          ...report === undefined ? {} : { report },
+        }
+      }),
     }
   }
 
@@ -622,13 +626,16 @@ export function createTeam(options = {}) {
       busy: active.some(task => task.status === 'running'),
       active: active.map(task => ({ id: task.id, title: task.title, status: task.status })),
       finished: own.filter(task => TERMINAL_TASK.has(task.status)).length,
-      last: last === undefined
-        ? undefined
-        : {
-            task: last.id,
-            status: last.status,
-            report: last.attempts[last.attempts.length - 1].report,
-          },
+      // Omitted rather than `undefined`: the tool output must survive a JSON round trip.
+      ...last === undefined ? {} : {
+        last: {
+          task: last.id,
+          status: last.status,
+          ...last.attempts[last.attempts.length - 1].report === undefined
+            ? {}
+            : { report: last.attempts[last.attempts.length - 1].report },
+        },
+      },
     }
   }
 
