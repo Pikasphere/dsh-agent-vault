@@ -16,7 +16,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const REPO = 'BAAI/bge-small-zh-v1.5'
+// These checksums describe Xenova's ONNX conversion at this exact revision.
+const REPO = 'Xenova/bge-small-zh-v1.5'
+const REVISION = '75c43b069aac4d136ba6bc1122f995fedcfd2781'
 const MIRRORS = ['https://hf-mirror.com', 'https://huggingface.co']
 const FILES = [
   ['config.json', 716, 'd4193ead3a810fd694fa8a31d7fc72fbaebc0668b603e398734bf2f6538ff42f'],
@@ -53,9 +55,9 @@ async function downloadOne(baseDir, name, size, sha, forceFlag, onProgress) {
     onProgress({ name, state: 'present', bytes: size })
     return
   }
-  let lastError = null
+  const failures = []
   for (const mirror of MIRRORS) {
-    const url = `${mirror}/${REPO}/resolve/main/${name}`
+    const url = `${mirror}/${REPO}/resolve/${REVISION}/${name}`
     try {
       const response = await fetch(url, { redirect: 'follow' })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -69,11 +71,14 @@ async function downloadOne(baseDir, name, size, sha, forceFlag, onProgress) {
       onProgress({ name, state: 'done', bytes: size, mirror })
       return
     } catch (error) {
-      lastError = error
-      onProgress({ name, state: 'retry', mirror, error: String(error?.message ?? error) })
+      const message = String(error?.message ?? error)
+      const code = error?.cause?.code
+      const detail = typeof code === 'string' ? `${message} (${code})` : message
+      failures.push(`${new URL(mirror).hostname}: ${detail}`)
+      onProgress({ name, state: 'retry', mirror, error: detail })
     }
   }
-  throw new Error(`${name}: ${String(lastError?.message ?? lastError)}`)
+  throw new Error(`${name}: ${failures.join(' | ')}`)
 }
 
 /**
